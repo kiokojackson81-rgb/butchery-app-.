@@ -1,47 +1,22 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
-/**
- * Utilities
- */
-const toNum = (v: any) => (typeof v === "number" ? v : v ? Number(v) : 0);
-const ymd = (d: Date) => d.toISOString().split("T")[0];
+/* =========================
+   Helpers (no any)
+   ========================= */
+const toNum = (v: unknown): number =>
+  typeof v === "number" ? v : v ? Number(v) : 0;
 
-/**
- * A safe group+sum helper that avoids the T[keyof T] numeric assignment issue.
- * Treats rows as dictionaries for the numeric fields you pass.
- */
-function groupAndSum<T extends Record<string, any>>(
-  rows: T[],
-  byKey: keyof T,
-  numericKeys: string[]
-): T[] {
-  const map = new Map<any, any>();
+const ymd = (d: Date): string => d.toISOString().split("T")[0];
 
-  for (const r of rows) {
-    const k = r[byKey];
-    if (!map.has(k)) {
-      // clone shallowly and normalize numeric fields
-      const base: Record<string, any> = { ...r };
-      for (const n of numericKeys) base[n] = toNum(r[n]);
-      map.set(k, base);
-    } else {
-      const acc = map.get(k) as Record<string, any>;
-      for (const n of numericKeys) {
-        acc[n] = toNum(acc[n]) + toNum(r[n]);
-      }
-    }
-  }
-  return Array.from(map.values());
-}
+/* =========================
+   Types
+   ========================= */
+type OutletName = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
 
-/**
- * Dummy example rows so the page compiles even if your localStorage is empty.
- * You can replace these with your real data pull/compute when ready.
- */
-type Row = {
-  outlet: string;
+type ReportRow = {
+  outlet: OutletName | string; // allow future outlets by name
   date: string;
   grossSales: number;
   tillSales: number;
@@ -51,7 +26,25 @@ type Row = {
   validatedDeposits: number;
 };
 
-const SAMPLE: Row[] = [
+type SupplyRow = {
+  itemKey: string;
+  qty: number;
+  unit: "kg" | "pcs";
+};
+
+type ModRequest = {
+  id: string;
+  date: string;
+  outlet: string;
+  itemKey: string;
+  note: string;
+};
+
+/* =========================
+   Demo data (safe fallback)
+   Replace with real computed rows later.
+   ========================= */
+const SAMPLE_ROWS: ReportRow[] = [
   {
     outlet: "Bright",
     date: ymd(new Date()),
@@ -74,25 +67,64 @@ const SAMPLE: Row[] = [
   },
 ];
 
-export default function AdminReportsPage() {
-  const [date, setDate] = useState(() => ymd(new Date()));
-  const [tab, setTab] = useState<"summary" | "items" | "waste" | "supply" | "requests">("summary");
+/* =========================
+   LocalStorage helpers (typed)
+   ========================= */
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
-  // In your real app, replace SAMPLE with computed rows from storage
-  const rows = SAMPLE;
+/* Safe group+sum WITHOUT any/generics footguns.
+   Aggregates by outlet. */
+function groupByOutletSum(rows: ReportRow[]): ReportRow[] {
+  const map = new Map<string, ReportRow>();
+  for (const r of rows) {
+    const k = String(r.outlet);
+    const has = map.get(k);
+    if (!has) {
+      map.set(k, { ...r });
+    } else {
+      map.set(k, {
+        outlet: has.outlet,
+        date: has.date, // date not used in sum; keep first
+        grossSales: has.grossSales + r.grossSales,
+        tillSales: has.tillSales + r.tillSales,
+        expenses: has.expenses + r.expenses,
+        wasteValue: has.wasteValue + r.wasteValue,
+        approvedExcess: has.approvedExcess + r.approvedExcess,
+        validatedDeposits: has.validatedDeposits + r.validatedDeposits,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
 
-  const byOutlet = useMemo(
-    () =>
-      groupAndSum(rows, "outlet", [
-        "grossSales",
-        "tillSales",
-        "expenses",
-        "wasteValue",
-        "approvedExcess",
-        "validatedDeposits",
-      ]),
-    [rows]
+export default function AdminReportsPage(): JSX.Element {
+  const [date, setDate] = useState<string>(() => ymd(new Date()));
+  const [tab, setTab] = useState<"summary" | "items" | "waste" | "supply" | "requests">(
+    "summary",
   );
+
+  // Replace SAMPLE_ROWS with your real computed data when ready.
+  const rows: ReportRow[] = SAMPLE_ROWS;
+
+  const byOutlet: ReportRow[] = useMemo(() => groupByOutletSum(rows), [rows]);
+
+  // Supply view (read-only example: Bright for selected date)
+  const supplyKey = `supplier_opening_${date}_Bright`;
+  const supplyRows: SupplyRow[] = typeof window !== "undefined"
+    ? readJSON<SupplyRow[]>(supplyKey, [])
+    : [];
+
+  const requestsKey = "attendant_mod_requests";
+  const modRequests: ModRequest[] = typeof window !== "undefined"
+    ? readJSON<ModRequest[]>(requestsKey, [])
+    : [];
 
   return (
     <main className="p-4 max-w-7xl mx-auto">
@@ -125,6 +157,7 @@ export default function AdminReportsPage() {
         </div>
       </header>
 
+      {/* Summary by outlet */}
       {tab === "summary" && (
         <section className="rounded-2xl border p-3">
           <h2 className="font-semibold mb-2">Summary by Outlet</h2>
@@ -142,8 +175,8 @@ export default function AdminReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {byOutlet.map((r: any) => (
-                  <tr key={r.outlet} className="border-b">
+                {byOutlet.map((r) => (
+                  <tr key={String(r.outlet)} className="border-b">
                     <td className="p-2">{r.outlet}</td>
                     <td className="p-2 text-right">Ksh {toNum(r.grossSales).toLocaleString()}</td>
                     <td className="p-2 text-right">Ksh {toNum(r.tillSales).toLocaleString()}</td>
@@ -160,26 +193,82 @@ export default function AdminReportsPage() {
       )}
 
       {tab === "items" && (
-        <section className="rounded-2xl border p-3 text-sm text-gray-500">
-          Item-level report can go here (kept simple for deployment).
+        <section className="rounded-2xl border p-3 text-sm text-gray-600">
+          Item-level report placeholder (wire to your computed item sales later).
         </section>
       )}
 
       {tab === "waste" && (
-        <section className="rounded-2xl border p-3 text-sm text-gray-500">
-          Waste records view (kept simple for deployment).
+        <section className="rounded-2xl border p-3 text-sm text-gray-600">
+          Waste view placeholder (show per-item waste and value when ready).
         </section>
       )}
 
       {tab === "supply" && (
-        <section className="rounded-2xl border p-3 text-sm text-gray-500">
-          Supply view (kept simple for deployment).
+        <section className="rounded-2xl border p-3">
+          <h2 className="font-semibold mb-2">Supply (Bright — {date})</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border">
+              <thead>
+                <tr className="border-b">
+                  <th className="p-2 text-left">Item</th>
+                  <th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-left">Unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supplyRows.length === 0 && (
+                  <tr>
+                    <td className="p-2 text-gray-500" colSpan={3}>
+                      No supply found in local storage for this day/outlet.
+                    </td>
+                  </tr>
+                )}
+                {supplyRows.map((s) => (
+                  <tr key={`${s.itemKey}-${s.unit}`}>
+                    <td className="p-2">{s.itemKey}</td>
+                    <td className="p-2 text-right">{toNum(s.qty).toLocaleString()}</td>
+                    <td className="p-2">{s.unit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
       {tab === "requests" && (
-        <section className="rounded-2xl border p-3 text-sm text-gray-500">
-          Modification requests (kept simple for deployment).
+        <section className="rounded-2xl border p-3">
+          <h2 className="font-semibold mb-2">Modification Requests</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border">
+              <thead>
+                <tr className="border-b">
+                  <th className="p-2">Date</th>
+                  <th className="p-2">Outlet</th>
+                  <th className="p-2">Item</th>
+                  <th className="p-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modRequests.length === 0 && (
+                  <tr>
+                    <td className="p-2 text-gray-500" colSpan={4}>
+                      No modification requests yet.
+                    </td>
+                  </tr>
+                )}
+                {modRequests.map((r) => (
+                  <tr key={r.id} className="border-b">
+                    <td className="p-2">{r.date}</td>
+                    <td className="p-2">{r.outlet}</td>
+                    <td className="p-2">{r.itemKey}</td>
+                    <td className="p-2">{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>
@@ -194,7 +283,7 @@ function TabBtn({
   children: React.ReactNode;
   active: boolean;
   onClick: () => void;
-}) {
+}): JSX.Element {
   return (
     <button
       onClick={onClick}
