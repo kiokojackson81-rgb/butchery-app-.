@@ -2,226 +2,330 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-/** =============== Types =============== */
+/* =========================================================
+   Types
+   ========================================================= */
 type Unit = "kg" | "pcs";
 
 type Product = {
   id: string;
-  key: string;         // stable key used by other pages, e.g. "beef"
+  key: string;        // stable key used across app: "beef", "goat", ...
   name: string;
   unit: Unit;
-  sellPrice: number;   // Ksh per unit (used by Attendant expected Ksh)
+  defaultSellPrice: number; // base price if no outlet override
   active: boolean;
 };
 
 type Outlet = {
   id: string;
-  name: string;        // "Bright", "Baraka A", ...
-  code: string;        // e.g. "BR1234"
+  name: string;       // "Bright", "Baraka A", ...
+  active: boolean;
+};
+
+type StaffRole = "admin" | "supervisor" | "supplier" | "attendant";
+
+type StaffMember = {
+  id: string;
+  name: string;
+  role: StaffRole;
+  code: string;               // login code used on role pages
+  outletId: string;           // which outlet they belong to
+  productKeys: string[];      // products this person is accountable for
   active: boolean;
 };
 
 type FixedExpense = {
   id: string;
-  name: string;        // "Rent", "Electricity", ...
-  amount: number;      // Ksh
+  name: string;
+  amount: number;
   frequency: "daily" | "monthly";
   active: boolean;
 };
 
-type AdminTab = "outlets" | "products" | "expenses" | "data";
+/** Per-outlet price overrides:
+ *  { [outletId]: { [productKey]: number } }
+ */
+type PriceOverrides = Record<string, Record<string, number>>;
 
-/** ────────────────────────────────────────────────────────────────
- *  Optional per-outlet price map (so each outlet can override price)
- *  Structure: { [outletId]: { [productKey]: priceNumber } }
- *  If you weren’t using this earlier, it’s harmless; it just persists
- *  an empty mapping until you start storing outlet-specific prices.
- *  The TS fix you needed lives in the “safeRemapKeys” helper below.
- *  ──────────────────────────────────────────────────────────────── */
-type OutletPriceMap = Record<string, Record<string, number>>;
+type AdminTab =
+  | "outlets"
+  | "products"
+  | "staff"
+  | "supply"
+  | "reports"
+  | "expenses"
+  | "data";
 
-/** =============== Storage Keys =============== */
-const K_OUTLETS        = "admin_outlets";
-const K_PRODUCTS       = "admin_products";
-const K_EXPENSES       = "admin_expenses";
-const K_OUTLET_PRICES  = "admin_outlet_prices"; // optional per-outlet price overrides
+/* =========================================================
+   Storage Keys
+   ========================================================= */
+const K_OUTLETS        = "admin_outlets_v2";
+const K_PRODUCTS       = "admin_products_v2";
+const K_STAFF          = "admin_staff_v2";
+const K_PRICE_OVERRIDES= "admin_price_overrides_v2";
+const K_EXPENSES       = "admin_fixed_expenses_v2";
 
-/** =============== Defaults (match what you’ve been using) =============== */
-function seedDefaultOutlets(): Outlet[] {
+/* =========================================================
+   Helpers
+   ========================================================= */
+function rid(): string {
+  return Math.random().toString(36).slice(2);
+}
+function toNum(v: string): number {
+  return v === "" ? 0 : Number(v);
+}
+function loadLS<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function saveLS<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+/* =========================================================
+   Seeds (safe defaults)
+   ========================================================= */
+function seedOutlets(): Outlet[] {
   return [
-    { id: rid(), name: "Bright",   code: "BR1234", active: true },
-    { id: rid(), name: "Baraka A", code: "A1234",  active: true },
-    { id: rid(), name: "Baraka B", code: "B1234",  active: true },
-    { id: rid(), name: "Baraka C", code: "C1234",  active: true },
+    { id: rid(), name: "Bright",   active: true },
+    { id: rid(), name: "Baraka A", active: true },
+    { id: rid(), name: "Baraka B", active: true },
+    { id: rid(), name: "Baraka C", active: true },
+  ];
+}
+function seedProducts(): Product[] {
+  return [
+    { id: rid(), key: "beef",     name: "Beef",            unit: "kg",  defaultSellPrice: 740, active: true },
+    { id: rid(), key: "goat",     name: "Goat (Cigon)",    unit: "kg",  defaultSellPrice: 900, active: true },
+    { id: rid(), key: "liver",    name: "Liver",           unit: "kg",  defaultSellPrice: 900, active: true },
+    { id: rid(), key: "kuku",     name: "Kuku (Chicken)",  unit: "kg",  defaultSellPrice: 900, active: true },
+    { id: rid(), key: "matumbo",  name: "Matumbo",         unit: "kg",  defaultSellPrice: 0,   active: true },
+    { id: rid(), key: "potatoes", name: "Potatoes (raw)",  unit: "kg",  defaultSellPrice: 150, active: true },
+    { id: rid(), key: "samosas",  name: "Samosas",         unit: "pcs", defaultSellPrice: 60,  active: true },
+    { id: rid(), key: "mutura",   name: "Mutura",          unit: "pcs", defaultSellPrice: 60,  active: true },
+  ];
+}
+function seedExpenses(): FixedExpense[] {
+  return [
+    { id: rid(), name: "Wages",       amount: 0, frequency: "monthly", active: true },
+    { id: rid(), name: "Rent",        amount: 0, frequency: "monthly", active: true },
+    { id: rid(), name: "Electricity", amount: 0, frequency: "monthly", active: true },
   ];
 }
 
-function seedDefaultProducts(): Product[] {
-  return [
-    { id: rid(), key: "beef",      name: "Beef",            unit: "kg",  sellPrice: 740, active: true },
-    { id: rid(), key: "goat",      name: "Goat (Cigon)",    unit: "kg",  sellPrice: 900, active: true },
-    { id: rid(), key: "liver",     name: "Liver",           unit: "kg",  sellPrice: 900, active: true },
-    { id: rid(), key: "kuku",      name: "Kuku (Chicken)",  unit: "kg",  sellPrice: 900, active: true },
-    { id: rid(), key: "matumbo",   name: "Matumbo",         unit: "kg",  sellPrice: 0,   active: true },
-    { id: rid(), key: "potatoes",  name: "Potatoes (raw)",  unit: "kg",  sellPrice: 150, active: true }, // used for deposit target calc
-    { id: rid(), key: "samosas",   name: "Samosas",         unit: "pcs", sellPrice: 60,  active: true },
-    { id: rid(), key: "mutura",    name: "Mutura",          unit: "pcs", sellPrice: 60,  active: true },
-  ];
-}
-
-function seedDefaultExpenses(): FixedExpense[] {
-  return [
-    { id: rid(), name: "Wages",       amount: 0,  frequency: "monthly", active: true },
-    { id: rid(), name: "Rent",        amount: 0,  frequency: "monthly", active: true },
-    { id: rid(), name: "Electricity", amount: 0,  frequency: "monthly", active: true },
-    { id: rid(), name: "Water",       amount: 0,  frequency: "monthly", active: false },
-  ];
-}
-
-/** =============== Page =============== */
-export default function AdminPage() {
+/* =========================================================
+   Component
+   ========================================================= */
+export default function AdminPage(): JSX.Element {
   const [tab, setTab] = useState<AdminTab>("outlets");
 
-  // Outlets
-  const [outlets, setOutlets]   = useState<Outlet[]>([]);
-  // Products
+  // Core admin data
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  // Expenses
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [overrides, setOverrides] = useState<PriceOverrides>({});
   const [expenses, setExpenses] = useState<FixedExpense[]>([]);
-  // Optional per-outlet price map (kept if already used)
-  const [outletPrices, setOutletPrices] = useState<OutletPriceMap>({});
 
-  // Data tab helpers
-  const payload = useMemo(
-    () => JSON.stringify({ outlets, products, expenses, outletPrices }, null, 2),
-    [outlets, products, expenses, outletPrices]
-  );
-  const [importText, setImportText] = useState("");
-
-  /** ----- Load on first mount (or if storage empty, seed defaults) ----- */
+  // Load on mount
   useEffect(() => {
-    try {
-      const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
-      const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
-      const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
-      const op = parseLS<OutletPriceMap>(K_OUTLET_PRICES) ?? {};
-      setOutlets(o);
-      setProducts(p);
-      setExpenses(e);
-      setOutletPrices(op);
-    } catch {
-      setOutlets(seedDefaultOutlets());
-      setProducts(seedDefaultProducts());
-      setExpenses(seedDefaultExpenses());
-      setOutletPrices({});
-    }
+    setOutlets(loadLS<Outlet[]>(K_OUTLETS, seedOutlets()));
+    setProducts(loadLS<Product[]>(K_PRODUCTS, seedProducts()));
+    setStaff(loadLS<StaffMember[]>(K_STAFF, []));
+    setOverrides(loadLS<PriceOverrides>(K_PRICE_OVERRIDES, {}));
+    setExpenses(loadLS<FixedExpense[]>(K_EXPENSES, seedExpenses()));
   }, []);
 
-  /** ----- Save whenever state changes ----- */
-  useEffect(() => { saveLS(K_OUTLETS, outlets); }, [outlets]);
-  useEffect(() => { saveLS(K_PRODUCTS, products); }, [products]);
-  useEffect(() => { saveLS(K_EXPENSES, expenses); }, [expenses]);
-  useEffect(() => { saveLS(K_OUTLET_PRICES, outletPrices); }, [outletPrices]);
+  // Persist on change
+  useEffect(() => saveLS(K_OUTLETS, outlets), [outlets]);
+  useEffect(() => saveLS(K_PRODUCTS, products), [products]);
+  useEffect(() => saveLS(K_STAFF, staff), [staff]);
+  useEffect(() => saveLS(K_PRICE_OVERRIDES, overrides), [overrides]);
+  useEffect(() => saveLS(K_EXPENSES, expenses), [expenses]);
 
-  /** ----- CRUD helpers ----- */
-  // Outlets
-  const addOutlet = () => setOutlets(v => [...v, { id: rid(), name: "", code: "", active: true }]);
-  const removeOutlet = (id: string) => setOutlets(v => v.filter(x => x.id !== id));
-  const updateOutlet = (id: string, patch: Partial<Outlet>) =>
-    setOutlets(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
+  // Convenience lookups
+  const outletById = useMemo(() => {
+    const m: Record<string, Outlet> = {};
+    for (const o of outlets) m[o.id] = o;
+    return m;
+  }, [outlets]);
 
-  // Products
-  const addProduct = () => setProducts(v => [...v, { id: rid(), key: "", name: "", unit: "kg", sellPrice: 0, active: true }]);
-  const removeProduct = (id: string) => setProducts(v => v.filter(x => x.id !== id));
-  const updateProduct = (id: string, patch: Partial<Product>) =>
-    setProducts(prevList => {
-      const before = prevList.find(p => p.id === id);
-      const next = prevList.map(p => p.id === id ? { ...p, ...patch } : p);
+  const productByKey = useMemo(() => {
+    const m: Record<string, Product> = {};
+    for (const p of products) m[p.key] = p;
+    return m;
+  }, [products]);
 
-      // If product key changed, safely remap per-outlet overrides
-      if (before && patch.key && patch.key !== before.key) {
-        setOutletPrices(current => safeRemapKeys(current, before.key, patch.key!, before.sellPrice));
-      }
+  /* ----------------------- OUTLETS CRUD ----------------------- */
+  const addOutlet = (): void =>
+    setOutlets((v) => [...v, { id: rid(), name: "", active: true }]);
+
+  const updateOutlet = (id: string, patch: Partial<Outlet>): void =>
+    setOutlets((v) => v.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+
+  const removeOutlet = (id: string): void =>
+    setOutlets((v) => v.filter((o) => o.id !== id));
+
+  /* ----------------------- PRODUCTS CRUD ---------------------- */
+  const addProduct = (): void =>
+    setProducts((v) => [
+      ...v,
+      {
+        id: rid(),
+        key: "",
+        name: "",
+        unit: "kg",
+        defaultSellPrice: 0,
+        active: true,
+      },
+    ]);
+
+  const updateProduct = (id: string, patch: Partial<Product>): void =>
+    setProducts((v) => v.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+  const removeProduct = (id: string): void =>
+    setProducts((v) => v.filter((p) => p.id !== id));
+
+  // Per-outlet price overrides
+  const getOverridePrice = (outletId: string, productKey: string): number => {
+    return overrides[outletId]?.[productKey] ?? productByKey[productKey]?.defaultSellPrice ?? 0;
+  };
+  const setOverridePrice = (outletId: string, productKey: string, price: number): void => {
+    setOverrides((prev) => {
+      const next: PriceOverrides = { ...prev };
+      if (!next[outletId]) next[outletId] = {};
+      next[outletId][productKey] = price;
       return next;
     });
-
-  // Expenses
-  const addExpense = () => setExpenses(v => [...v, { id: rid(), name: "", amount: 0, frequency: "monthly", active: true }]);
-  const removeExpense = (id: string) => setExpenses(v => v.filter(x => x.id !== id));
-  const updateExpense = (id: string, patch: Partial<FixedExpense>) =>
-    setExpenses(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
-
-  /** ----- Data tab actions ----- */
-  const exportJSON = () => {
-    const blob = new Blob([payload], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `admin-settings-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
   };
 
-  const importJSON = () => {
+  /* ----------------------- STAFF & CODES ---------------------- */
+  const addStaff = (): void =>
+    setStaff((v) => [
+      ...v,
+      {
+        id: rid(),
+        name: "",
+        role: "attendant",
+        code: "",
+        outletId: outlets[0]?.id ?? "",
+        productKeys: [],
+        active: true,
+      },
+    ]);
+
+  const updateStaff = (id: string, patch: Partial<StaffMember>): void =>
+    setStaff((v) => v.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+
+  const removeStaff = (id: string): void =>
+    setStaff((v) => v.filter((s) => s.id !== id));
+
+  const toggleStaffProduct = (staffId: string, productKey: string): void => {
+    setStaff((v) =>
+      v.map((s) => {
+        if (s.id !== staffId) return s;
+        const has = s.productKeys.includes(productKey);
+        return {
+          ...s,
+          productKeys: has
+            ? s.productKeys.filter((k) => k !== productKey)
+            : [...s.productKeys, productKey],
+        };
+      })
+    );
+  };
+
+  /* ----------------------- EXPENSES CRUD ---------------------- */
+  const addExpense = (): void =>
+    setExpenses((v) => [
+      ...v,
+      { id: rid(), name: "", amount: 0, frequency: "monthly", active: true },
+    ]);
+
+  const updateExpense = (id: string, patch: Partial<FixedExpense>): void =>
+    setExpenses((v) => v.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  const removeExpense = (id: string): void =>
+    setExpenses((v) => v.filter((e) => e.id !== id));
+
+  /* ----------------------- Data Tab --------------------------- */
+  const exportPayload = useMemo(
+    () =>
+      JSON.stringify(
+        { outlets, products, priceOverrides: overrides, staff, expenses },
+        null,
+        2
+      ),
+    [outlets, products, overrides, staff, expenses]
+  );
+
+  const importData = (txt: string): void => {
     try {
-      const parsed = JSON.parse(importText) as {
+      const parsed = JSON.parse(txt) as {
         outlets?: Outlet[];
         products?: Product[];
+        priceOverrides?: PriceOverrides;
+        staff?: StaffMember[];
         expenses?: FixedExpense[];
-        outletPrices?: OutletPriceMap;
       };
-      if (parsed.outlets)  setOutlets(parsed.outlets);
+      if (parsed.outlets) setOutlets(parsed.outlets);
       if (parsed.products) setProducts(parsed.products);
+      if (parsed.priceOverrides) setOverrides(parsed.priceOverrides);
+      if (parsed.staff) setStaff(parsed.staff);
       if (parsed.expenses) setExpenses(parsed.expenses);
-      if (parsed.outletPrices) setOutletPrices(parsed.outletPrices);
-      alert("Imported settings successfully.");
-    } catch (e: any) {
-      alert("Failed to import: " + e.message);
+      alert("Imported successfully.");
+    } catch (e) {
+      alert("Invalid JSON.");
     }
   };
 
-  const resetDefaults = () => {
-    if (!confirm("Reset ALL admin settings to defaults?")) return;
-    setOutlets(seedDefaultOutlets());
-    setProducts(seedDefaultProducts());
-    setExpenses(seedDefaultExpenses());
-    setOutletPrices({});
-  };
-
-  const clearAll = () => {
-    if (!confirm("Remove ALL admin settings from this browser?")) return;
-    localStorage.removeItem(K_OUTLETS);
-    localStorage.removeItem(K_PRODUCTS);
-    localStorage.removeItem(K_EXPENSES);
-    localStorage.removeItem(K_OUTLET_PRICES);
-    setOutlets([]);
-    setProducts([]);
-    setExpenses([]);
-    setOutletPrices({});
-  };
-
-  /** ----- Render ----- */
+  /* =========================================================
+     Render
+     ========================================================= */
   return (
     <main className="p-6 max-w-7xl mx-auto">
       <header className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
         <nav className="flex gap-2">
-          <TabBtn active={tab==="outlets"}  onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
-          <TabBtn active={tab==="products"} onClick={() => setTab("products")}>Products & Prices</TabBtn>
-          <TabBtn active={tab==="expenses"} onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
-          <TabBtn active={tab==="data"}     onClick={() => setTab("data")}>Backup / Restore</TabBtn>
+          <TabBtn active={tab === "outlets"} onClick={() => setTab("outlets")}>
+            Outlets
+          </TabBtn>
+          <TabBtn active={tab === "products"} onClick={() => setTab("products")}>
+            Products & Prices
+          </TabBtn>
+          <TabBtn active={tab === "staff"} onClick={() => setTab("staff")}>
+            Staff & Codes
+          </TabBtn>
+          <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>
+            Supply
+          </TabBtn>
+          <TabBtn active={tab === "reports"} onClick={() => setTab("reports")}>
+            Reports
+          </TabBtn>
+          <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>
+            Fixed Expenses
+          </TabBtn>
+          <TabBtn active={tab === "data"} onClick={() => setTab("data")}>
+            Backup / Restore
+          </TabBtn>
         </nav>
       </header>
 
+      {/* ---------- OUTLETS ---------- */}
       {tab === "outlets" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Outlets & Attendant Codes</h2>
-            <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>+ Add outlet</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setOutlets(seedDefaultOutlets())}>
-                Reset defaults
-              </button>
-            </div>
+            <h2 className="font-semibold">Outlets</h2>
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>
+              + Add outlet
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -229,137 +333,361 @@ export default function AdminPage() {
               <thead>
                 <tr className="text-left border-b">
                   <th className="py-2">Name</th>
-                  <th>Login Code</th>
                   <th>Status</th>
-                  <th style={{width: 1}}></th>
+                  <th style={{ width: 1 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {outlets.length === 0 && (
-                  <tr><td className="py-3 text-gray-500" colSpan={4}>No outlets yet.</td></tr>
+                  <tr>
+                    <td className="py-3 text-gray-500" colSpan={3}>
+                      No outlets yet.
+                    </td>
+                  </tr>
                 )}
-                {outlets.map(o => (
+                {outlets.map((o) => (
                   <tr key={o.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-56"
-                             value={o.name}
-                             onChange={e => updateOutlet(o.id, { name: e.target.value })}
-                             placeholder="Outlet name"/>
-                    </td>
-                    <td>
-                      <input className="border rounded-xl p-2 w-40"
-                             value={o.code}
-                             onChange={e => updateOutlet(o.id, { code: e.target.value })}
-                             placeholder="Secret code"/>
+                      <input
+                        className="border rounded-xl p-2 w-56"
+                        value={o.name}
+                        onChange={(e) => updateOutlet(o.id, { name: e.target.value })}
+                        placeholder="Outlet name"
+                      />
                     </td>
                     <td>
                       <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={o.active}
-                               onChange={e => updateOutlet(o.id, { active: e.target.checked })}/>
+                        <input
+                          type="checkbox"
+                          checked={o.active}
+                          onChange={(e) => updateOutlet(o.id, { active: e.target.checked })}
+                        />
                         Active
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeOutlet(o.id)}>✕</button>
+                      <button
+                        className="text-xs border rounded-lg px-2 py-1"
+                        onClick={() => removeOutlet(o.id)}
+                      >
+                        ✕
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="text-xs text-gray-600 mt-2">
-              Step 1: Create outlets and their base codes. Step 2: Set products & prices.
+              Create outlets first. Then assign codes/users to these outlets in the “Staff & Codes” tab.
             </p>
           </div>
         </section>
       )}
 
+      {/* ---------- PRODUCTS & PER-OUTLET PRICES ---------- */}
       {tab === "products" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Products & Prices</h2>
-            <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>
-                Reset defaults
-              </button>
-            </div>
+            <h2 className="font-semibold">Products & Prices (per outlet)</h2>
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>
+              + Add product
+            </button>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mb-6">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
                   <th className="py-2">Key</th>
                   <th>Name</th>
                   <th>Unit</th>
-                  <th>Sell Price (Ksh)</th>
+                  <th>Default Price (Ksh)</th>
                   <th>Status</th>
-                  <th style={{width: 1}}></th>
+                  <th style={{ width: 1 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {products.length === 0 && (
-                  <tr><td className="py-3 text-gray-500" colSpan={6}>No products yet.</td></tr>
+                  <tr>
+                    <td className="py-3 text-gray-500" colSpan={6}>
+                      No products yet.
+                    </td>
+                  </tr>
                 )}
-                {products.map(p => (
+                {products.map((p) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-44"
-                             value={p.key}
-                             onChange={e => updateProduct(p.id, { key: e.target.value })}
-                             placeholder="unique key (e.g., beef)"/>
+                      <input
+                        className="border rounded-xl p-2 w-44"
+                        value={p.key}
+                        onChange={(e) => updateProduct(p.id, { key: e.target.value })}
+                        placeholder="unique key (e.g., beef)"
+                      />
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-56"
-                             value={p.name}
-                             onChange={e => updateProduct(p.id, { name: e.target.value })}
-                             placeholder="Display name"/>
+                      <input
+                        className="border rounded-xl p-2 w-56"
+                        value={p.name}
+                        onChange={(e) => updateProduct(p.id, { name: e.target.value })}
+                        placeholder="Display name"
+                      />
                     </td>
                     <td>
-                      <select className="border rounded-xl p-2"
-                              value={p.unit}
-                              onChange={e => updateProduct(p.id, { unit: e.target.value as Unit })}>
+                      <select
+                        className="border rounded-xl p-2"
+                        value={p.unit}
+                        onChange={(e) => updateProduct(p.id, { unit: e.target.value as Unit })}
+                      >
                         <option value="kg">kg</option>
                         <option value="pcs">pcs</option>
                       </select>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-36" type="number" min={0} step={1}
-                             value={p.sellPrice}
-                             onChange={e => updateProduct(p.id, { sellPrice: n(e.target.value) })}
-                             placeholder="Ksh"/>
+                      <input
+                        className="border rounded-xl p-2 w-36"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={p.defaultSellPrice}
+                        onChange={(e) => updateProduct(p.id, { defaultSellPrice: toNum(e.target.value) })}
+                        placeholder="Ksh"
+                      />
                     </td>
                     <td>
                       <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={p.active}
-                               onChange={e => updateProduct(p.id, { active: e.target.checked })}/>
+                        <input
+                          type="checkbox"
+                          checked={p.active}
+                          onChange={(e) => updateProduct(p.id, { active: e.target.checked })}
+                        />
                         Active
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeProduct(p.id)}>✕</button>
+                      <button
+                        className="text-xs border rounded-lg px-2 py-1"
+                        onClick={() => removeProduct(p.id)}
+                      >
+                        ✕
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="text-xs text-gray-600 mt-2">
-              These prices can be used by Attendant Dashboard to compute expected Ksh.
+              Set a default selling price. Override per outlet below.
+            </p>
+          </div>
+
+          {/* Per-outlet overrides */}
+          <div className="rounded-xl border p-3">
+            <h3 className="font-medium mb-2">Per-Outlet Price Overrides</h3>
+            {outlets.length === 0 && (
+              <p className="text-sm text-gray-600">Create outlets first.</p>
+            )}
+            {outlets.map((o) => (
+              <div key={o.id} className="mb-4">
+                <h4 className="font-semibold mb-1">{o.name}</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left border-b">
+                        <th className="py-2">Product</th>
+                        <th>Override Price (Ksh)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products
+                        .filter((p) => p.active)
+                        .map((p) => (
+                          <tr key={p.id} className="border-b">
+                            <td className="py-2">{p.name}</td>
+                            <td>
+                              <input
+                                className="border rounded-xl p-2 w-36"
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={getOverridePrice(o.id, p.key)}
+                                onChange={(e) =>
+                                  setOverridePrice(o.id, p.key, toNum(e.target.value))
+                                }
+                                placeholder={`${p.defaultSellPrice}`}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-gray-600">
+              Attendant dashboard will use the outlet override if set, otherwise the default price.
             </p>
           </div>
         </section>
       )}
 
+      {/* ---------- STAFF & CODES ---------- */}
+      {tab === "staff" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Staff & Codes</h2>
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={addStaff}>
+              + Add Staff / Code
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Name</th>
+                  <th>Role</th>
+                  <th>Code</th>
+                  <th>Outlet</th>
+                  <th>Products (assign)</th>
+                  <th>Status</th>
+                  <th style={{ width: 1 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {staff.length === 0 && (
+                  <tr>
+                    <td className="py-3 text-gray-500" colSpan={7}>
+                      No staff yet. Use “+ Add Staff / Code”.
+                    </td>
+                  </tr>
+                )}
+                {staff.map((s) => (
+                  <tr key={s.id} className="border-b align-top">
+                    <td className="py-2">
+                      <input
+                        className="border rounded-xl p-2 w-44"
+                        value={s.name}
+                        onChange={(e) => updateStaff(s.id, { name: e.target.value })}
+                        placeholder="Full name"
+                      />
+                    </td>
+                    <td>
+                      <select
+                        className="border rounded-xl p-2"
+                        value={s.role}
+                        onChange={(e) => updateStaff(s.id, { role: e.target.value as StaffRole })}
+                      >
+                        <option value="admin">admin</option>
+                        <option value="supervisor">supervisor</option>
+                        <option value="supplier">supplier</option>
+                        <option value="attendant">attendant</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        className="border rounded-xl p-2 w-40"
+                        value={s.code}
+                        onChange={(e) => updateStaff(s.id, { code: e.target.value })}
+                        placeholder="Login code e.g. BR1234"
+                      />
+                    </td>
+                    <td>
+                      <select
+                        className="border rounded-xl p-2 w-40"
+                        value={s.outletId}
+                        onChange={(e) => updateStaff(s.id, { outletId: e.target.value })}
+                      >
+                        {outlets.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-w-md">
+                        {products
+                          .filter((p) => p.active)
+                          .map((p) => {
+                            const checked = s.productKeys.includes(p.key);
+                            return (
+                              <label key={p.id} className="inline-flex items-center gap-2 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleStaffProduct(s.id, p.key)}
+                                />
+                                {p.name}
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </td>
+                    <td>
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={s.active}
+                          onChange={(e) => updateStaff(s.id, { active: e.target.checked })}
+                        />
+                        Active
+                      </label>
+                    </td>
+                    <td>
+                      <button
+                        className="text-xs border rounded-lg px-2 py-1"
+                        onClick={() => removeStaff(s.id)}
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <p className="text-xs text-gray-600 mt-2">
+              Flow: create outlets → create staff/code → assign outlet → assign products. Codes are used by
+              role pages (e.g., Attendant Login) to auto-map outlets and allowed products.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* ---------- SUPPLY (content placeholder only, per your request) ---------- */}
+      {tab === "supply" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-2">Supply (Admin View)</h2>
+          <p className="text-sm text-gray-600">
+            Admin overview of supply/transfer activity can be added here later (read-only). Supplier editing happens on the Supplier dashboard.
+          </p>
+        </section>
+      )}
+
+      {/* ---------- REPORTS (link only) ---------- */}
+      {tab === "reports" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-2">Reports</h2>
+          <p className="text-sm text-gray-600 mb-3">
+            Open the reports dashboard to view summaries, waste, supply, and modification requests.
+          </p>
+          <a
+            href="/admin/reports"
+            className="inline-block border rounded-2xl px-4 py-2 text-sm bg-black text-white"
+          >
+            Go to Reports
+          </a>
+        </section>
+      )}
+
+      {/* ---------- FIXED EXPENSES ---------- */}
       {tab === "expenses" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Fixed Expenses</h2>
-            <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addExpense}>+ Add expense</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setExpenses(seedDefaultExpenses())}>
-                Reset defaults
-              </button>
-            </div>
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={addExpense}>
+              + Add expense
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -370,90 +698,91 @@ export default function AdminPage() {
                   <th>Amount (Ksh)</th>
                   <th>Frequency</th>
                   <th>Status</th>
-                  <th style={{width: 1}}></th>
+                  <th style={{ width: 1 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {expenses.length === 0 && (
-                  <tr><td className="py-3 text-gray-500" colSpan={5}>No expenses yet.</td></tr>
+                  <tr>
+                    <td className="py-3 text-gray-500" colSpan={5}>
+                      No expenses yet.
+                    </td>
+                  </tr>
                 )}
-                {expenses.map(e => (
+                {expenses.map((e) => (
                   <tr key={e.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-56"
-                             value={e.name}
-                             onChange={ev => updateExpense(e.id, { name: ev.target.value })}
-                             placeholder="Expense name"/>
+                      <input
+                        className="border rounded-xl p-2 w-56"
+                        value={e.name}
+                        onChange={(ev) => updateExpense(e.id, { name: ev.target.value })}
+                        placeholder="Expense name"
+                      />
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-36" type="number" min={0} step={1}
-                             value={e.amount}
-                             onChange={ev => updateExpense(e.id, { amount: n(ev.target.value) })}
-                             placeholder="Ksh"/>
+                      <input
+                        className="border rounded-xl p-2 w-36"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={e.amount}
+                        onChange={(ev) => updateExpense(e.id, { amount: toNum(ev.target.value) })}
+                        placeholder="Ksh"
+                      />
                     </td>
                     <td>
-                      <select className="border rounded-xl p-2"
-                              value={e.frequency}
-                              onChange={ev => updateExpense(e.id, { frequency: ev.target.value as FixedExpense["frequency"] })}>
+                      <select
+                        className="border rounded-xl p-2"
+                        value={e.frequency}
+                        onChange={(ev) =>
+                          updateExpense(e.id, {
+                            frequency: ev.target.value as FixedExpense["frequency"],
+                          })
+                        }
+                      >
                         <option value="daily">daily</option>
                         <option value="monthly">monthly</option>
                       </select>
                     </td>
                     <td>
                       <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={e.active}
-                               onChange={ev => updateExpense(e.id, { active: ev.target.checked })}/>
+                        <input
+                          type="checkbox"
+                          checked={e.active}
+                          onChange={(ev) => updateExpense(e.id, { active: ev.target.checked })}
+                        />
                         Active
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeExpense(e.id)}>✕</button>
+                      <button
+                        className="text-xs border rounded-lg px-2 py-1"
+                        onClick={() => removeExpense(e.id)}
+                      >
+                        ✕
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="text-xs text-gray-600 mt-2">
-              We can later show these in Supervisor/Admin analytics (daily proration of monthly items).
+              These are deducted in analytics; attendants still record daily operational expenses on their page.
             </p>
           </div>
         </section>
       )}
 
-      {tab === "data" && (
-        <section className="rounded-2xl border p-4">
-          <h2 className="font-semibold mb-3">Backup / Restore</h2>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="rounded-xl border p-3">
-              <h3 className="font-medium mb-2">Current Settings (read-only)</h3>
-              <textarea className="w-full h-64 border rounded-xl p-2 text-xs" readOnly value={payload} />
-              <div className="mt-2 flex gap-2">
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={exportJSON}>Download JSON</button>
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={resetDefaults}>Reset Defaults</button>
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={clearAll}>Clear All</button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-3">
-              <h3 className="font-medium mb-2">Import Settings</h3>
-              <textarea className="w-full h-64 border rounded-xl p-2 text-xs"
-                        placeholder='Paste JSON here…'
-                        value={importText}
-                        onChange={e => setImportText(e.target.value)} />
-              <div className="mt-2">
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={importJSON}>Import JSON</button>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
+      {/* ---------- BACKUP / RESTORE ---------- */}
+      {tab === "data" && <DataTab exportPayload={exportPayload} onImport={importData} />}
     </main>
   );
 }
 
-/** =============== UI bits =============== */
-function TabBtn(props: React.PropsWithChildren<{active: boolean; onClick(): void;}>) {
+/* =========================================================
+   Small Components
+   ========================================================= */
+function TabBtn(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={props.onClick}
@@ -464,46 +793,47 @@ function TabBtn(props: React.PropsWithChildren<{active: boolean; onClick(): void
   );
 }
 
-/** =============== Helpers =============== */
-function rid() { return Math.random().toString(36).slice(2); }
-function n(v: string) { return v === "" ? 0 : Number(v); }
+function DataTab({ exportPayload, onImport }: { exportPayload: string; onImport: (txt: string) => void }) {
+  const [txt, setTxt] = useState("");
 
-// Parse + Save with safety
-function parseLS<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch { return null; }
-}
-function saveLS<T>(key: string, value: T) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-}
+  const download = (): void => {
+    const blob = new Blob([exportPayload], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `admin-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
-/** ────────────────────────────────────────────────────────────────
- *  TS-SAFE KEY REMAP (the fix Vercel needed)
- *  When a product key changes, rename that key inside every outlet’s
- *  override map. Guards prevent indexing with `undefined`.
- *  ──────────────────────────────────────────────────────────────── */
-function safeRemapKeys(
-  current: OutletPriceMap,
-  prevKey: string,
-  nextKey: string,
-  fallbackPrice: number
-): OutletPriceMap {
-  // no-op if keys are bad
-  if (!prevKey || !nextKey || prevKey === nextKey) return current;
+  return (
+    <section className="rounded-2xl border p-4">
+      <h2 className="font-semibold mb-3">Backup / Restore</h2>
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-xl border p-3">
+          <h3 className="font-medium mb-2">Current Settings (read-only)</h3>
+          <textarea className="w-full h-64 border rounded-xl p-2 text-xs" readOnly value={exportPayload} />
+          <div className="mt-2 flex gap-2">
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={download}>
+              Download JSON
+            </button>
+          </div>
+        </div>
 
-  const cp: OutletPriceMap = { ...current };
-
-  for (const outId of Object.keys(cp)) {
-    const row = cp[outId] || (cp[outId] = {});
-    if (typeof row[prevKey] !== "undefined") {
-      row[nextKey] = row[prevKey];
-      delete row[prevKey];
-    } else {
-      // If the previous key didn’t exist for this outlet, seed with fallback
-      row[nextKey] = fallbackPrice;
-    }
-  }
-  return cp;
+        <div className="rounded-xl border p-3">
+          <h3 className="font-medium mb-2">Import Settings</h3>
+          <textarea
+            className="w-full h-64 border rounded-xl p-2 text-xs"
+            placeholder="Paste JSON here…"
+            value={txt}
+            onChange={(e) => setTxt(e.target.value)}
+          />
+          <div className="mt-2">
+            <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => onImport(txt)}>
+              Import JSON
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
