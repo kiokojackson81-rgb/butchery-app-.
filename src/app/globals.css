@@ -1,0 +1,17 @@
+/* Tailwind core layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: a tiny baseline so things don’t look naked before you style */
+:root {
+  color-scheme: light dark;
+}
+html, body {
+  min-height: 100%;
+}
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
