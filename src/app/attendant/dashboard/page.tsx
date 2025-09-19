@@ -30,6 +30,15 @@ const summaryKey      = (date: string, outlet: string) => `attendant_summary_${d
 /** ========= NEW (for disputes to supervisor) ========= */
 const AMEND_REQUESTS_KEY = "amend_requests";
 
+/** ========= NEW (scope mapping: attendant_code -> outlet + products) ========= */
+const SCOPE_KEY = "attendant_scope"; // { [code: string]: { outlet: Outlet; productKeys: ItemKey[] } }
+
+/** ========= NEW (per-outlet price override) ========= */
+const PRICEBOOK_KEY = "admin_pricebook"; // { [outletName]: { [productKey]: { sellPrice:number, active:boolean } } }
+
+/** ========= NEW (waste review status written by Supervisor) ========= */
+const wasteReviewKey = (date: string, outlet: string) => `supervisor_waste_review_${date}_${outlet}`;
+
 /** ========= Helpers (unchanged computations) ========= */
 function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : v ? Number(v) : 0; }
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
@@ -74,6 +83,12 @@ export default function AttendantDashboard() {
   // Optional items toggle (unchanged)
   const OPTIONALS: ItemKey[] = ["potatoes", "samosas", "mutura"];
 
+  // Waste review map for current date/outlet (set by Supervisor)
+  const [wasteReview, setWasteReview] = useState<Record<
+    string,
+    { status: "approved" | "rejected"; reason?: string; reviewer?: string; reviewedAt?: string }
+  >>({});
+
   /** ===== Load outlet from login code & products (unchanged) ===== */
   useEffect(() => {
     const rawOutlets = localStorage.getItem(ADMIN_OUTLETS_KEY);
@@ -90,11 +105,69 @@ export default function AttendantDashboard() {
     if (rawProd) {
       const arr = JSON.parse(rawProd) as AdminProduct[];
       const map = arr.filter(p => p.active).reduce((acc, p) => {
-        acc[p.key] = p; return acc;
+        acc[p.key as ItemKey] = p; return acc;
       }, {} as Record<ItemKey, AdminProduct>);
       setCatalog(map);
     }
   }, []);
+
+  /** ===== Enforce per-attendant scope WITHOUT changing login ===== */
+  useEffect(() => {
+    const code = sessionStorage.getItem("attendant_code") || "";
+    if (!code) return;
+    try {
+      const raw = localStorage.getItem(SCOPE_KEY);
+      if (!raw) return; // no scopes yet → keep existing behavior
+      const map = JSON.parse(raw) as Record<string, { outlet: Outlet; productKeys: ItemKey[] }>;
+      const scope = map[code];
+      if (!scope) return;
+
+      // Force outlet to scoped outlet
+      setOutlet(scope.outlet as Outlet);
+
+      // Restrict catalog to scoped products (no infinite loop)
+      setCatalog(prev => {
+        const keys = Object.keys(prev) as ItemKey[];
+        const wanted = new Set(scope.productKeys);
+        const alreadyScoped = keys.every(k => wanted.has(k)) && keys.length === scope.productKeys.length;
+        if (alreadyScoped) return prev;
+        const filtered = {} as Record<ItemKey, AdminProduct>;
+        scope.productKeys.forEach(k => { if (prev[k]) filtered[k] = prev[k]; });
+        return filtered;
+      });
+    } catch {}
+  }, [catalog]);
+
+  /** ===== NEW: Overlay per-outlet pricebook (price & enabled) ===== */
+  useEffect(() => {
+    if (!outlet) return;
+    try {
+      const raw = localStorage.getItem(PRICEBOOK_KEY);
+      if (!raw) return;
+      const all = JSON.parse(raw) as Record<string, Record<ItemKey, { sellPrice: number; active: boolean }>>;
+      const pbForOutlet = all[outlet];
+      if (!pbForOutlet) return;
+
+      setCatalog(prev => {
+        let changed = false;
+        const next: Record<ItemKey, AdminProduct> = { ...prev };
+        (Object.keys(prev) as ItemKey[]).forEach(k => {
+          const row = pbForOutlet[k];
+          if (!row) return;
+          if (row.active === false) {
+            if (k in next) { delete next[k]; changed = true; }
+          } else {
+            const curr = next[k];
+            if (curr && Number(row.sellPrice ?? curr.sellPrice) !== Number(curr.sellPrice)) {
+              next[k] = { ...curr, sellPrice: Number(row.sellPrice ?? curr.sellPrice) };
+              changed = true;
+            }
+          }
+        });
+        return changed ? next : prev;
+      });
+    } catch {}
+  }, [outlet]);
 
   /** ===== Load opening + previous entries when outlet/date changes ===== */
   useEffect(() => {
@@ -105,10 +178,12 @@ export default function AttendantDashboard() {
 
       const byItem: Record<ItemKey, number> = {} as any;
       (openingRows || []).forEach(r => { byItem[r.itemKey] = (byItem[r.itemKey] || 0) + Number(r.qty || 0); });
-      const built: Row[] = Object.keys(byItem).map(k => {
-        const key = k as ItemKey; const prod = catalog[key];
-        return { key, name: prod?.name || key.toUpperCase(), unit: prod?.unit || "kg", opening: byItem[key] || 0, closing: "", waste: "" };
-      });
+      const built: Row[] = (Object.keys(byItem) as ItemKey[])
+        .filter(k => !!catalog[k]) // enforce scope by catalog (and pricebook enabled)
+        .map(k => {
+          const key = k as ItemKey; const prod = catalog[key];
+          return { key, name: prod?.name || key.toUpperCase(), unit: prod?.unit || "kg", opening: byItem[key] || 0, closing: "", waste: "" };
+        });
       setRows(built);
       setSubmitted(false);
     } catch {}
@@ -143,6 +218,12 @@ export default function AttendantDashboard() {
       const t = localStorage.getItem(countedTillKey(dateStr, outlet));
       setCountedTill(t ? Number(t) : "");
     } catch { setCountedTill(""); }
+
+    // waste review status (set by Supervisor dashboard)
+    try {
+      const wrRaw = localStorage.getItem(wasteReviewKey(dateStr, outlet));
+      setWasteReview(wrRaw ? JSON.parse(wrRaw) : {});
+    } catch { setWasteReview({}); }
   }, [dateStr, outlet, catalog]);
 
   /** ===== Computations (unchanged) ===== */
@@ -295,7 +376,8 @@ export default function AttendantDashboard() {
                   {rows.length === 0 && (
                     <tr><td className="py-2 text-gray-500" colSpan={6}>No opening stock found from Supplier for this outlet/day.</td></tr>
                   )}
-                  {rows.map(r=>(
+                  {rows.map(r=>
+                    (
                     <tr key={r.key} className="border-b">
                       <td className="py-2">{r.name}</td>
                       <td>{fmt(r.opening)} {r.unit}</td>
@@ -316,6 +398,29 @@ export default function AttendantDashboard() {
                             <span className="inline-flex items-center rounded-xl border px-2 py-1 text-xs">
                               Waste: {fmt(toNum(r.waste))} {r.unit}
                             </span>
+                            {/* NEW: show supervisor waste review status (if any) */}
+                            {(() => {
+                              const ws = wasteReview[r.key];
+                              if (ws?.status === "rejected") {
+                                return (
+                                  <span className="inline-flex items-center rounded-xl border px-2 py-1 text-xs bg-red-50 text-red-700 border-red-200">
+                                    Rejected
+                                  </span>
+                                );
+                              }
+                              if (ws?.status === "approved") {
+                                return (
+                                  <span className="inline-flex items-center rounded-xl border px-2 py-1 text-xs bg-green-50 text-green-700 border-green-200">
+                                    Approved
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center rounded-xl border px-2 py-1 text-xs text-gray-600">
+                                  Pending review
+                                </span>
+                              );
+                            })()}
                             <button
                               className="text-xs border rounded-xl px-2 py-1"
                               onClick={()=>{
@@ -416,12 +521,12 @@ export default function AttendantDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {openingRowsRaw.length === 0 && (
+                {(openingRowsRaw.filter(r => !!catalog[r.itemKey])).length === 0 && (
                   <tr><td className="py-3 text-gray-500" colSpan={4}>
                     No opening stock captured by Supplier for this date/outlet.
                   </td></tr>
                 )}
-                {openingRowsRaw.map((r, i) => (
+                {openingRowsRaw.filter(r => !!catalog[r.itemKey]).map((r, i) => (
                   <tr key={`${r.itemKey}-${i}`} className="border-b">
                     <td className="py-2">{catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()}</td>
                     <td>{fmt(r.qty)}</td>

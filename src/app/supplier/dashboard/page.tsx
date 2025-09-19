@@ -12,17 +12,18 @@ type Product = {
   key: string;               // "beef", "goat", ...
   name: string;
   unit: Unit;
-  defaultSellPrice: number;  // not used here, but kept for consistency
+  sellPrice: number;         // Admin global default (kept for info)
   active: boolean;
 };
 
 type Outlet = {
   id: string;
-  name: string;   // "Bright", "Baraka A", ...
+  name: string;              // "Bright", "Baraka A", ...
+  code?: string;             // legacy field (ignored here)
   active: boolean;
 };
 
-/** A single supply row (this page) */
+/** A single supply row (supplier UI only) */
 type SupplyRow = {
   id: string;
   itemKey: string;    // product.key
@@ -30,6 +31,9 @@ type SupplyRow = {
   buyPrice: number;   // per unit
   unit: Unit;         // "kg" or "pcs" (copied from product)
 };
+
+/** Minimal opening row (what Attendant reads) */
+type OpeningItem = { itemKey: string; qty: number };
 
 /** A transfer record (supplier → cross outlet) */
 type TransferRow = {
@@ -42,37 +46,57 @@ type TransferRow = {
   unit: Unit;
 };
 
-/** A simple amend/modification request (to Supervisor) */
-type AmendRequest = {
+/** Disputes (support both Attendant- and Supplier-created shapes) */
+type AmendComment = { by: string; at: string; text: string };
+type AnyAmend = {
   id: string;
   date: string;
-  outletName: string;
-  requestedBy: string; // e.g. supplier code or label
-  type: "supply" | "transfer";
-  description: string;
-  status: "pending" | "approved" | "rejected";
+  outlet?: string;             // attendants use 'outlet'
+  outletName?: string;         // suppliers may use 'outletName'
+  requestedBy?: string;
+  type?: string;               // "supply" | "transfer" | "supplier_adjustment"
+  itemKey?: string;
+  qty?: number;
+  description?: string;
+  status?: "pending" | "approved" | "rejected";
+  createdAt?: string;
+  comments?: AmendComment[];
 };
 
 /* =========================
    Storage Keys
    ========================= */
-/** Opening stock list (what Attendant will use as "Opening" for the day) */
+
+/** Minimal Opening list for Attendant (Array<{itemKey, qty}>) */
 const supplierOpeningKey = (date: string, outletName: string) =>
-  `supplier_opening_${date}_${outletName}`; // SupplyRow[]
+  `supplier_opening_${date}_${outletName}`;
+
+/** Supplier private editable copy (SupplyRow[]) */
+const supplierOpeningFullKey = (date: string, outletName: string) =>
+  `supplier_opening_full_${date}_${outletName}`;
+
+/** Optional cost map (per date/outlet): { [itemKey]: unitCost } */
+const supplierCostKey = (date: string, outletName: string) =>
+  `supplier_cost_${date}_${outletName}`;
 
 /** Submission lock (after submit, only supervisor can edit) */
 const supplierSubmittedKey = (date: string, outletName: string) =>
-  `supplier_submitted_${date}_${outletName}`; // boolean
+  `supplier_submitted_${date}_${outletName}`;
 
 /** Cross-outlet transfers for a given date */
-const supplierTransfersKey = (date: string) => `supplier_transfers_${date}`; // TransferRow[]
+const supplierTransfersKey = (date: string) => `supplier_transfers_${date}`;
 
 /** Global amend requests list */
 const AMEND_REQUESTS_KEY = "amend_requests";
 
 /** Admin data keys (from Admin page) */
-const K_OUTLETS  = "admin_outlets_v2";   // Outlet[]
-const K_PRODUCTS = "admin_products_v2";  // Product[]
+const K_OUTLETS  = "admin_outlets";
+const K_PRODUCTS = "admin_products";
+const K_PRICEBOOK = "admin_pricebook";
+
+// (Optional fallback if someone used v2 keys earlier)
+const K_OUTLETS_V2  = "admin_outlets_v2";
+const K_PRODUCTS_V2 = "admin_products_v2";
 
 /* =========================
    Helpers
@@ -101,6 +125,9 @@ function saveLS<T>(key: string, value: T): void {
 function toNumStr(s: string): number {
   return s.trim() === "" ? 0 : Number(s);
 }
+function fmt(n: number) {
+  return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 
 /* =========================
    Page
@@ -109,6 +136,7 @@ export default function SupplierDashboard(): JSX.Element {
   /* Admin data */
   const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [pricebook, setPricebook] = useState<Record<string, Record<string, { sellPrice: number; active: boolean }>>>({});
 
   /* Selection */
   const [dateStr, setDateStr] = useState<string>(ymd());
@@ -121,46 +149,98 @@ export default function SupplierDashboard(): JSX.Element {
   /* Transfers */
   const [transfers, setTransfers] = useState<TransferRow[]>([]);
 
-  /* Quick product map */
+  /* Disputes list for viewing/comment */
+  const [amends, setAmends] = useState<AnyAmend[]>([]);
+
+  /* Welcome name */
+  const [welcomeName, setWelcomeName] = useState<string>("");
+
+  /* Quick maps */
   const productByKey = useMemo(() => {
     const map: Record<string, Product> = {};
     for (const p of products) map[p.key] = p;
     return map;
   }, [products]);
 
-  /* Quick outlet map + current names */
   const outletById = useMemo(() => {
     const map: Record<string, Outlet> = {};
     for (const o of outlets) map[o.id] = o;
     return map;
   }, [outlets]);
 
-  const selectedOutletName = useMemo<string>(() => {
-    return outletById[outletId]?.name ?? "";
-  }, [outletById, outletId]);
+  // TRIM the outlet name so storage keys match Attendant side exactly
+  const selectedOutletName = useMemo<string>(
+    () => (outletById[outletId]?.name ?? "").trim(),
+    [outletById, outletId]
+  );
 
-  /* Load admin data (once) */
+  /* Pricebook filter helpers */
+  const isProductActiveForOutlet = (p: Product, outletName: string): boolean => {
+    const row = pricebook[outletName]?.[p.key];
+    if (row) return !!row.active;
+    return !!p.active; // fallback to global
+  };
+
+  /* Load admin data + session (once) */
   useEffect(() => {
-    setOutlets(loadLS<Outlet[]>(K_OUTLETS, []));
-    setProducts(loadLS<Product[]>(K_PRODUCTS, []));
+    // Outlets (prefer v1 key, fallback to v2)
+    const o1 = loadLS<Outlet[]>(K_OUTLETS, []);
+    const o2 = o1.length ? o1 : loadLS<Outlet[]>(K_OUTLETS_V2, []);
+    setOutlets(o2);
+
+    // Products (prefer v1 key, fallback to v2)
+    const p1raw = loadLS<any[]>(K_PRODUCTS, []);
+    const p2raw = p1raw.length ? p1raw : loadLS<any[]>(K_PRODUCTS_V2, []);
+    // Normalize product fields (sellPrice vs defaultSellPrice)
+    const normProducts: Product[] = (p2raw || []).map((p: any) => ({
+      id: p.id,
+      key: p.key,
+      name: p.name,
+      unit: (p.unit as Unit) ?? "kg",
+      sellPrice: typeof p.sellPrice === "number" ? p.sellPrice : (p.defaultSellPrice ?? 0),
+      active: !!p.active,
+    }));
+    setProducts(normProducts);
+
+    // Pricebook
+    const pb = loadLS<typeof pricebook>(K_PRICEBOOK, {});
+    setPricebook(pb || {});
+
+    // Welcome
+    setWelcomeName(sessionStorage.getItem("supplier_name") || "");
   }, []);
 
-  /* Initialize outlet selection when outlets are loaded */
+  /* Initialize outlet selection to first active */
   useEffect(() => {
     if (outlets.length > 0 && !outletId) {
-      setOutletId(outlets[0].id);
+      const firstActive = outlets.find(o => o.active) || outlets[0];
+      setOutletId(firstActive.id);
     }
   }, [outlets, outletId]);
 
-  /* Load rows + submitted lock when date/outlet changes */
+  /* Load rows + submitted lock + transfers + disputes when date/outlet changes */
   useEffect(() => {
     if (!selectedOutletName) return;
 
-    const loaded = loadLS<SupplyRow[]>(
-      supplierOpeningKey(dateStr, selectedOutletName),
+    // Prefer FULL editable rows; if absent, hydrate from minimal opening
+    const full = loadLS<SupplyRow[]>(
+      supplierOpeningFullKey(dateStr, selectedOutletName),
       []
     );
-    setRows(loaded);
+
+    if (full.length > 0) {
+      setRows(full);
+    } else {
+      const minimal = loadLS<OpeningItem[]>(
+        supplierOpeningKey(dateStr, selectedOutletName),
+        []
+      );
+      const hydrated: SupplyRow[] = minimal.map(mi => {
+        const p = productByKey[mi.itemKey];
+        return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: p?.unit ?? "kg" };
+      });
+      setRows(hydrated);
+    }
 
     const isSubmitted = loadLS<boolean>(
       supplierSubmittedKey(dateStr, selectedOutletName),
@@ -168,20 +248,25 @@ export default function SupplierDashboard(): JSX.Element {
     );
     setSubmitted(isSubmitted);
 
-    // load transfers for date
+    // transfers for date
     const tx = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
     setTransfers(tx);
-  }, [dateStr, selectedOutletName]);
+
+    // disputes (show open supply disputes for this outlet or all)
+    const rawAmends = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
+    const list = rawAmends.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
+      ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName)));
+    setAmends(list);
+  }, [dateStr, selectedOutletName, productByKey]);
 
   /* ===== Row operations ===== */
   const addRow = (itemKey: string): void => {
     if (!itemKey) return;
     const p = productByKey[itemKey];
     if (!p) return;
-
     setRows((prev) => [
       ...prev,
-      { id: rid(), itemKey: itemKey, qty: 0, buyPrice: 0, unit: p.unit },
+      { id: rid(), itemKey, qty: 0, buyPrice: 0, unit: p.unit },
     ]);
   };
 
@@ -193,11 +278,28 @@ export default function SupplierDashboard(): JSX.Element {
     setRows((prev) => prev.filter((r) => r.id !== id));
   };
 
+  /* ===== Save (draft) ===== */
+  const saveDraft = (): void => {
+    if (!selectedOutletName) return;
+    // Save full rows for supplier UI
+    saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), rows);
+    // Also save minimal (aggregated) for attendants
+    const minimal = toMinimal(rows);
+    saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
+    // Save cost map
+    const costMap = rows.reduce<Record<string, number>>((acc, r) => {
+      acc[r.itemKey] = r.buyPrice || 0;
+      return acc;
+    }, {});
+    saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
+    alert("Saved.");
+  };
+
   /* ===== Submit (lock) ===== */
   const submitDay = (): void => {
     if (!selectedOutletName) return;
-    // Save rows
-    saveLS(supplierOpeningKey(dateStr, selectedOutletName), rows);
+    // Save full + minimal + cost
+    saveDraft();
     // Lock
     saveLS(supplierSubmittedKey(dateStr, selectedOutletName), true);
     setSubmitted(true);
@@ -211,20 +313,40 @@ export default function SupplierDashboard(): JSX.Element {
     const note = window.prompt("Describe what needs to be corrected:", "");
     if (!note) return;
 
-    const req: AmendRequest = {
+    const req: AnyAmend = {
       id: rid(),
       date: dateStr,
       outletName: selectedOutletName,
-      requestedBy: "supplier",
-      type: "supply",
+      requestedBy: sessionStorage.getItem("supplier_code") || "supplier",
+      type: "supplier_adjustment",
       description: note,
       status: "pending",
+      createdAt: new Date().toISOString(),
     };
 
-    const list = loadLS<AmendRequest[]>(AMEND_REQUESTS_KEY, []);
+    const list = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
     const next = [req, ...list];
     saveLS(AMEND_REQUESTS_KEY, next);
+    setAmends(next.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
+      ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName))));
     alert("Modification request sent to Supervisor.");
+  };
+
+  /* ===== Add supplier comment on outlet-raised disputes ===== */
+  const addAmendComment = (amendId: string) => {
+    const text = window.prompt("Add a short comment/reason (visible to Supervisor):", "");
+    if (!text) return;
+    const code = sessionStorage.getItem("supplier_code") || "supplier";
+    const list = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
+    const next = list.map(a => {
+      if (a.id !== amendId) return a;
+      const comments = Array.isArray(a.comments) ? a.comments.slice() : [];
+      comments.push({ by: code, at: new Date().toISOString(), text });
+      return { ...a, comments };
+    });
+    saveLS(AMEND_REQUESTS_KEY, next);
+    setAmends(next.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
+      ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName))));
   };
 
   /* ===== Transfers ===== */
@@ -240,8 +362,8 @@ export default function SupplierDashboard(): JSX.Element {
   }, [outlets, txFromId, txToId]);
 
   const addTransfer = (): void => {
-    const fromName = outletById[txFromId]?.name ?? "";
-    const toName = outletById[txToId]?.name ?? "";
+    const fromName = (outletById[txFromId]?.name ?? "").trim();
+    const toName = (outletById[txToId]?.name ?? "").trim();
     if (!fromName || !toName) {
       alert("Please select valid outlets.");
       return;
@@ -276,29 +398,28 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(supplierTransfersKey(dateStr), nextTx);
     setTransfers(nextTx);
 
-    // 2) Reduce from-outlet opening for the day
-    const fromRows = loadLS<SupplyRow[]>(
-      supplierOpeningKey(dateStr, fromName),
-      []
-    );
-    const fromUpdated = adjustSupply(fromRows, txProductKey, -qtyNum, p.unit);
-    saveLS(supplierOpeningKey(dateStr, fromName), fromUpdated);
-
-    // 3) Increase to-outlet opening for the day
-    const toRows = loadLS<SupplyRow[]>(
-      supplierOpeningKey(dateStr, toName),
-      []
-    );
-    const toUpdated = adjustSupply(toRows, txProductKey, +qtyNum, p.unit);
-    saveLS(supplierOpeningKey(dateStr, toName), toUpdated);
+    // 2) Adjust FROM outlet (full + minimal)
+    adjOutletOpening(fromName, txProductKey, -qtyNum, p.unit);
+    // 3) Adjust TO outlet (full + minimal)
+    adjOutletOpening(toName, txProductKey, +qtyNum, p.unit);
 
     alert("Transfer saved and applied to both outlets’ opening.");
-    // clear qty only
     setTxQty("");
   };
 
-  function adjustSupply(list: SupplyRow[], itemKey: string, delta: number, unit: Unit): SupplyRow[] {
-    // Try find existing row for item; otherwise create a new one
+  function adjOutletOpening(outletName: string, itemKey: string, delta: number, unit: Unit) {
+    // FULL
+    const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, outletName), []);
+    const fullNext = adjustSupplyFull(full, itemKey, delta, unit);
+    saveLS(supplierOpeningFullKey(dateStr, outletName), fullNext);
+
+    // MINIMAL
+    const minimal = loadLS<OpeningItem[]>(supplierOpeningKey(dateStr, outletName), []);
+    const minimalNext = adjustSupplyMinimal(minimal, itemKey, delta);
+    saveLS(supplierOpeningKey(dateStr, outletName), minimalNext);
+  }
+
+  function adjustSupplyFull(list: SupplyRow[], itemKey: string, delta: number, unit: Unit): SupplyRow[] {
     const idx = list.findIndex((r) => r.itemKey === itemKey);
     if (idx === -1) {
       return [...list, { id: rid(), itemKey, qty: Math.max(0, delta), buyPrice: 0, unit }];
@@ -309,6 +430,26 @@ export default function SupplierDashboard(): JSX.Element {
       next[idx] = { ...now, qty: newQty };
       return next;
     }
+  }
+  function adjustSupplyMinimal(list: OpeningItem[], itemKey: string, delta: number): OpeningItem[] {
+    const idx = list.findIndex((r) => r.itemKey === itemKey);
+    if (idx === -1) {
+      return [...list, { itemKey, qty: Math.max(0, delta) }];
+    } else {
+      const next = [...list];
+      const now = next[idx];
+      const newQty = Math.max(0, now.qty + delta);
+      next[idx] = { ...now, qty: newQty };
+      return next;
+    }
+  }
+
+  function toMinimal(list: SupplyRow[]): OpeningItem[] {
+    const map = new Map<string, number>();
+    for (const r of list) {
+      map.set(r.itemKey, (map.get(r.itemKey) || 0) + (r.qty || 0));
+    }
+    return Array.from(map.entries()).map(([itemKey, qty]) => ({ itemKey, qty }));
   }
 
   /* ===== Calculations ===== */
@@ -321,13 +462,6 @@ export default function SupplierDashboard(): JSX.Element {
     }
     return { totalQty, totalBuy };
   }, [rows]);
-
-  /* ===== Save (without lock) ===== */
-  const saveDraft = (): void => {
-    if (!selectedOutletName) return;
-    saveLS(supplierOpeningKey(dateStr, selectedOutletName), rows);
-    alert("Saved.");
-  };
 
   /* ===== Print summary ===== */
   const printSummary = (): void => {
@@ -342,7 +476,10 @@ export default function SupplierDashboard(): JSX.Element {
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Supplier Dashboard</h1>
-          <p className="text-sm text-gray-600">Enter opening supply and handle transfers.</p>
+          <p className="text-sm text-gray-600">
+            {welcomeName ? <>Welcome <span className="font-medium">{welcomeName}</span>. </> : null}
+            Enter opening supply, manage transfers, and respond to disputes.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -399,11 +536,13 @@ export default function SupplierDashboard(): JSX.Element {
             <option value="" disabled>
               Select product…
             </option>
-            {products.filter((p) => p.active).map((p) => (
-              <option key={p.id} value={p.key}>
-                {p.name}
-              </option>
-            ))}
+            {products
+              .filter((p) => p.active && (!selectedOutletName || isProductActiveForOutlet(p, selectedOutletName)))
+              .map((p) => (
+                <option key={p.id} value={p.key}>
+                  {p.name}
+                </option>
+              ))}
           </select>
         </div>
 
@@ -462,7 +601,7 @@ export default function SupplierDashboard(): JSX.Element {
                         disabled={submitted}
                       />
                     </td>
-                    <td className="font-medium">{(line || 0).toLocaleString()}</td>
+                    <td className="font-medium">{fmt(line)}</td>
                     <td>
                       {!submitted && (
                         <button
@@ -482,7 +621,7 @@ export default function SupplierDashboard(): JSX.Element {
                 <td className="py-2 font-semibold" colSpan={4}>
                   Totals
                 </td>
-                <td className="font-semibold">{totals.totalBuy.toLocaleString()}</td>
+                <td className="font-semibold">{fmt(totals.totalBuy)}</td>
                 <td></td>
               </tr>
             </tfoot>
@@ -506,7 +645,7 @@ export default function SupplierDashboard(): JSX.Element {
       </section>
 
       {/* Transfers */}
-      <section className="rounded-2xl border p-4">
+      <section className="rounded-2xl border p-4 mb-6">
         <h2 className="font-semibold mb-2">Transfers (Between Outlets) — {dateStr}</h2>
 
         <div className="grid md:grid-cols-5 gap-2 mb-3">
@@ -592,7 +731,7 @@ export default function SupplierDashboard(): JSX.Element {
                       <td className="p-2">{t.fromOutletName}</td>
                       <td className="p-2">{t.toOutletName}</td>
                       <td className="p-2">{name}</td>
-                      <td className="p-2">{t.qty}</td>
+                      <td className="p-2">{fmt(t.qty)}</td>
                       <td className="p-2">{t.unit}</td>
                     </tr>
                   );
@@ -606,6 +745,55 @@ export default function SupplierDashboard(): JSX.Element {
           Transfers update the “Opening Supply” of both outlets for this date. Attendants will see the effect when they record closing.
         </p>
       </section>
+
+      {/* Disputes (read + comment) */}
+      <section className="rounded-2xl border p-4">
+        <h2 className="font-semibold mb-2">Disputes for {selectedOutletName || "—"}</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2">Date</th>
+                <th>Type</th>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {amends.length === 0 ? (
+                <tr>
+                  <td className="py-3 text-gray-500" colSpan={7}>No disputes.</td>
+                </tr>
+              ) : amends.map(a => (
+                <tr key={a.id} className="border-b">
+                  <td className="py-2">{a.date}</td>
+                  <td>{a.type || "-"}</td>
+                  <td>{a.itemKey || "-"}</td>
+                  <td>{typeof a.qty === "number" ? fmt(a.qty) : "-"}</td>
+                  <td className="max-w-[28rem] truncate" title={a.description || ""}>{a.description || "-"}</td>
+                  <td>{a.status || "-"}</td>
+                  <td>
+                    <button className="text-xs border rounded-lg px-2 py-1" onClick={() => addAmendComment(a.id)}>
+                      Add reason
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-gray-600 mt-2">
+          You can add comments/reasons. Only the Supervisor can approve/reject disputes.
+        </p>
+      </section>
+
+      <footer className="mt-6 text-xs text-gray-600">
+        Tip: Complete supplies and transfers <span className="font-medium">before</span> attendants start closing. Use
+        “Submit & Lock” when done; contact Supervisor for corrections.
+      </footer>
     </main>
   );
 }

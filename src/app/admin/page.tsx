@@ -29,12 +29,61 @@ type FixedExpense = {
   active: boolean;
 };
 
-type AdminTab = "outlets" | "products" | "expenses" | "data";
+type AdminTab =
+  | "outlets"
+  | "products"
+  | "pricebook"
+  | "supply"    // NEW
+  | "reports"   // NEW
+  | "expenses"
+  | "data";
+
+/** NEW: people codes (login identities) */
+type PersonCode = {
+  id: string;
+  name: string;
+  code: string;
+  role: "attendant" | "supervisor" | "supplier";
+  active: boolean;
+};
+
+/** NEW: attendant scope type (code -> outlet + product keys) */
+type ScopeMap = Record<string, { outlet: string; productKeys: string[] }>;
+
+/** NEW: per-outlet pricebook */
+type PriceBook = Record<
+  string, // outlet name
+  Record<
+    string, // product key
+    { sellPrice: number; active: boolean }
+  >
+>;
 
 /** =============== Storage Keys =============== */
-const K_OUTLETS  = "admin_outlets";
-const K_PRODUCTS = "admin_products";
-const K_EXPENSES = "admin_expenses";
+const K_OUTLETS   = "admin_outlets";
+const K_PRODUCTS  = "admin_products";
+const K_EXPENSES  = "admin_expenses";
+/** NEW keys */
+const K_CODES     = "admin_codes";
+const K_SCOPE     = "attendant_scope";
+const K_PRICEBOOK = "admin_pricebook";
+
+/** =============== Cross-page dynamic keys (read-only here) =============== */
+const supplierOpeningKey = (date: string, outlet: string) =>
+  `supplier_opening_${date}_${outlet}`; // OpeningItem[]: {itemKey, qty}
+const supplierCostKey = (date: string, outlet: string) =>
+  `supplier_cost_${date}_${outlet}`;    // { [itemKey]: unitBuyPrice }
+
+const summaryKey = (date: string, outlet: string) =>
+  `attendant_summary_${date}_${outlet}`; // { expectedKsh, depositedKsh, expensesKsh, cashAtTill, varianceKsh }
+const attClosingKey = (date: string, outlet: string) =>
+  `attendant_closing_${date}_${outlet}`; // Record<key, number>
+const attWasteKey = (date: string, outlet: string) =>
+  `attendant_waste_${date}_${outlet}`;   // Record<key, number>
+const expensesKeyDyn = (date: string, outlet: string) =>
+  `attendant_expenses_${date}_${outlet}`; // Array<{name, amount}>
+
+const AMEND_REQUESTS_KEY = "amend_requests";
 
 /** =============== Defaults (match what you’ve been using) =============== */
 function seedDefaultOutlets(): Outlet[] {
@@ -78,9 +127,18 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   // Expenses
   const [expenses, setExpenses] = useState<FixedExpense[]>([]);
+  /** NEW: people codes */
+  const [codes, setCodes]       = useState<PersonCode[]>([]);
+  /** NEW: scopes */
+  const [scope, setScope]       = useState<ScopeMap>({});
+  /** NEW: pricebook */
+  const [pricebook, setPricebook] = useState<PriceBook>({});
 
-  // Data tab helpers
-  const payload = useMemo(() => JSON.stringify({ outlets, products, expenses }, null, 2), [outlets, products, expenses]);
+  // Data tab helpers (include new stores in backup)
+  const payload = useMemo(
+    () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
+    [outlets, products, expenses, codes, scope, pricebook]
+  );
   const [importText, setImportText] = useState("");
 
   /** ----- Load on first mount (or if storage empty, seed defaults) ----- */
@@ -89,13 +147,22 @@ export default function AdminPage() {
       const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
       const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
       const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
+      const c = parseLS<PersonCode[]>(K_CODES) ?? [];
+      const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
+      const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
       setOutlets(o);
       setProducts(p);
       setExpenses(e);
+      setCodes(c);
+      setScope(s);
+      setPricebook(pb);
     } catch {
       setOutlets(seedDefaultOutlets());
       setProducts(seedDefaultProducts());
       setExpenses(seedDefaultExpenses());
+      setCodes([]);
+      setScope({});
+      setPricebook({});
     }
   }, []);
 
@@ -103,6 +170,10 @@ export default function AdminPage() {
   const saveOutletsNow  = () => { saveLS(K_OUTLETS, outlets);  alert("Outlets & Codes saved ✅"); };
   const saveProductsNow = () => { saveLS(K_PRODUCTS, products); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = () => { saveLS(K_EXPENSES, expenses); alert("Fixed Expenses saved ✅"); };
+  /** NEW */
+  const saveCodesNow    = () => { saveLS(K_CODES, codes);       alert("People & Codes saved ✅"); };
+  const saveScopesNow   = () => { saveLS(K_SCOPE, scope);       alert("Assignments (attendants) saved ✅"); };
+  const savePricebook   = () => { saveLS(K_PRICEBOOK, pricebook); alert("Outlet pricebook saved ✅"); };
 
   /** ----- CRUD helpers ----- */
   // Outlets
@@ -123,6 +194,289 @@ export default function AdminPage() {
   const updateExpense = (id: string, patch: Partial<FixedExpense>) =>
     setExpenses(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
 
+  /** NEW: People & Codes CRUD */
+  const addCode = () =>
+    setCodes(v => [
+      { id: rid(), name: "", code: "", role: "attendant", active: true },
+      ...v,
+    ]);
+  const removeCode = (id: string) => setCodes(v => v.filter(c => c.id !== id));
+  const updateCode = (id: string, patch: Partial<PersonCode>) =>
+    setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch } : c)));
+
+  /** ----- Assignments (Attendants) ----- */
+  const activeOutlets = useMemo(() => outlets.filter(o => o.active), [outlets]);
+  const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
+  const attendantCodes = useMemo(
+    () => codes.filter(c => c.role === "attendant"),
+    [codes]
+  );
+
+  const setScopeOutlet = (code: string, outletName: string) => {
+    if (!code.trim()) return;
+    setScope(prev => {
+      const next = { ...prev };
+      const entry = next[code] ?? { outlet: outletName, productKeys: [] as string[] };
+      entry.outlet = outletName;
+      next[code] = entry;
+      return next;
+    });
+  };
+
+  const toggleScopeProduct = (code: string, prodKey: string) => {
+    if (!code.trim()) return;
+    setScope(prev => {
+      const next = { ...prev };
+      const entry = next[code] ?? { outlet: "", productKeys: [] as string[] };
+      entry.productKeys = entry.productKeys.includes(prodKey)
+        ? entry.productKeys.filter(k => k !== prodKey)
+        : [...entry.productKeys, prodKey];
+      next[code] = entry;
+      return next;
+    });
+  };
+
+  const clearScopeForCode = (code: string) => {
+    if (!code.trim()) return;
+    setScope(prev => {
+      const next = { ...prev };
+      delete next[code];
+      return next;
+    });
+  };
+
+  /** ----- Pricebook helpers ----- */
+  const [pbOutlet, setPbOutlet] = useState<string>("");
+
+  const getPBRow = (outletName: string, key: string): { sellPrice: number; active: boolean } => {
+    const fromPB = pricebook[outletName]?.[key];
+    if (fromPB) return fromPB;
+    const base = products.find(p => p.key === key);
+    return { sellPrice: base?.sellPrice ?? 0, active: base?.active ?? true };
+  };
+
+  const setPBRow = (outletName: string, key: string, patch: Partial<{ sellPrice: number; active: boolean }>) => {
+    setPricebook(prev => {
+      const next = { ...prev };
+      const outletPB = { ...(next[outletName] || {}) };
+      const current = outletPB[key] || getPBRow(outletName, key);
+      outletPB[key] = { ...current, ...patch };
+      next[outletName] = outletPB;
+      return next;
+    });
+  };
+
+  const copyGlobalToOutlet = (outletName: string) => {
+    const map: Record<string, { sellPrice: number; active: boolean }> = {};
+    products.forEach(p => {
+      map[p.key] = { sellPrice: p.sellPrice, active: p.active };
+    });
+    setPricebook(prev => ({ ...prev, [outletName]: map }));
+  };
+
+  const resetOutletPricebook = (outletName: string) => {
+    setPricebook(prev => {
+      const next = { ...prev };
+      delete next[outletName]; // fallback to global
+      return next;
+    });
+  };
+
+  /** ----- Reports helpers (read-only) ----- */
+  type RangeMode = "day" | "week";
+  const [repDate, setRepDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [repMode, setRepMode] = useState<RangeMode>("day");
+
+  const datesInRange = useMemo(() => {
+    return repMode === "day" ? [repDate] : getWeekDates(repDate);
+  }, [repDate, repMode]);
+
+  // Daily/Weekly totals per outlet (using saved summaries)
+  const repRows = useMemo(() => {
+    return outlets.map(o => {
+      let expectedKsh = 0, depositedKsh = 0, expensesKsh = 0, cashAtTill = 0, varianceKsh = 0;
+      let hasData = false;
+      datesInRange.forEach(d => {
+        const s = readJSON<{ expectedKsh:number; depositedKsh:number; expensesKsh:number; cashAtTill:number; varianceKsh:number } | null>(
+          summaryKey(d, o.name),
+          null
+        );
+        if (s) {
+          expectedKsh += s.expectedKsh || 0;
+          depositedKsh += s.depositedKsh || 0;
+          expensesKsh += s.expensesKsh || 0;
+          cashAtTill  += s.cashAtTill  || 0;
+          varianceKsh += s.varianceKsh || 0;
+          hasData = true;
+        }
+      });
+      return { outlet: o.name, expectedKsh, depositedKsh, expensesKsh, cashAtTill, varianceKsh, hasData };
+    });
+  }, [outlets, datesInRange]);
+
+  const repTotals = useMemo(() => {
+    return repRows.reduce(
+      (a,r)=>({
+        expectedKsh: a.expectedKsh + r.expectedKsh,
+        depositedKsh: a.depositedKsh + r.depositedKsh,
+        expensesKsh: a.expensesKsh + r.expensesKsh,
+        cashAtTill: a.cashAtTill + r.cashAtTill,
+        varianceKsh: a.varianceKsh + r.varianceKsh
+      }),
+      { expectedKsh:0, depositedKsh:0, expensesKsh:0, cashAtTill:0, varianceKsh:0 }
+    );
+  }, [repRows]);
+
+  // Sales-by-item & waste over the same date range (computed from opening, closing, waste)
+  const salesByItem = useMemo(() => {
+    const m = new Map<string, { name: string; unit: Unit; soldQty: number; wasteQty: number; revenue: number }>();
+
+    datesInRange.forEach(d => {
+      outlets.forEach(o => {
+        const openingArr = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(d, o.name), []);
+        const closingMap = readJSON<Record<string, number>>(attClosingKey(d, o.name), {});
+        const wasteMap   = readJSON<Record<string, number>>(attWasteKey(d, o.name), {});
+
+        openingArr.forEach(row => {
+          const prod = products.find(p => p.key === row.itemKey);
+          const unit = (prod?.unit ?? "kg") as Unit;
+          const price = prod?.sellPrice ?? 0;
+          const closing = Number(closingMap[row.itemKey] || 0);
+          const waste = Number(wasteMap[row.itemKey] || 0);
+          const sold = Math.max(0, Number(row.qty || 0) - closing - waste);
+
+          const rec = m.get(row.itemKey) || { name: prod?.name ?? row.itemKey, unit, soldQty: 0, wasteQty: 0, revenue: 0 };
+          rec.soldQty  += sold;
+          rec.wasteQty += waste;
+          rec.revenue  += sold * price;
+          m.set(row.itemKey, rec);
+        });
+      });
+    });
+
+    return Array.from(m.entries()).map(([key, v]) => ({ key, ...v }));
+  }, [datesInRange, outlets, products]);
+
+  // Expenses Monitor across range
+  const expensesMonitor = useMemo(() => {
+    const perOutlet = outlets.map(o => {
+      let total = 0;
+      datesInRange.forEach(d => {
+        const list = readJSON<Array<{ name: string; amount: number }>>(expensesKeyDyn(d, o.name), []);
+        total += list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+      });
+      return { outlet: o.name, total };
+    });
+    const totalAll = perOutlet.reduce((a, r) => a + r.total, 0);
+    return { perOutlet, totalAll };
+  }, [datesInRange, outlets]);
+
+  // Rough supply cost for range (from supplier cost snapshots)
+  const supplyCost = useMemo(() => {
+    let totalQty = 0, totalAmount = 0;
+    const perItem = new Map<string, { qty: number; amount: number }>();
+
+    datesInRange.forEach(d => {
+      outlets.forEach(o => {
+        const open = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(d, o.name), []);
+        const costMap = readJSON<Record<string, number>>(supplierCostKey(d, o.name), {});
+        open.forEach(r => {
+          const qty = Number(r.qty || 0);
+          const price = Number(costMap[r.itemKey] || 0);
+          const amt = qty * price;
+
+          totalQty += qty;
+          totalAmount += amt;
+
+          const prev = perItem.get(r.itemKey) || { qty: 0, amount: 0 };
+          prev.qty += qty;
+          prev.amount += amt;
+          perItem.set(r.itemKey, prev);
+        });
+      });
+    });
+
+    const byItem = Array.from(perItem.entries()).map(([key, v]) => {
+      const p = products.find(pp => pp.key === key);
+      const unit = (p?.unit ?? "kg") as Unit;
+      return { key, name: p?.name ?? key, unit, qty: v.qty, avgPrice: v.qty > 0 ? v.amount / v.qty : 0, amount: v.amount };
+    });
+
+    return { totalQty, totalAmount, byItem };
+  }, [datesInRange, outlets, products]);
+
+  const profitEstimate = useMemo(() => {
+    const revenue = salesByItem.reduce((a, r) => a + r.revenue, 0);
+    const expensesTotal = expensesMonitor.totalAll;
+    const supplyTotal = supplyCost.totalAmount;
+    const grossProfit = revenue - supplyTotal;
+    const netAfterExpenses = grossProfit - expensesTotal;
+    return { revenue, supplyTotal, expensesTotal, grossProfit, netAfterExpenses };
+  }, [salesByItem, supplyCost, expensesMonitor]);
+
+  const raiseExpenseDispute = (outletName: string) => {
+    const reason = window.prompt(`Dispute/adjust expenses for ${outletName}. Reason:`, "");
+    if (!reason) return;
+    const req = {
+      id: rid(),
+      date: repDate,
+      outlet: outletName,
+      requestedBy: "admin",
+      type: "expense",
+      description: reason,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    const list = readJSON<any[]>(AMEND_REQUESTS_KEY, []);
+    saveLS(AMEND_REQUESTS_KEY, [req, ...list]);
+    alert("Expense dispute sent to Supervisor.");
+  };
+
+  /** ----- Supply view helpers (read-only) ----- */
+  const [supDate, setSupDate] = useState<string>(new Date().toISOString().slice(0,10));
+  const ALL = "__ALL__";
+  const [supOutletName, setSupOutletName] = useState<string>(ALL);
+
+  const supplyItems = useMemo(() => {
+    const acc = new Map<string, { name: string; unit: Unit; qty: number; amount: number }>();
+
+    const collect = (outletName: string) => {
+      const open = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(supDate, outletName), []);
+      const costMap = readJSON<Record<string, number>>(supplierCostKey(supDate, outletName), {});
+      open.forEach(r => {
+        const prod = products.find(p => p.key === r.itemKey);
+        const unit = (prod?.unit ?? "kg") as Unit;
+        const price = Number(costMap[r.itemKey] || 0);
+        const qty = Number(r.qty || 0);
+        const amt = qty * price;
+
+        const prev = acc.get(r.itemKey) || { name: prod?.name ?? r.itemKey, unit, qty: 0, amount: 0 };
+        prev.qty += qty;
+        prev.amount += amt;
+        acc.set(r.itemKey, prev);
+      });
+    };
+
+    if (supOutletName === ALL) {
+      outlets.forEach(o => collect(o.name));
+    } else {
+      collect(supOutletName);
+    }
+
+    const list = Array.from(acc.entries()).map(([itemKey, v]) => {
+      const avg = v.qty > 0 ? v.amount / v.qty : 0;
+      return { itemKey, name: v.name, unit: v.unit, qty: v.qty, buyPrice: avg, amount: v.amount };
+    });
+    return list.sort((a,b)=>a.name.localeCompare(b.name));
+  }, [supDate, supOutletName, outlets, products]);
+
+  const supTotals = useMemo(() => {
+    return {
+      qty: supplyItems.reduce((a, r) => a + (Number(r.qty)||0), 0),
+      amount: supplyItems.reduce((a, r) => a + (Number(r.amount)||0), 0),
+    };
+  }, [supplyItems]);
+
   /** ----- Data tab actions ----- */
   const exportJSON = () => {
     const blob = new Blob([payload], { type: "application/json" });
@@ -136,9 +490,12 @@ export default function AdminPage() {
   const importJSON = () => {
     try {
       const parsed = JSON.parse(importText);
-      if (parsed.outlets)  setOutlets(parsed.outlets);
-      if (parsed.products) setProducts(parsed.products);
-      if (parsed.expenses) setExpenses(parsed.expenses);
+      if (parsed.outlets)   setOutlets(parsed.outlets);
+      if (parsed.products)  setProducts(parsed.products);
+      if (parsed.expenses)  setExpenses(parsed.expenses);
+      if (parsed.codes)     setCodes(parsed.codes);
+      if (parsed.scope)     setScope(parsed.scope);
+      if (parsed.pricebook) setPricebook(parsed.pricebook);
       alert("Imported settings successfully.");
     } catch (e: any) {
       alert("Failed to import: " + e.message);
@@ -150,6 +507,9 @@ export default function AdminPage() {
     setOutlets(seedDefaultOutlets());
     setProducts(seedDefaultProducts());
     setExpenses(seedDefaultExpenses());
+    setCodes([]);
+    setScope({});
+    setPricebook({});
   };
 
   const clearAll = () => {
@@ -157,9 +517,15 @@ export default function AdminPage() {
     localStorage.removeItem(K_OUTLETS);
     localStorage.removeItem(K_PRODUCTS);
     localStorage.removeItem(K_EXPENSES);
+    localStorage.removeItem(K_CODES);
+    localStorage.removeItem(K_SCOPE);
+    localStorage.removeItem(K_PRICEBOOK);
     setOutlets([]);
     setProducts([]);
     setExpenses([]);
+    setCodes([]);
+    setScope({});
+    setPricebook({});
   };
 
   /** ----- Render ----- */
@@ -168,22 +534,24 @@ export default function AdminPage() {
       <header className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
         <nav className="flex gap-2">
-          <TabBtn active={tab==="outlets"}  onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
-          <TabBtn active={tab==="products"} onClick={() => setTab("products")}>Products & Prices</TabBtn>
-          <TabBtn active={tab==="expenses"} onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
-          <TabBtn active={tab==="data"}     onClick={() => setTab("data")}>Backup / Restore</TabBtn>
+          <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
+          <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
+          <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
+          <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
+          <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
+          <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
+          <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
         </nav>
       </header>
 
+      {/* ---------- OUTLETS & CODES ---------- */}
       {tab === "outlets" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Outlets & Attendant Codes</h2>
             <div className="flex gap-2">
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>+ Add outlet</button>
-              {/* ONLY ADDITION BELOW */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveOutletsNow}>Submit / Save</button>
-              {/* ONLY ADDITION ABOVE */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setOutlets(seedDefaultOutlets())}>
                 Reset defaults
               </button>
@@ -195,7 +563,7 @@ export default function AdminPage() {
               <thead>
                 <tr className="text-left border-b">
                   <th className="py-2">Name</th>
-                  <th>Login Code</th>
+                  <th>Login Code (legacy, optional)</th>
                   <th>Status</th>
                   <th style={{width: 1}}></th>
                 </tr>
@@ -233,21 +601,159 @@ export default function AdminPage() {
               </tbody>
             </table>
             <p className="text-xs text-gray-600 mt-2">
-              These codes are used by the Attendant Login page to auto-map the outlet.
+              These codes are used by the Attendant Login page to auto-map the outlet (legacy). New person codes live below.
             </p>
+          </div>
+
+          {/* People & Codes */}
+          <div className="mt-6 pt-4 border-t">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold">People & Codes</h3>
+              <div className="flex gap-2">
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={addCode}>+ Add code</button>
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveCodesNow}>Save Codes</button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Name</th>
+                    <th>Login Code</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th style={{width:1}}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {codes.length === 0 && (
+                    <tr><td className="py-3 text-gray-500" colSpan={5}>No codes yet.</td></tr>
+                  )}
+                  {codes.map(c => (
+                    <tr key={c.id} className="border-b">
+                      <td className="py-2">
+                        <input className="border rounded-xl p-2 w-44"
+                          value={c.name} onChange={e=>updateCode(c.id,{name:e.target.value})}
+                          placeholder="Person name"/>
+                      </td>
+                      <td>
+                        <input className="border rounded-xl p-2 w-44 font-mono"
+                          value={c.code} onChange={e=>updateCode(c.id,{code:e.target.value})}
+                          placeholder="Unique code"/>
+                      </td>
+                      <td>
+                        <select className="border rounded-xl p-2"
+                          value={c.role} onChange={e=>updateCode(c.id,{role:e.target.value as PersonCode["role"]})}>
+                          <option value="attendant">attendant</option>
+                          <option value="supervisor">supervisor</option>
+                          <option value="supplier">supplier</option>
+                        </select>
+                      </td>
+                      <td>
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={c.active}
+                            onChange={e=>updateCode(c.id,{active:e.target.checked})}/>
+                          Active
+                        </label>
+                      </td>
+                      <td>
+                        <button className="text-xs border rounded-lg px-2 py-1" onClick={()=>removeCode(c.id)}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Assignments (Attendants) */}
+          <div className="mt-6 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">Assignments (Attendants)</h3>
+              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
+            </div>
+            <p className="text-xs text-gray-600 mt-1 mb-2">
+              Choose outlet and allowed products for each attendant code. Supervisors & suppliers aren’t tied to outlets.
+            </p>
+
+            {attendantCodes.length === 0 && (
+              <p className="text-xs text-gray-600">Add at least one code with role “attendant”.</p>
+            )}
+
+            {attendantCodes.map(ac => {
+              const code = (ac.code || "").trim();
+              const entry = scope[code] || { outlet: "", productKeys: [] as string[] };
+              const sel = new Set(entry.productKeys);
+
+              return (
+                <div key={`assign-${ac.id}`} className="rounded-xl border p-3 mb-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="text-sm">
+                      <span className="font-medium">{ac.name || "Unnamed"}</span>{" "}
+                      <span className="text-gray-500">({code || "no code"})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-600">Outlet</label>
+                      <select
+                        className="border rounded-xl p-2 text-sm"
+                        value={entry.outlet}
+                        onChange={e => setScopeOutlet(code, e.target.value)}
+                      >
+                        <option value="">— select —</option>
+                        {activeOutlets.map(o => (
+                          <option key={o.id} value={o.name}>{o.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        className="border rounded-xl px-3 py-1 text-xs"
+                        onClick={() => { saveScopesNow(); }}
+                      >
+                        Apply/Save
+                      </button>
+                      {scope[code] && (
+                        <button
+                          className="border rounded-xl px-3 py-1 text-xs"
+                          onClick={() => clearScopeForCode(code)}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tick UI for products */}
+                  <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-3">
+                    {activeProducts.map(p => (
+                      <label
+                        key={`tick-${p.id}`}
+                        className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 ${sel.has(p.key) ? "bg-black text-white" : "bg-white"}`}
+                        title={p.name}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel.has(p.key)}
+                          onChange={() => toggleScopeProduct(code, p.key)}
+                        />
+                        <span>{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
 
+      {/* ---------- PRODUCTS (global) ---------- */}
       {tab === "products" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Products & Prices</h2>
             <div className="flex gap-2">
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
-              {/* ONLY ADDITION BELOW */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveProductsNow}>Submit / Save</button>
-              {/* ONLY ADDITION ABOVE */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>
                 Reset defaults
               </button>
@@ -313,21 +819,331 @@ export default function AdminPage() {
               </tbody>
             </table>
             <p className="text-xs text-gray-600 mt-2">
-              These prices can be used by Attendant Dashboard to compute expected Ksh. (We can wire that next.)
+              These prices are global defaults; per-outlet overrides live in the Outlet Pricebook tab.
             </p>
           </div>
         </section>
       )}
 
+      {/* ---------- OUTLET PRICEBOOK ---------- */}
+      {tab === "pricebook" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Outlet Pricebook</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600">Outlet</label>
+              <select
+                className="border rounded-xl p-2 text-sm"
+                value={pbOutlet}
+                onChange={(e)=>setPbOutlet(e.target.value)}
+              >
+                <option value="">— select outlet —</option>
+                {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+              </select>
+              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>savePricebook()}>Save</button>
+            </div>
+          </div>
+
+          {!pbOutlet ? (
+            <p className="text-sm text-gray-600">Choose an outlet to edit its prices & availability.</p>
+          ) : (
+            <>
+              <div className="flex gap-2 mb-3">
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>copyGlobalToOutlet(pbOutlet)}>Copy from Global</button>
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>resetOutletPricebook(pbOutlet)}>Reset this Outlet</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-2">Product</th>
+                      <th>Sell Price (Ksh)</th>
+                      <th>Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.length === 0 && (
+                      <tr><td className="py-3 text-gray-500" colSpan={3}>No products defined.</td></tr>
+                    )}
+                    {products.map(p => {
+                      const row = getPBRow(pbOutlet, p.key);
+                      return (
+                        <tr key={`pb-${p.id}`} className="border-b">
+                          <td className="py-2">{p.name} <span className="text-xs text-gray-500">({p.key})</span></td>
+                          <td>
+                            <input
+                              className="border rounded-xl p-2 w-36"
+                              type="number" min={0} step={1}
+                              value={row.sellPrice}
+                              onChange={e=>setPBRow(pbOutlet, p.key, { sellPrice: n(e.target.value) })}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row.active}
+                              onChange={e=>setPBRow(pbOutlet, p.key, { active: e.target.checked })}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* ---------- SUPPLY VIEW (read-only) ---------- */}
+      {tab === "supply" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Supply View</h2>
+            <div className="flex items-center gap-2">
+              <input
+                className="border rounded-xl p-2 text-sm"
+                type="date"
+                value={supDate}
+                onChange={(e)=>setSupDate(e.target.value)}
+              />
+              <select
+                className="border rounded-xl p-2 text-sm"
+                value={supOutletName}
+                onChange={(e)=>setSupOutletName(e.target.value)}
+              >
+                <option value={ALL}>All outlets</option>
+                {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Item</th>
+                  <th>Qty</th>
+                  <th>Unit</th>
+                  <th>Buy Price</th>
+                  <th>Total (Ksh)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supplyItems.length === 0 ? (
+                  <tr><td className="py-3 text-gray-500" colSpan={5}>No opening recorded by Supplier for this date/outlet.</td></tr>
+                ) : (
+                  supplyItems.map((r, i) => (
+                    <tr key={`${r.itemKey}-${i}`} className="border-b">
+                      <td className="py-2">{r.name}</td>
+                      <td>{fmt(r.qty)}</td>
+                      <td>{r.unit}</td>
+                      <td>{fmt(r.buyPrice)}</td>
+                      <td>{fmt(r.amount)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {supplyItems.length > 0 && (
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">Totals</td>
+                    <td>{fmt(supTotals.qty)}</td>
+                    <td></td>
+                    <td></td>
+                    <td>{fmt(supTotals.amount)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+          <p className="text-xs text-gray-600 mt-2">Read-only mirror of supplier opening for attendants.</p>
+        </section>
+      )}
+
+      {/* ---------- REPORTS (read-only) ---------- */}
+      {tab === "reports" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Reports</h2>
+            <div className="flex items-center gap-2">
+              <input
+                className="border rounded-xl p-2 text-sm"
+                type="date"
+                value={repDate}
+                onChange={(e)=>setRepDate(e.target.value)}
+              />
+              <select
+                className="border rounded-xl p-2 text-sm"
+                value={repMode}
+                onChange={(e)=>setRepMode(e.target.value as RangeMode)}
+              >
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Summary per outlet */}
+          <div className="overflow-x-auto mb-6">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Outlet</th>
+                  <th>Expected (Ksh)</th>
+                  <th>Deposited (Ksh)</th>
+                  <th>Expenses (Ksh)</th>
+                  <th>Cash At Till (Ksh)</th>
+                  <th>Variance (Ksh)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repRows.length === 0 ? (
+                  <tr><td className="py-3 text-gray-500" colSpan={7}>No outlets.</td></tr>
+                ) : (
+                  repRows.map(r => (
+                    <tr key={r.outlet} className="border-b">
+                      <td className="py-2">{r.outlet}</td>
+                      <td>{fmt(r.expectedKsh)}</td>
+                      <td>{fmt(r.depositedKsh)}</td>
+                      <td>{fmt(r.expensesKsh)}</td>
+                      <td>{fmt(r.cashAtTill)}</td>
+                      <td className={r.varianceKsh === 0 ? "text-green-700" : r.varianceKsh < 0 ? "text-red-700" : "text-yellow-700"}>
+                        {fmt(r.varianceKsh)}
+                      </td>
+                      <td>
+                        {!r.hasData ? (
+                          <span className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-800">no data</span>
+                        ) : r.varianceKsh < 0 ? (
+                          <span className="px-2 py-1 rounded text-xs bg-red-200 text-red-800">deficit</span>
+                        ) : r.varianceKsh > 0 ? (
+                          <span className="px-2 py-1 rounded text-xs bg-yellow-200 text-yellow-800">excess</span>
+                        ) : (
+                          <span className="px-2 py-1 rounded text-xs bg-green-200 text-green-800">balanced</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {repRows.length > 0 && (
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">Totals</td>
+                    <td>{fmt(repTotals.expectedKsh)}</td>
+                    <td>{fmt(repTotals.depositedKsh)}</td>
+                    <td>{fmt(repTotals.expensesKsh)}</td>
+                    <td>{fmt(repTotals.cashAtTill)}</td>
+                    <td>{fmt(repTotals.varianceKsh)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* Sales by item + waste */}
+          <div className="rounded-xl border p-3 mb-6">
+            <h3 className="font-semibold mb-2">Sales by Item (and Waste)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Item</th>
+                    <th>Sold Qty</th>
+                    <th>Waste</th>
+                    <th>Unit</th>
+                    <th>Revenue (Ksh)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salesByItem.length === 0 ? (
+                    <tr><td className="py-3 text-gray-500" colSpan={5}>No data for range.</td></tr>
+                  ) : salesByItem.map(r => (
+                    <tr key={r.key} className="border-b">
+                      <td className="py-2">{r.name}</td>
+                      <td>{fmt(r.soldQty)}</td>
+                      <td>{fmt(r.wasteQty)}</td>
+                      <td>{r.unit}</td>
+                      <td>{fmt(r.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {salesByItem.length > 0 && (
+                  <tfoot>
+                    <tr className="font-semibold">
+                      <td className="py-2">Totals</td>
+                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.soldQty,0))}</td>
+                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.wasteQty,0))}</td>
+                      <td></td>
+                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.revenue,0))}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* Expenses monitor */}
+          <div className="rounded-xl border p-3 mb-6">
+            <h3 className="font-semibold mb-2">Expenses Monitor (range)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Outlet</th>
+                    <th>Total Expenses (Ksh)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expensesMonitor.perOutlet.map(row => (
+                    <tr key={row.outlet} className="border-b">
+                      <td className="py-2">{row.outlet}</td>
+                      <td>{fmt(row.total)}</td>
+                      <td>
+                        <button className="border rounded-lg px-2 py-1 text-xs" onClick={()=>raiseExpenseDispute(row.outlet)}>
+                          Dispute/Adjust
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">All outlets</td>
+                    <td>{fmt(expensesMonitor.totalAll)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Profit snapshot */}
+          <div className="rounded-xl border p-3">
+            <h3 className="font-semibold mb-2">Profit Snapshot (range)</h3>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <KPI label="Revenue (Ksh)"        value={fmt(profitEstimate.revenue)} />
+              <KPI label="Supply Cost (Ksh)"    value={fmt(profitEstimate.supplyTotal)} />
+              <KPI label="Gross Profit (Ksh)"   value={fmt(profitEstimate.grossProfit)} />
+              <KPI label="Expenses (Ksh)"       value={fmt(profitEstimate.expensesTotal)} />
+              <KPI label="Net After Exp (Ksh)"  value={fmt(profitEstimate.netAfterExpenses)} />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ---------- EXPENSES ---------- */}
       {tab === "expenses" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Fixed Expenses</h2>
             <div className="flex gap-2">
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={addExpense}>+ Add expense</button>
-              {/* ONLY ADDITION BELOW */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveExpensesNow}>Submit / Save</button>
-              {/* ONLY ADDITION ABOVE */}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setExpenses(seedDefaultExpenses())}>
                 Reset defaults
               </button>
@@ -392,6 +1208,7 @@ export default function AdminPage() {
         </section>
       )}
 
+      {/* ---------- DATA ---------- */}
       {tab === "data" && (
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Backup / Restore</h2>
@@ -436,11 +1253,35 @@ function TabBtn(props: React.PropsWithChildren<{active: boolean; onClick(): void
   );
 }
 
+function KPI({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border p-4">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-xl font-semibold mt-1">{value}</div>
+    </div>
+  );
+}
+
 /** =============== Helpers =============== */
 function rid() { return Math.random().toString(36).slice(2); }
 function n(v: string) { return v === "" ? 0 : Number(v); }
+function fmt(v: number) { return (v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 
-// Parse + Save with safety
+function getWeekDates(dateStr: string): string[] {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const day = d.getDay(); // 0 Sun ... 6 Sat
+  const diffToMonday = (day + 6) % 7; // days since Monday
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - diffToMonday);
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const di = new Date(monday);
+    di.setDate(monday.getDate() + i);
+    out.push(di.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 function parseLS<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -449,4 +1290,12 @@ function parseLS<T>(key: string): T | null {
 }
 function saveLS<T>(key: string, value: T) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }

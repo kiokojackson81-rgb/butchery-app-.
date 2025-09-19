@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
+// ===== Types kept exactly as your original =====
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
 type Unit = "kg" | "pcs";
 type ItemKey =
@@ -17,7 +18,10 @@ type Staff = {
   active: boolean;
 };
 
+// ===== Storage keys stay the same =====
 const ADMIN_STAFF_KEY = "admin_staff";
+const SCOPE_KEY = "attendant_scope"; // NEW: mapping attendant_code -> { outlet, productKeys }
+
 const ITEMS: { key: ItemKey; name: string; unit: Unit }[] = [
   { key: "beef", name: "Beef", unit: "kg" },
   { key: "goat", name: "Goat (Cigon)", unit: "kg" },
@@ -30,18 +34,27 @@ const ITEMS: { key: ItemKey; name: string; unit: Unit }[] = [
 ];
 const OUTLETS: Outlet[] = ["Bright", "Baraka A", "Baraka B", "Baraka C"];
 
+// ===== Utilities (unchanged + small extras) =====
 function uid() { return Math.random().toString(36).slice(2); }
 function readStaff(): Staff[] {
   try { const raw = localStorage.getItem(ADMIN_STAFF_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
 function writeStaff(list: Staff[]) { localStorage.setItem(ADMIN_STAFF_KEY, JSON.stringify(list)); }
 
+// Scope store: code -> { outlet, productKeys }
+type ScopeMap = Record<string, { outlet: Outlet; productKeys: ItemKey[] }>
+function readScope(): ScopeMap { try { return JSON.parse(localStorage.getItem(SCOPE_KEY) || "{}"); } catch { return {}; } }
+function writeScope(map: ScopeMap) { localStorage.setItem(SCOPE_KEY, JSON.stringify(map)); }
+
 export default function AdminStaffPage() {
   const [list, setList] = useState<Staff[]>([]);
   const [filterOutlet, setFilterOutlet] = useState<Outlet | "ALL">("ALL");
+  const [scope, setScope] = useState<ScopeMap>({}); // NEW
 
-  useEffect(() => { setList(readStaff()); }, []);
+  // Load both stores on mount
+  useEffect(() => { setList(readStaff()); setScope(readScope()); }, []);
 
+  // CRUD staff (unchanged)
   const addStaff = () => {
     const s: Staff = { id: uid(), name: "", code: "", outlet: "Bright", products: [], active: true };
     const next = [s, ...list];
@@ -50,6 +63,11 @@ export default function AdminStaffPage() {
   const removeStaff = (id: string) => {
     const next = list.filter(s => s.id !== id);
     setList(next); writeStaff(next);
+    // also try to clean scope entry if code exists
+    const removed = list.find(s => s.id === id);
+    if (removed?.code) {
+      const m = { ...scope }; delete m[removed.code]; setScope(m); writeScope(m);
+    }
   };
   const update = (id: string, patch: Partial<Staff>) => {
     const next = list.map(s => s.id === id ? { ...s, ...patch } : s);
@@ -61,7 +79,31 @@ export default function AdminStaffPage() {
     update(s.id, { products });
   };
 
+  // Derived view
   const shown = useMemo(() => filterOutlet === "ALL" ? list : list.filter(s => s.outlet === filterOutlet), [filterOutlet, list]);
+
+  // ===== Scope helpers (do not touch login flow) =====
+  const applyScope = (s: Staff) => {
+    if (!s.code) return alert("Set a login code first.");
+    const m = { ...scope, [s.code]: { outlet: s.outlet, productKeys: s.products } };
+    setScope(m); writeScope(m);
+    alert(`Scope saved for ${s.name || s.code}. Attendant will see only ${s.outlet} and ${s.products.length} products.`);
+  };
+  const clearScope = (s: Staff) => {
+    if (!s.code) return;
+    const m = { ...scope }; delete m[s.code]; setScope(m); writeScope(m);
+  };
+  const isScoped = (code: string) => !!scope[code];
+
+  // Bulk sync (optional convenience)
+  const syncAllScopes = () => {
+    const m: ScopeMap = { ...scope };
+    list.forEach(s => {
+      if (s.active && s.code) m[s.code] = { outlet: s.outlet, productKeys: s.products };
+    });
+    setScope(m); writeScope(m);
+    alert("All active staff synced into attendant_scope.");
+  };
 
   return (
     <main className="p-6 max-w-6xl mx-auto">
@@ -73,6 +115,10 @@ export default function AdminStaffPage() {
             {OUTLETS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
           <button className="border rounded-xl px-3 py-2 text-sm" onClick={addStaff}>+ Add Staff</button>
+          {/* NEW: bulk sync */}
+          <button className="border rounded-xl px-3 py-2 text-sm" title="Save outlet+products to attendant_scope for all active staff" onClick={syncAllScopes}>
+            Sync All Scopes
+          </button>
         </div>
       </header>
 
@@ -121,7 +167,17 @@ export default function AdminStaffPage() {
               </div>
             </div>
 
-            <div className="mt-4 flex gap-2">
+            {/* NEW: Scope controls (do NOT change login) */}
+            <div className="mt-4 flex items-center gap-2">
+              <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>applyScope(s)}>
+                {isScoped(s.code) ? "Update Scope" : "Apply Scope"}
+              </button>
+              {isScoped(s.code) && (
+                <>
+                  <span className="text-xs rounded-lg border px-2 py-1">Scoped</span>
+                  <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>clearScope(s)}>Clear Scope</button>
+                </>
+              )}
               <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>removeStaff(s.id)}>Remove</button>
             </div>
           </section>

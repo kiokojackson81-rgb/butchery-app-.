@@ -1,37 +1,57 @@
+// app/supplier/page.tsx
 "use client";
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
-/** Primary storage key used by Admin Staff page */
-const ADMIN_STAFF_KEY = "admin_staff";
+/** Primary storage keys (match your Admin page) */
+const ADMIN_CODES_KEY = "admin_codes";   // People & Codes from Admin
+const LEGACY_STAFF_KEYS = ["admin_staff", "admin_staff_v2", "ADMIN_STAFF"]; // optional fallback
 
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
 
-type Staff = {
+/** Matches Admin “People & Codes” structure */
+type PersonCode = {
   id: string;
   name: string;
   code: string;
-  role: "attendant" | "supplier" | "supervisor";
+  role: "attendant" | "supervisor" | "supplier";
+  active: boolean;
+};
+
+/** Legacy staff shape (older admin_staff stores might not have role) */
+type LegacyStaff = {
+  id: string;
+  name: string;
+  code: string;
+  role?: "attendant" | "supplier" | "supervisor";
   outlet?: Outlet;
   active: boolean;
 };
 
 /** Helpers */
 function norm(s: string): string {
-  // normalize: trim, collapse inner spaces, lowercase
   return s.replace(/\s+/g, "").trim().toLowerCase();
 }
 
-function loadStaff(): Staff[] {
+function loadPeople(): PersonCode[] {
   try {
-    // Try known keys (in case your Admin page used a newer key later)
-    const candidates = [ADMIN_STAFF_KEY, "admin_staff_v2", "ADMIN_STAFF"];
-    for (const key of candidates) {
+    const raw = localStorage.getItem(ADMIN_CODES_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as PersonCode[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadLegacy(): LegacyStaff[] {
+  try {
+    for (const key of LEGACY_STAFF_KEYS) {
       const raw = localStorage.getItem(key);
       if (raw) {
-        const list = JSON.parse(raw) as Staff[];
-        if (Array.isArray(list)) return list;
+        const arr = JSON.parse(raw) as LegacyStaff[];
+        if (Array.isArray(arr)) return arr;
       }
     }
   } catch {}
@@ -45,41 +65,62 @@ export default function SupplierLoginPage() {
 
   const handleLogin = () => {
     setError("");
-    const staffList = loadStaff();
-    if (staffList.length === 0) {
-      setError("No staff configured by Admin (admin_staff is empty).");
-      return;
-    }
 
+    const people = loadPeople();
     const input = norm(code);
-    const found = staffList.find(
-      (s) =>
-        s.role === "supplier" &&
-        s.active === true &&
-        norm(s.code) === input
+
+    // Preferred: admin_codes with role === "supplier"
+    let found = people.find(
+      (p) => p.active === true && p.role === "supplier" && norm(p.code) === input
     );
+
+    // Legacy fallback: admin_staff* (role may be missing)
+    if (!found) {
+      const legacy = loadLegacy();
+      const m = legacy.find(
+        (s) =>
+          s.active === true &&
+          (s.role === "supplier" || s.role == null) &&
+          norm(s.code) === input
+      );
+      if (m) {
+        found = {
+          id: m.id,
+          name: m.name,
+          code: m.code,
+          role: (m.role as PersonCode["role"]) || "supplier",
+          active: m.active,
+        };
+      }
+    }
 
     if (!found) {
       setError("Invalid supplier code.");
       return;
     }
 
-    // Store session
+    // Session for dashboard
     sessionStorage.setItem("supplier_code", found.code);
     sessionStorage.setItem("supplier_name", found.name || "Supplier");
-    if (found.outlet) {
-      sessionStorage.setItem("supplier_outlet", found.outlet);
-    }
 
     router.push("/supplier/dashboard");
   };
 
   const showKnownCodes = () => {
-    const list = loadStaff()
-      .filter((s) => s.role === "supplier")
-      .map((s) => `${s.name || "Unnamed"} — ${s.code}${s.active ? "" : " (inactive)"}`);
+    const people = loadPeople();
+    const list = people
+      .filter((p) => p.role === "supplier")
+      .map((p) => `${p.name || "Unnamed"} — ${p.code}${p.active ? "" : " (inactive)"}`);
+
     if (list.length === 0) {
-      alert("No supplier codes found in localStorage under 'admin_staff'.");
+      const legacy = loadLegacy()
+        .filter((s) => s.role === "supplier" || s.role == null)
+        .map((s) => `${s.name || "Unnamed"} — ${s.code}${s.active ? "" : " (inactive)"} [legacy]`);
+      if (legacy.length === 0) {
+        alert("No supplier codes found in localStorage (admin_codes or legacy admin_staff).");
+      } else {
+        alert("Supplier codes found (legacy):\n\n" + legacy.join("\n"));
+      }
     } else {
       alert("Supplier codes found:\n\n" + list.join("\n"));
     }
