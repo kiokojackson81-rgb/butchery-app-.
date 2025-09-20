@@ -106,55 +106,44 @@ export default function SupplierLoginPage() {
     router.push("/supplier/dashboard");
   };
 
-  const showKnownCodes = () => {
-    const people = loadPeople();
-    const list = people
-      .filter((p) => p.role === "supplier")
-      .map((p) => `${p.name || "Unnamed"} — ${p.code}${p.active ? "" : " (inactive)"}`);
-
-    if (list.length === 0) {
-      const legacy = loadLegacy()
-        .filter((s) => s.role === "supplier" || s.role == null)
-        .map((s) => `${s.name || "Unnamed"} — ${s.code}${s.active ? "" : " (inactive)"} [legacy]`);
-      if (legacy.length === 0) {
-        alert("No supplier codes found in localStorage (admin_codes or legacy admin_staff).");
-      } else {
-        alert("Supplier codes found (legacy):\n\n" + legacy.join("\n"));
-      }
-    } else {
-      alert("Supplier codes found:\n\n" + list.join("\n"));
-    }
-  };
-
   return (
-    <main className="p-6 max-w-md mx-auto">
-      <h1 className="text-xl font-semibold mb-4">Supplier Login</h1>
+    <main className="p-6 max-w-2xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-4">Supplier Login</h1>
 
-      <input
-        className="border rounded-xl p-2 w-full mb-3"
-        placeholder="Enter supplier code (e.g. SUPP001)"
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-      />
+      <div className="rounded-2xl border p-4 mb-4">
+        <input
+          className="border rounded-xl p-3 w-full mb-3"
+          placeholder="Enter supplier code (e.g. SUPP001)"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+        />
 
-      {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
+        {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="flex gap-2">
         <button
           onClick={handleLogin}
           className="px-4 py-2 rounded-xl bg-black text-white w-full"
         >
           Login
         </button>
-        <button
-          type="button"
-          onClick={showKnownCodes}
-          className="px-4 py-2 rounded-xl border w-full"
-          title="Show supplier codes saved by Admin"
-        >
-          I forgot my code
-        </button>
       </div>
+
+      {/* Operational Instructions & Guidelines */}
+      <section className="rounded-2xl border p-4">
+        <h2 className="font-semibold mb-2">Operational Instructions</h2>
+        <ol className="list-decimal pl-5 text-sm space-y-2 text-gray-200 md:text-gray-700 md:dark:text-gray-200">
+          <li>After login you’ll land on the <span className="font-medium">Supplier Dashboard</span>.</li>
+          <li>Select the <span className="font-medium">date</span> and the <span className="font-medium">outlet</span> you are supplying.</li>
+          <li>Use <span className="font-medium">Add Item</span> to enter each product’s quantity and buying price. Click <span className="font-medium">Save</span> to store your draft.</li>
+          <li>When all supplies are correct, click <span className="font-medium">Submit &amp; Lock</span>. This locks the day’s opening stock for attendants.</li>
+          <li>Record any <span className="font-medium">Transfers</span> between outlets (they automatically adjust both outlets’ openings).</li>
+          <li>If an adjustment is required after locking, use <span className="font-medium">Request Modification</span> to notify the Supervisor.</li>
+          <li>Use <span className="font-medium">Download PDF</span> / <span className="font-medium">Print</span> on the dashboard to get a supply report for filing.</li>
+        </ol>
+        <p className="text-xs mt-3 text-gray-400 md:text-gray-500">
+          Note: Your code is provided by Admin. If you cannot log in, contact the Supervisor or Admin to confirm your active status and code.
+        </p>
+      </section>
     </main>
   );
 }

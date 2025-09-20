@@ -1,14 +1,33 @@
 // src/app/supervisor/dashboard/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-/* ================= Keys ================= */
+/* ================= Existing Review Keys (unchanged) ================= */
 const WASTE_KEY     = "attendant_waste_reviews";    // waste entries needing review
 const EXPENSES_KEY  = "attendant_expenses_reviews"; // expenses needing review
 const EXCESS_KEY    = "excess_adjustments_reviews"; // excess approval requests
 const DEFICIT_KEY   = "deficit_disputes_reviews";   // deficit disputes
 const DEPOSITS_KEY  = "attendant_deposits_reviews"; // deposit monitoring
+
+/* ================= Extra keys used only for summary/supply view ================= */
+const depositsKey = (date: string, outlet: string) =>
+  `attendant_deposits_${date}_${outlet}`;
+const expensesDailyKey = (date: string, outlet: string) =>
+  `attendant_expenses_${date}_${outlet}`;
+const summaryKey = (date: string, outlet: string) =>
+  `attendant_summary_${date}_${outlet}`; // { expectedKsh, depositedKsh, expensesKsh, cashAtTill, varianceKsh }
+const WASTE_MAP = (date: string, outlet: string) =>
+  `attendant_waste_${date}_${outlet}`; // { [itemKey]: qty }
+
+/* ---- Supply (opening) rows (used by attendants) ---- */
+const supplierOpeningKey = (date: string, outlet: string) =>
+  `supplier_opening_${date}_${outlet}`; // Array<{ itemKey: string; qty: number }>
+
+// Admin outlets (names list)
+const ADMIN_OUTLETS_KEY = "admin_outlets";
+
+type AdminOutlet = { id?: string; name: string; code?: string; active: boolean };
 
 type ReviewItem = {
   id: string;
@@ -20,24 +39,59 @@ type ReviewItem = {
   state: "pending" | "approved" | "rejected";
 };
 
+type KPIRow = {
+  outlet: string;
+  expected: number;
+  deposits: number;
+  expenses: number;
+  cashAtTill: number;
+  variance: number;
+  wasteQty: number;
+};
+
+function ymd() {
+  return new Date().toISOString().split("T")[0];
+}
+function readJSON<T>(k: string, fb: T): T {
+  try {
+    const raw = localStorage.getItem(k);
+    return raw ? (JSON.parse(raw) as T) : fb;
+  } catch {
+    return fb;
+  }
+}
+function fmt(n: number) {
+  return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 export default function SupervisorDashboard() {
+  /* ========= Filters ========= */
+  const [date, setDate] = useState<string>(ymd());
+  const [outlets, setOutlets] = useState<AdminOutlet[]>([]);
+  const [selectedOutlet, setSelectedOutlet] = useState<string>("__ALL__");
+
+  /* ========= Tabs (added "supply") ========= */
   const [tab, setTab] = useState<
-    "waste" | "expenses" | "excess" | "deficit" | "deposits"
+    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply"
   >("waste");
 
+  /* ========= Review lists (existing) ========= */
   const [waste, setWaste] = useState<ReviewItem[]>([]);
   const [expenses, setExpenses] = useState<ReviewItem[]>([]);
   const [excess, setExcess] = useState<ReviewItem[]>([]);
   const [deficit, setDeficit] = useState<ReviewItem[]>([]);
   const [deposits, setDeposits] = useState<ReviewItem[]>([]);
 
-  // Load on mount
+  // Load review lists + outlets
   useEffect(() => {
     setWaste(read(WASTE_KEY));
     setExpenses(read(EXPENSES_KEY));
     setExcess(read(EXCESS_KEY));
     setDeficit(read(DEFICIT_KEY));
     setDeposits(read(DEPOSITS_KEY));
+
+    const outs = readJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
+    setOutlets((outs || []).filter(o => o?.name));
   }, []);
 
   const updateState = (
@@ -49,7 +103,6 @@ export default function SupervisorDashboard() {
       r.id === id ? { ...r, state } : r
     );
     save(key, list);
-    // update local state
     if (key === WASTE_KEY) setWaste(list);
     if (key === EXPENSES_KEY) setExpenses(list);
     if (key === EXCESS_KEY) setExcess(list);
@@ -57,39 +110,258 @@ export default function SupervisorDashboard() {
     if (key === DEPOSITS_KEY) setDeposits(list);
   };
 
+  /* ========= KPI Summary (date + outlet/all) ========= */
+  const outletNames = useMemo(
+    () =>
+      selectedOutlet === "__ALL__"
+        ? outlets.map((o) => o.name)
+        : [selectedOutlet],
+    [selectedOutlet, outlets]
+  );
+
+  const kpis: KPIRow[] = useMemo(() => {
+    const rows: KPIRow[] = [];
+    outletNames.forEach((outletName) => {
+      if (!outletName) return;
+
+      // Preferred summary saved by attendants
+      const summary = readJSON<{
+        expectedKsh: number;
+        depositedKsh: number;
+        expensesKsh: number;
+        cashAtTill: number;
+        varianceKsh: number;
+      } | null>(summaryKey(date, outletName), null);
+
+      // Fallbacks
+      const deps = readJSON<Array<{ amount: number }>>(
+        depositsKey(date, outletName),
+        []
+      );
+      const exps = readJSON<Array<{ amount: number }>>(
+        expensesDailyKey(date, outletName),
+        []
+      );
+      const totalDeposits = deps.reduce((a, d) => a + (Number(d.amount) || 0), 0);
+      const totalExpenses = exps.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+
+      const wasteMap = readJSON<Record<string, number>>(
+        WASTE_MAP(date, outletName),
+        {}
+      );
+      const wasteQty = Object.values(wasteMap).reduce(
+        (a, n) => a + (Number(n) || 0),
+        0
+      );
+
+      rows.push({
+        outlet: outletName,
+        expected: summary?.expectedKsh ?? 0,
+        deposits: summary?.depositedKsh ?? totalDeposits,
+        expenses: summary?.expensesKsh ?? totalExpenses,
+        cashAtTill:
+          summary?.cashAtTill ??
+          Math.max(
+            0,
+            (summary?.expectedKsh ?? 0) -
+              (summary?.depositedKsh ?? totalDeposits) -
+              (summary?.expensesKsh ?? totalExpenses)
+          ),
+        variance: summary?.varianceKsh ?? 0,
+        wasteQty,
+      });
+    });
+    return rows;
+  }, [date, outletNames]);
+
+  const agg = useMemo(
+    () =>
+      kpis.reduce(
+        (a, r) => {
+          a.expected += r.expected;
+          a.deposits += r.deposits;
+          a.expenses += r.expenses;
+          a.cashAtTill += r.cashAtTill;
+          a.variance += r.variance;
+          a.wasteQty += r.wasteQty;
+          return a;
+        },
+        {
+          expected: 0,
+          deposits: 0,
+          expenses: 0,
+          cashAtTill: 0,
+          variance: 0,
+          wasteQty: 0,
+        }
+      ),
+    [kpis]
+  );
+
+  /* ========= Actions ========= */
+  const downloadPDF = () => window.print();
+  const logout = () => {
+    try {
+      sessionStorage.removeItem("supervisor_code");
+      sessionStorage.removeItem("supervisor_name");
+    } catch {}
+    window.location.href = "/supervisor";
+  };
+
   return (
-    <main className="p-6 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Supervisor Dashboard</h1>
-        <nav className="flex gap-2">
-          <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>
-            Waste Review
-          </TabBtn>
-          <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>
-            Expenses Review
-          </TabBtn>
-          <TabBtn active={tab === "excess"} onClick={() => setTab("excess")}>
-            Excess Approvals
-          </TabBtn>
-          <TabBtn active={tab === "deficit"} onClick={() => setTab("deficit")}>
-            Deficit Disputes
-          </TabBtn>
-          <TabBtn active={tab === "deposits"} onClick={() => setTab("deposits")}>
-            Deposits Monitor
-          </TabBtn>
-        </nav>
+    <main className="p-6 max-w-7xl mx-auto">
+      {/* Header / Filters */}
+      <header className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 className="text-2xl font-semibold">Supervisor Dashboard</h1>
+          <p className="text-sm text-gray-600">
+            Review waste/expenses/excess/deficit/deposits & monitor sales and deposits by outlet.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            className="border rounded-xl p-2 text-sm"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+          <select
+            className="border rounded-xl p-2 text-sm"
+            value={selectedOutlet}
+            onChange={(e) => setSelectedOutlet(e.target.value)}
+          >
+            <option value="__ALL__">All Outlets</option>
+            {outlets.map((o) => (
+              <option key={o.name} value={o.name}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <button className="px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
+            Download PDF
+          </button>
+          <button className="px-3 py-2 rounded-xl border text-sm" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </header>
 
-      {tab === "waste" && <ReviewTable title="Waste Requests" data={waste} onAction={(id, state) => updateState(WASTE_KEY, id, state)} />}
-      {tab === "expenses" && <ReviewTable title="Expense Requests" data={expenses} onAction={(id, state) => updateState(EXPENSES_KEY, id, state)} />}
-      {tab === "excess" && <ReviewTable title="Excess Approvals" data={excess} onAction={(id, state) => updateState(EXCESS_KEY, id, state)} />}
-      {tab === "deficit" && <ReviewTable title="Deficit Disputes" data={deficit} onAction={(id, state) => updateState(DEFICIT_KEY, id, state)} />}
+      {/* KPI Summary */}
+      <section className="rounded-2xl border p-4 mb-6">
+        <h2 className="font-semibold mb-3">
+          Summary — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})
+        </h2>
+        <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KPI label="Expected Sales (Ksh)" value={`Ksh ${fmt(agg.expected)}`} />
+          <KPI label="Deposits (Ksh)" value={`Ksh ${fmt(agg.deposits)}`} />
+          <KPI label="Expenses (Ksh)" value={`Ksh ${fmt(agg.expenses)}`} />
+          <KPI label="Cash at Till (Ksh)" value={`Ksh ${fmt(agg.cashAtTill)}`} />
+          <KPI label="Variance (Ksh)" value={`Ksh ${fmt(agg.variance)}`} />
+        </div>
+        <div className="grid md:grid-cols-3 gap-3 mt-3">
+          <KPI label="Waste (Qty)" value={fmt(agg.wasteQty)} />
+        </div>
+
+        {/* Per-outlet breakdown */}
+        {selectedOutlet === "__ALL__" && (
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Outlet</th>
+                  <th>Expected</th>
+                  <th>Deposits</th>
+                  <th>Expenses</th>
+                  <th>Cash @ Till</th>
+                  <th>Variance</th>
+                  <th>Waste (Qty)</th>
+                  <th>Deposited?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpis.length === 0 ? (
+                  <tr>
+                    <td className="py-2 text-gray-500" colSpan={8}>
+                      No data.
+                    </td>
+                  </tr>
+                ) : (
+                  kpis.map((r) => (
+                    <tr key={r.outlet} className="border-b">
+                      <td className="py-2">{r.outlet}</td>
+                      <td>Ksh {fmt(r.expected)}</td>
+                      <td>Ksh {fmt(r.deposits)}</td>
+                      <td>Ksh {fmt(r.expenses)}</td>
+                      <td>Ksh {fmt(r.cashAtTill)}</td>
+                      <td>Ksh {fmt(r.variance)}</td>
+                      <td>{fmt(r.wasteQty)}</td>
+                      <td>{r.deposits > 0 ? "Yes" : "No"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Menu (added Supply View) */}
+      <nav className="flex gap-2 mb-4">
+        <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>
+          Waste Review
+        </TabBtn>
+        <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>
+          Expenses Review
+        </TabBtn>
+        <TabBtn active={tab === "excess"} onClick={() => setTab("excess")}>
+          Excess Approvals
+        </TabBtn>
+        <TabBtn active={tab === "deficit"} onClick={() => setTab("deficit")}>
+          Deficit Disputes
+        </TabBtn>
+        <TabBtn active={tab === "deposits"} onClick={() => setTab("deposits")}>
+          Deposits Monitor
+        </TabBtn>
+        <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>
+          Supply View
+        </TabBtn>
+      </nav>
+
+      {tab === "waste" && (
+        <ReviewTable
+          title="Waste Requests"
+          data={waste}
+          onAction={(id, state) => updateState(WASTE_KEY, id, state)}
+        />
+      )}
+      {tab === "expenses" && (
+        <ReviewTable
+          title="Expense Requests"
+          data={expenses}
+          onAction={(id, state) => updateState(EXPENSES_KEY, id, state)}
+        />
+      )}
+      {tab === "excess" && (
+        <ReviewTable
+          title="Excess Approvals"
+          data={excess}
+          onAction={(id, state) => updateState(EXCESS_KEY, id, state)}
+        />
+      )}
+      {tab === "deficit" && (
+        <ReviewTable
+          title="Deficit Disputes"
+          data={deficit}
+          onAction={(id, state) => updateState(DEFICIT_KEY, id, state)}
+        />
+      )}
+
       {tab === "deposits" && (
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Deposits Monitor</h2>
           <table className="w-full text-sm border">
             <thead>
-              <tr className="border-b">
+              <tr className="text-left border-b">
                 <th className="p-2">Date</th>
                 <th>Outlet</th>
                 <th>Amount</th>
@@ -109,7 +381,7 @@ export default function SupervisorDashboard() {
                 <tr key={d.id} className="border-b">
                   <td className="p-2">{d.date}</td>
                   <td className="p-2">{d.outlet}</td>
-                  <td className="p-2">Ksh {d.amount}</td>
+                  <td className="p-2">Ksh {fmt(d.amount)}</td>
                   <td className="p-2">{d.note || "—"}</td>
                   <td className="p-2">{d.state}</td>
                 </tr>
@@ -118,11 +390,78 @@ export default function SupervisorDashboard() {
           </table>
         </section>
       )}
+
+      {/* ===== Supply View (new tab) ===== */}
+      {tab === "supply" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">
+            Supply View — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})
+          </h2>
+
+          {selectedOutlet === "__ALL__" ? (
+            <div className="space-y-6">
+              {outlets.map((o) => (
+                <SupplyTable key={o.name} date={date} outlet={o.name} />
+              ))}
+            </div>
+          ) : (
+            <SupplyTable date={date} outlet={selectedOutlet} />
+          )}
+        </section>
+      )}
     </main>
   );
 }
 
-/* ===== Review Table ===== */
+/* ===== Reusable supply table (reads supplier_opening_*) ===== */
+function SupplyTable({ date, outlet }: { date: string; outlet: string }) {
+  const rows =
+    readJSON<Array<{ itemKey: string; qty: number }>>(
+      supplierOpeningKey(date, outlet),
+      []
+    ) || [];
+  const totalQty = rows.reduce((a, r) => a + (Number(r.qty) || 0), 0);
+
+  return (
+    <div>
+      <div className="text-sm font-medium mb-2">{outlet}</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left border-b">
+              <th className="py-2">Item</th>
+              <th>Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td className="py-2 text-gray-500" colSpan={2}>
+                  No opening recorded.
+                </td>
+              </tr>
+            ) : (
+              rows.map((r, i) => (
+                <tr key={`${r.itemKey}-${i}`} className="border-b">
+                  <td className="py-2">{r.itemKey?.toUpperCase?.() || r.itemKey}</td>
+                  <td>{fmt(Number(r.qty) || 0)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td className="py-2 font-semibold">Total Qty</td>
+              <td className="font-semibold">{fmt(totalQty)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Review Table (existing) ===== */
 function ReviewTable({
   title,
   data,
@@ -137,7 +476,7 @@ function ReviewTable({
       <h2 className="font-semibold mb-3">{title}</h2>
       <table className="w-full text-sm border">
         <thead>
-          <tr className="border-b">
+          <tr className="text-left border-b">
             <th className="p-2">Date</th>
             <th>Outlet</th>
             <th>Item</th>
@@ -160,7 +499,7 @@ function ReviewTable({
               <td className="p-2">{r.date}</td>
               <td className="p-2">{r.outlet}</td>
               <td className="p-2">{r.item || "—"}</td>
-              <td className="p-2">Ksh {r.amount}</td>
+              <td className="p-2">Ksh {fmt(r.amount)}</td>
               <td className="p-2">{r.note || "—"}</td>
               <td className="p-2">{r.state}</td>
               <td className="p-2 flex gap-2">
@@ -189,7 +528,7 @@ function ReviewTable({
   );
 }
 
-/* ===== Helpers ===== */
+/* ===== Small helpers ===== */
 function read(key: string): ReviewItem[] {
   try {
     const raw = localStorage.getItem(key);
@@ -217,10 +556,19 @@ function TabBtn({
     <button
       onClick={onClick}
       className={`px-3 py-1.5 rounded-xl border text-sm ${
-        active ? "bg-black text-white" : "bg-white"
+        active ? "bg-black text-white" : "" /* no white background */
       }`}
     >
       {children}
     </button>
+  );
+}
+
+function KPI({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border p-4">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-xl font-semibold mt-1">{value}</div>
+    </div>
   );
 }

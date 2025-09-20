@@ -1,6 +1,8 @@
+// src/app/admin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 /** =============== Types =============== */
 type Unit = "kg" | "pcs";
@@ -33,12 +35,12 @@ type AdminTab =
   | "outlets"
   | "products"
   | "pricebook"
-  | "supply"    // NEW
-  | "reports"   // NEW
+  | "supply"
+  | "reports"
   | "expenses"
   | "data";
 
-/** NEW: people codes (login identities) */
+/** People & Codes */
 type PersonCode = {
   id: string;
   name: string;
@@ -47,10 +49,10 @@ type PersonCode = {
   active: boolean;
 };
 
-/** NEW: attendant scope type (code -> outlet + product keys) */
+/** Attendant scope (code -> outlet + product keys) */
 type ScopeMap = Record<string, { outlet: string; productKeys: string[] }>;
 
-/** NEW: per-outlet pricebook */
+/** per-outlet pricebook */
 type PriceBook = Record<
   string, // outlet name
   Record<
@@ -63,29 +65,28 @@ type PriceBook = Record<
 const K_OUTLETS   = "admin_outlets";
 const K_PRODUCTS  = "admin_products";
 const K_EXPENSES  = "admin_expenses";
-/** NEW keys */
 const K_CODES     = "admin_codes";
 const K_SCOPE     = "attendant_scope";
 const K_PRICEBOOK = "admin_pricebook";
 
 /** =============== Cross-page dynamic keys (read-only here) =============== */
 const supplierOpeningKey = (date: string, outlet: string) =>
-  `supplier_opening_${date}_${outlet}`; // OpeningItem[]: {itemKey, qty}
+  `supplier_opening_${date}_${outlet}`;
 const supplierCostKey = (date: string, outlet: string) =>
-  `supplier_cost_${date}_${outlet}`;    // { [itemKey]: unitBuyPrice }
+  `supplier_cost_${date}_${outlet}`;
 
 const summaryKey = (date: string, outlet: string) =>
-  `attendant_summary_${date}_${outlet}`; // { expectedKsh, depositedKsh, expensesKsh, cashAtTill, varianceKsh }
+  `attendant_summary_${date}_${outlet}`;
 const attClosingKey = (date: string, outlet: string) =>
-  `attendant_closing_${date}_${outlet}`; // Record<key, number>
+  `attendant_closing_${date}_${outlet}`;
 const attWasteKey = (date: string, outlet: string) =>
-  `attendant_waste_${date}_${outlet}`;   // Record<key, number>
+  `attendant_waste_${date}_${outlet}`;
 const expensesKeyDyn = (date: string, outlet: string) =>
-  `attendant_expenses_${date}_${outlet}`; // Array<{name, amount}>
+  `attendant_expenses_${date}_${outlet}`;
 
 const AMEND_REQUESTS_KEY = "amend_requests";
 
-/** =============== Defaults (match what you’ve been using) =============== */
+/** =============== Defaults =============== */
 function seedDefaultOutlets(): Outlet[] {
   return [
     { id: rid(), name: "Bright",   code: "BR1234", active: true },
@@ -94,7 +95,6 @@ function seedDefaultOutlets(): Outlet[] {
     { id: rid(), name: "Baraka C", code: "C1234",  active: true },
   ];
 }
-
 function seedDefaultProducts(): Product[] {
   return [
     { id: rid(), key: "beef",      name: "Beef",            unit: "kg",  sellPrice: 740, active: true },
@@ -107,7 +107,6 @@ function seedDefaultProducts(): Product[] {
     { id: rid(), key: "mutura",    name: "Mutura",          unit: "pcs", sellPrice: 60,  active: true },
   ];
 }
-
 function seedDefaultExpenses(): FixedExpense[] {
   return [
     { id: rid(), name: "Wages",       amount: 0,  frequency: "monthly", active: true },
@@ -119,29 +118,39 @@ function seedDefaultExpenses(): FixedExpense[] {
 
 /** =============== Page =============== */
 export default function AdminPage() {
+  const router = useRouter();
+
+  // ---------- Auth guard + warm welcome ----------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const ok = sessionStorage.getItem("admin_auth") === "true";
+    if (!ok) {
+      router.replace("/admin/login");
+    }
+  }, [router]);
+
+  const [welcome, setWelcome] = useState<string>("");
+  useEffect(() => {
+    const msg = sessionStorage.getItem("admin_welcome");
+    if (msg) setWelcome(msg);
+  }, []);
+
   const [tab, setTab] = useState<AdminTab>("outlets");
 
-  // Outlets
   const [outlets, setOutlets]   = useState<Outlet[]>([]);
-  // Products
   const [products, setProducts] = useState<Product[]>([]);
-  // Expenses
   const [expenses, setExpenses] = useState<FixedExpense[]>([]);
-  /** NEW: people codes */
   const [codes, setCodes]       = useState<PersonCode[]>([]);
-  /** NEW: scopes */
   const [scope, setScope]       = useState<ScopeMap>({});
-  /** NEW: pricebook */
   const [pricebook, setPricebook] = useState<PriceBook>({});
 
-  // Data tab helpers (include new stores in backup)
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
     [outlets, products, expenses, codes, scope, pricebook]
   );
   const [importText, setImportText] = useState("");
 
-  /** ----- Load on first mount (or if storage empty, seed defaults) ----- */
+  /** ----- Load once ----- */
   useEffect(() => {
     try {
       const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
@@ -150,30 +159,27 @@ export default function AdminPage() {
       const c = parseLS<PersonCode[]>(K_CODES) ?? [];
       const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
       const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
-      setOutlets(o);
-      setProducts(p);
-      setExpenses(e);
-      setCodes(c);
-      setScope(s);
-      setPricebook(pb);
+      setOutlets(o); setProducts(p); setExpenses(e);
+      setCodes(c); setScope(s); setPricebook(pb);
     } catch {
       setOutlets(seedDefaultOutlets());
       setProducts(seedDefaultProducts());
       setExpenses(seedDefaultExpenses());
-      setCodes([]);
-      setScope({});
-      setPricebook({});
+      setCodes([]); setScope({}); setPricebook({});
     }
   }, []);
 
-  /** ----- Manual SAVE buttons (only addition) ----- */
+  /** ----- Explicit save buttons (unchanged) ----- */
   const saveOutletsNow  = () => { saveLS(K_OUTLETS, outlets);  alert("Outlets & Codes saved ✅"); };
   const saveProductsNow = () => { saveLS(K_PRODUCTS, products); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = () => { saveLS(K_EXPENSES, expenses); alert("Fixed Expenses saved ✅"); };
-  /** NEW */
   const saveCodesNow    = () => { saveLS(K_CODES, codes);       alert("People & Codes saved ✅"); };
   const saveScopesNow   = () => { saveLS(K_SCOPE, scope);       alert("Assignments (attendants) saved ✅"); };
   const savePricebook   = () => { saveLS(K_PRICEBOOK, pricebook); alert("Outlet pricebook saved ✅"); };
+
+  /** ----- Autosave so settings persist immediately ----- */
+  useEffect(() => { saveLS(K_PRICEBOOK, pricebook); }, [pricebook]);
+  useEffect(() => { saveLS(K_SCOPE, scope);         }, [scope]);
 
   /** ----- CRUD helpers ----- */
   // Outlets
@@ -194,12 +200,9 @@ export default function AdminPage() {
   const updateExpense = (id: string, patch: Partial<FixedExpense>) =>
     setExpenses(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
 
-  /** NEW: People & Codes CRUD */
+  /** People & Codes CRUD */
   const addCode = () =>
-    setCodes(v => [
-      { id: rid(), name: "", code: "", role: "attendant", active: true },
-      ...v,
-    ]);
+    setCodes(v => [{ id: rid(), name: "", code: "", role: "attendant", active: true }, ...v]);
   const removeCode = (id: string) => setCodes(v => v.filter(c => c.id !== id));
   const updateCode = (id: string, patch: Partial<PersonCode>) =>
     setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch } : c)));
@@ -207,40 +210,43 @@ export default function AdminPage() {
   /** ----- Assignments (Attendants) ----- */
   const activeOutlets = useMemo(() => outlets.filter(o => o.active), [outlets]);
   const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
-  const attendantCodes = useMemo(
-    () => codes.filter(c => c.role === "attendant"),
-    [codes]
-  );
+  const attendantCodes = useMemo(() => codes.filter(c => c.role === "attendant"), [codes]);
+
+  const normCode = (c: string) => c.replace(/\s+/g, "").toLowerCase();
 
   const setScopeOutlet = (code: string, outletName: string) => {
-    if (!code.trim()) return;
+    const key = normCode(code || "");
+    if (!key) return;
     setScope(prev => {
       const next = { ...prev };
-      const entry = next[code] ?? { outlet: outletName, productKeys: [] as string[] };
+      const entry = next[key] ?? { outlet: outletName, productKeys: [] as string[] };
       entry.outlet = outletName;
-      next[code] = entry;
+      next[key] = { ...entry };
       return next;
     });
   };
 
   const toggleScopeProduct = (code: string, prodKey: string) => {
-    if (!code.trim()) return;
+    const key = normCode(code || "");
+    if (!key) return;
     setScope(prev => {
       const next = { ...prev };
-      const entry = next[code] ?? { outlet: "", productKeys: [] as string[] };
-      entry.productKeys = entry.productKeys.includes(prodKey)
+      const entry = next[key] ?? { outlet: "", productKeys: [] as string[] };
+      const has = entry.productKeys.includes(prodKey);
+      const productKeys = has
         ? entry.productKeys.filter(k => k !== prodKey)
         : [...entry.productKeys, prodKey];
-      next[code] = entry;
+      next[key] = { ...entry, productKeys };
       return next;
     });
   };
 
   const clearScopeForCode = (code: string) => {
-    if (!code.trim()) return;
+    const key = normCode(code || "");
+    if (!key) return;
     setScope(prev => {
       const next = { ...prev };
-      delete next[code];
+      delete next[key];
       return next;
     });
   };
@@ -268,18 +274,11 @@ export default function AdminPage() {
 
   const copyGlobalToOutlet = (outletName: string) => {
     const map: Record<string, { sellPrice: number; active: boolean }> = {};
-    products.forEach(p => {
-      map[p.key] = { sellPrice: p.sellPrice, active: p.active };
-    });
+    products.forEach(p => { map[p.key] = { sellPrice: p.sellPrice, active: p.active }; });
     setPricebook(prev => ({ ...prev, [outletName]: map }));
   };
-
   const resetOutletPricebook = (outletName: string) => {
-    setPricebook(prev => {
-      const next = { ...prev };
-      delete next[outletName]; // fallback to global
-      return next;
-    });
+    setPricebook(prev => { const next = { ...prev }; delete next[outletName]; return next; });
   };
 
   /** ----- Reports helpers (read-only) ----- */
@@ -287,19 +286,15 @@ export default function AdminPage() {
   const [repDate, setRepDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [repMode, setRepMode] = useState<RangeMode>("day");
 
-  const datesInRange = useMemo(() => {
-    return repMode === "day" ? [repDate] : getWeekDates(repDate);
-  }, [repDate, repMode]);
+  const datesInRange = useMemo(() => (repMode === "day" ? [repDate] : getWeekDates(repDate)), [repDate, repMode]);
 
-  // Daily/Weekly totals per outlet (using saved summaries)
   const repRows = useMemo(() => {
     return outlets.map(o => {
       let expectedKsh = 0, depositedKsh = 0, expensesKsh = 0, cashAtTill = 0, varianceKsh = 0;
       let hasData = false;
       datesInRange.forEach(d => {
         const s = readJSON<{ expectedKsh:number; depositedKsh:number; expensesKsh:number; cashAtTill:number; varianceKsh:number } | null>(
-          summaryKey(d, o.name),
-          null
+          summaryKey(d, o.name), null
         );
         if (s) {
           expectedKsh += s.expectedKsh || 0;
@@ -327,16 +322,13 @@ export default function AdminPage() {
     );
   }, [repRows]);
 
-  // Sales-by-item & waste over the same date range (computed from opening, closing, waste)
   const salesByItem = useMemo(() => {
     const m = new Map<string, { name: string; unit: Unit; soldQty: number; wasteQty: number; revenue: number }>();
-
     datesInRange.forEach(d => {
       outlets.forEach(o => {
         const openingArr = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(d, o.name), []);
         const closingMap = readJSON<Record<string, number>>(attClosingKey(d, o.name), {});
         const wasteMap   = readJSON<Record<string, number>>(attWasteKey(d, o.name), {});
-
         openingArr.forEach(row => {
           const prod = products.find(p => p.key === row.itemKey);
           const unit = (prod?.unit ?? "kg") as Unit;
@@ -344,7 +336,6 @@ export default function AdminPage() {
           const closing = Number(closingMap[row.itemKey] || 0);
           const waste = Number(wasteMap[row.itemKey] || 0);
           const sold = Math.max(0, Number(row.qty || 0) - closing - waste);
-
           const rec = m.get(row.itemKey) || { name: prod?.name ?? row.itemKey, unit, soldQty: 0, wasteQty: 0, revenue: 0 };
           rec.soldQty  += sold;
           rec.wasteQty += waste;
@@ -353,11 +344,9 @@ export default function AdminPage() {
         });
       });
     });
-
     return Array.from(m.entries()).map(([key, v]) => ({ key, ...v }));
   }, [datesInRange, outlets, products]);
 
-  // Expenses Monitor across range
   const expensesMonitor = useMemo(() => {
     const perOutlet = outlets.map(o => {
       let total = 0;
@@ -371,11 +360,9 @@ export default function AdminPage() {
     return { perOutlet, totalAll };
   }, [datesInRange, outlets]);
 
-  // Rough supply cost for range (from supplier cost snapshots)
   const supplyCost = useMemo(() => {
     let totalQty = 0, totalAmount = 0;
     const perItem = new Map<string, { qty: number; amount: number }>();
-
     datesInRange.forEach(d => {
       outlets.forEach(o => {
         const open = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(d, o.name), []);
@@ -384,24 +371,18 @@ export default function AdminPage() {
           const qty = Number(r.qty || 0);
           const price = Number(costMap[r.itemKey] || 0);
           const amt = qty * price;
-
-          totalQty += qty;
-          totalAmount += amt;
-
+          totalQty += qty; totalAmount += amt;
           const prev = perItem.get(r.itemKey) || { qty: 0, amount: 0 };
-          prev.qty += qty;
-          prev.amount += amt;
+          prev.qty += qty; prev.amount += amt;
           perItem.set(r.itemKey, prev);
         });
       });
     });
-
     const byItem = Array.from(perItem.entries()).map(([key, v]) => {
       const p = products.find(pp => pp.key === key);
       const unit = (p?.unit ?? "kg") as Unit;
       return { key, name: p?.name ?? key, unit, qty: v.qty, avgPrice: v.qty > 0 ? v.amount / v.qty : 0, amount: v.amount };
     });
-
     return { totalQty, totalAmount, byItem };
   }, [datesInRange, outlets, products]);
 
@@ -432,14 +413,13 @@ export default function AdminPage() {
     alert("Expense dispute sent to Supervisor.");
   };
 
-  /** ----- Supply view helpers (read-only) ----- */
+  /** ----- Supply view (read-only) ----- */
   const [supDate, setSupDate] = useState<string>(new Date().toISOString().slice(0,10));
   const ALL = "__ALL__";
   const [supOutletName, setSupOutletName] = useState<string>(ALL);
 
   const supplyItems = useMemo(() => {
     const acc = new Map<string, { name: string; unit: Unit; qty: number; amount: number }>();
-
     const collect = (outletName: string) => {
       const open = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(supDate, outletName), []);
       const costMap = readJSON<Record<string, number>>(supplierCostKey(supDate, outletName), {});
@@ -449,20 +429,12 @@ export default function AdminPage() {
         const price = Number(costMap[r.itemKey] || 0);
         const qty = Number(r.qty || 0);
         const amt = qty * price;
-
         const prev = acc.get(r.itemKey) || { name: prod?.name ?? r.itemKey, unit, qty: 0, amount: 0 };
-        prev.qty += qty;
-        prev.amount += amt;
+        prev.qty += qty; prev.amount += amt;
         acc.set(r.itemKey, prev);
       });
     };
-
-    if (supOutletName === ALL) {
-      outlets.forEach(o => collect(o.name));
-    } else {
-      collect(supOutletName);
-    }
-
+    if (supOutletName === ALL) { outlets.forEach(o => collect(o.name)); } else { collect(supOutletName); }
     const list = Array.from(acc.entries()).map(([itemKey, v]) => {
       const avg = v.qty > 0 ? v.amount / v.qty : 0;
       return { itemKey, name: v.name, unit: v.unit, qty: v.qty, buyPrice: avg, amount: v.amount };
@@ -470,79 +442,46 @@ export default function AdminPage() {
     return list.sort((a,b)=>a.name.localeCompare(b.name));
   }, [supDate, supOutletName, outlets, products]);
 
-  const supTotals = useMemo(() => {
-    return {
-      qty: supplyItems.reduce((a, r) => a + (Number(r.qty)||0), 0),
-      amount: supplyItems.reduce((a, r) => a + (Number(r.amount)||0), 0),
-    };
-  }, [supplyItems]);
-
-  /** ----- Data tab actions ----- */
-  const exportJSON = () => {
-    const blob = new Blob([payload], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `admin-settings-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  const importJSON = () => {
-    try {
-      const parsed = JSON.parse(importText);
-      if (parsed.outlets)   setOutlets(parsed.outlets);
-      if (parsed.products)  setProducts(parsed.products);
-      if (parsed.expenses)  setExpenses(parsed.expenses);
-      if (parsed.codes)     setCodes(parsed.codes);
-      if (parsed.scope)     setScope(parsed.scope);
-      if (parsed.pricebook) setPricebook(parsed.pricebook);
-      alert("Imported settings successfully.");
-    } catch (e: any) {
-      alert("Failed to import: " + e.message);
-    }
-  };
-
-  const resetDefaults = () => {
-    if (!confirm("Reset ALL admin settings to defaults?")) return;
-    setOutlets(seedDefaultOutlets());
-    setProducts(seedDefaultProducts());
-    setExpenses(seedDefaultExpenses());
-    setCodes([]);
-    setScope({});
-    setPricebook({});
-  };
-
-  const clearAll = () => {
-    if (!confirm("Remove ALL admin settings from this browser?")) return;
-    localStorage.removeItem(K_OUTLETS);
-    localStorage.removeItem(K_PRODUCTS);
-    localStorage.removeItem(K_EXPENSES);
-    localStorage.removeItem(K_CODES);
-    localStorage.removeItem(K_SCOPE);
-    localStorage.removeItem(K_PRICEBOOK);
-    setOutlets([]);
-    setProducts([]);
-    setExpenses([]);
-    setCodes([]);
-    setScope({});
-    setPricebook({});
-  };
+  const supTotals = useMemo(() => ({
+    qty: supplyItems.reduce((a, r) => a + (Number(r.qty)||0), 0),
+    amount: supplyItems.reduce((a, r) => a + (Number(r.amount)||0), 0),
+  }), [supplyItems]);
 
   /** ----- Render ----- */
   return (
     <main className="p-6 max-w-7xl mx-auto">
-      <header className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
-        <nav className="flex gap-2">
-          <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
-          <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
-          <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
-          <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
-          <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
-          <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
-          <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
-        </nav>
+      <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
+          {welcome && (
+            <p className="text-sm text-gray-600 mt-1">{welcome}</p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            className="border rounded-xl px-3 py-2 text-sm"
+            onClick={() => {
+              sessionStorage.removeItem("admin_auth");
+              sessionStorage.removeItem("admin_welcome");
+              router.replace("/admin/login");
+            }}
+            title="Sign out"
+          >
+            Logout
+          </button>
+        </div>
       </header>
+
+      <nav className="flex gap-2 mb-6">
+        <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
+        <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
+        <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
+        <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
+        <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
+        <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
+        <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
+      </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
       {tab === "outlets" && (
@@ -682,62 +621,85 @@ export default function AdminPage() {
             )}
 
             {attendantCodes.map(ac => {
-              const code = (ac.code || "").trim();
-              const entry = scope[code] || { outlet: "", productKeys: [] as string[] };
+              const displayCode = (ac.code || "").trim();
+              const key = normCode(displayCode);
+              const entry = scope[key] || { outlet: "", productKeys: [] as string[] };
               const sel = new Set(entry.productKeys);
+              const quickAddOptions = activeProducts.filter(p => !sel.has(p.key));
 
               return (
                 <div key={`assign-${ac.id}`} className="rounded-xl border p-3 mb-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="text-sm">
                       <span className="font-medium">{ac.name || "Unnamed"}</span>{" "}
-                      <span className="text-gray-500">({code || "no code"})</span>
+                      <span className="text-gray-500">({displayCode || "no code"})</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <label className="text-xs text-gray-600">Outlet</label>
                       <select
                         className="border rounded-xl p-2 text-sm"
                         value={entry.outlet}
-                        onChange={e => setScopeOutlet(code, e.target.value)}
+                        onChange={e => setScopeOutlet(displayCode, e.target.value)}
                       >
                         <option value="">— select —</option>
                         {activeOutlets.map(o => (
                           <option key={o.id} value={o.name}>{o.name}</option>
                         ))}
                       </select>
-                      <button
-                        className="border rounded-xl px-3 py-1 text-xs"
-                        onClick={() => { saveScopesNow(); }}
-                      >
+                      <button className="border rounded-xl px-3 py-1 text-xs" onClick={saveScopesNow}>
                         Apply/Save
                       </button>
-                      {scope[code] && (
-                        <button
-                          className="border rounded-xl px-3 py-1 text-xs"
-                          onClick={() => clearScopeForCode(code)}
-                        >
+                      {scope[key] && (
+                        <button className="border rounded-xl px-3 py-1 text-xs" onClick={() => clearScopeForCode(displayCode)}>
                           Clear
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Tick UI for products */}
+                  {/* Product chips — click anywhere to toggle; keep checkbox for structure */}
                   <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-3">
-                    {activeProducts.map(p => (
-                      <label
-                        key={`tick-${p.id}`}
-                        className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 ${sel.has(p.key) ? "bg-black text-white" : "bg-white"}`}
-                        title={p.name}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={sel.has(p.key)}
-                          onChange={() => toggleScopeProduct(code, p.key)}
-                        />
-                        <span>{p.name}</span>
-                      </label>
-                    ))}
+                    {activeProducts.map(p => {
+                      const checked = sel.has(p.key);
+                      return (
+                        <label
+                          key={`tick-${p.id}`}
+                          className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 cursor-pointer ${checked ? "bg-black text-white" : ""}`}
+                          title={p.name}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            toggleScopeProduct(displayCode, p.key);
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="pointer-events-none"
+                            readOnly
+                            checked={checked}
+                          />
+                          <span>{p.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Quick add dropdown */}
+                  <div className="flex items-center gap-2 mt-3">
+                    <span className="text-xs text-gray-600">Quick add:</span>
+                    <select
+                      className="border rounded-xl p-2 text-sm"
+                      defaultValue=""
+                      onChange={(e) => {
+                        const k = e.target.value;
+                        if (k) toggleScopeProduct(displayCode, k);
+                        e.currentTarget.value = "";
+                      }}
+                    >
+                      <option value="" disabled>Select product…</option>
+                      {quickAddOptions.map(p => (
+                        <option key={`qa-${p.id}`} value={p.key}>{p.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               );
@@ -840,7 +802,7 @@ export default function AdminPage() {
                 <option value="">— select outlet —</option>
                 {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
               </select>
-              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>savePricebook()}>Save</button>
+              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={savePricebook}>Save</button>
             </div>
           </div>
 
@@ -1252,7 +1214,6 @@ function TabBtn(props: React.PropsWithChildren<{active: boolean; onClick(): void
     </button>
   );
 }
-
 function KPI({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border p-4">
@@ -1269,8 +1230,8 @@ function fmt(v: number) { return (v || 0).toLocaleString(undefined, { maximumFra
 
 function getWeekDates(dateStr: string): string[] {
   const d = new Date(`${dateStr}T00:00:00`);
-  const day = d.getDay(); // 0 Sun ... 6 Sat
-  const diffToMonday = (day + 6) % 7; // days since Monday
+  const day = d.getDay();
+  const diffToMonday = (day + 6) % 7;
   const monday = new Date(d);
   monday.setDate(d.getDate() - diffToMonday);
   const out: string[] = [];
@@ -1281,21 +1242,14 @@ function getWeekDates(dateStr: string): string[] {
   }
   return out;
 }
-
 function parseLS<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch { return null; }
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : null; }
+  catch { return null; }
 }
 function saveLS<T>(key: string, value: T) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 function readJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; }
+  catch { return fallback; }
 }

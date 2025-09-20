@@ -1,0 +1,29 @@
+// prisma/schema.prisma
+
+// Learn more: https://pris.ly/d/prisma-schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MpesaPayment {
+  id                String   @id @default(cuid())
+  source            String   // "C2B" | "STK"
+  transType         String?
+  mpesaReceipt      String?  @unique
+  amount            Int
+  msisdn            String?
+  payerName         String?
+  businessShortcode String?
+  tillNumber        String?
+  billRef           String?
+  accountReference  String?
+  transTime         DateTime
+  outlet            String?
+  raw               Json
+  createdAt         DateTime @default(now())
+}

@@ -1,3 +1,4 @@
+// src/app/supplier/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -468,9 +469,124 @@ export default function SupplierDashboard(): JSX.Element {
     window.print();
   };
 
+  /* ===== Download PDF report (detail + general summary) ===== */
+  const downloadPdfReport = (): void => {
+    // Detail for selected outlet/date (use current rows)
+    const detailRows = rows.map(r => {
+      const name = productByKey[r.itemKey]?.name ?? r.itemKey.toUpperCase();
+      const line = r.qty * r.buyPrice;
+      return { name, qty: r.qty, unit: r.unit, buyPrice: r.buyPrice, line };
+    });
+    const detailTotal = detailRows.reduce((a, r) => a + r.line, 0);
+
+    // General summary across outlets for date
+    const general = outlets.map(o => {
+      const outletName = (o.name || "").trim();
+      const list = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, outletName), []);
+      let kgQty = 0;
+      let pcsQty = 0;
+      let totalBuy = 0;
+      for (const r of list) {
+        if (r.unit === "kg") kgQty += r.qty || 0;
+        else pcsQty += r.qty || 0;
+        totalBuy += (r.qty || 0) * (r.buyPrice || 0);
+      }
+      return { outlet: outletName, kgQty, pcsQty, totalBuy };
+    });
+
+    const genTotals = general.reduce(
+      (a, g) => ({ kgQty: a.kgQty + g.kgQty, pcsQty: a.pcsQty + g.pcsQty, totalBuy: a.totalBuy + g.totalBuy }),
+      { kgQty: 0, pcsQty: 0, totalBuy: 0 }
+    );
+
+    const html = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Supply Report - ${dateStr}</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 24px; color: #111; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 20px 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 8px; border: 1px solid #ddd; text-align: left; }
+  tfoot td { font-weight: 600; }
+  .muted { color: #555; }
+</style>
+</head>
+<body>
+  <h1>Supply Report</h1>
+  <div class="muted">Date: ${dateStr}</div>
+  <div class="muted">Outlet (detail): ${selectedOutletName || "—"}</div>
+
+  <h2>Outlet Supply Detail</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Buy Price</th><th>Line Total</th></tr></thead>
+    <tbody>
+      ${detailRows.map(r => `
+        <tr>
+          <td>${r.name}</td>
+          <td>${(r.qty || 0).toLocaleString()}</td>
+          <td>${r.unit}</td>
+          <td>${(r.buyPrice || 0).toLocaleString()}</td>
+          <td>${(r.line || 0).toLocaleString()}</td>
+        </tr>
+      `).join("")}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="4">Total Buying Cost</td><td>${detailTotal.toLocaleString()}</td></tr>
+    </tfoot>
+  </table>
+
+  <h2>General Supply Summary (All Outlets)</h2>
+  <table>
+    <thead><tr><th>Outlet</th><th>KG Qty</th><th>PCS Qty</th><th>Total Buying Cost</th></tr></thead>
+    <tbody>
+      ${general.map(g => `
+        <tr>
+          <td>${g.outlet}</td>
+          <td>${g.kgQty.toLocaleString()}</td>
+          <td>${g.pcsQty.toLocaleString()}</td>
+          <td>${g.totalBuy.toLocaleString()}</td>
+        </tr>
+      `).join("")}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td>Totals</td>
+        <td>${genTotals.kgQty.toLocaleString()}</td>
+        <td>${genTotals.pcsQty.toLocaleString()}</td>
+        <td>${genTotals.totalBuy.toLocaleString()}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <script>
+    window.onload = () => { window.print(); };
+  </script>
+</body>
+</html>
+    `.trim();
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
   /* =========================
      Render
      ========================= */
+  const logout = () => {
+    try {
+      sessionStorage.removeItem("supplier_name");
+      sessionStorage.removeItem("supplier_code");
+    } catch {}
+    window.location.href = "/supplier";
+  };
+
   return (
     <main className="p-6 max-w-6xl mx-auto">
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -500,6 +616,10 @@ export default function SupplierDashboard(): JSX.Element {
               </option>
             ))}
           </select>
+          {/* NEW: Logout next to date/select */}
+          <button className="border rounded-xl px-3 py-2 text-sm" onClick={logout}>
+            Logout
+          </button>
         </div>
       </header>
 
@@ -510,6 +630,10 @@ export default function SupplierDashboard(): JSX.Element {
           <div className="flex gap-2">
             <button className="border rounded-xl px-3 py-1 text-xs" onClick={saveDraft} disabled={!selectedOutletName}>
               Save
+            </button>
+            {/* NEW: Download PDF */}
+            <button className="border rounded-xl px-3 py-1 text-xs" onClick={downloadPdfReport} disabled={!selectedOutletName}>
+              Download PDF
             </button>
             <button
               className="border rounded-xl px-3 py-1 text-xs bg-black text-white"
@@ -661,7 +785,7 @@ export default function SupplierDashboard(): JSX.Element {
             ))}
           </select>
 
-          <select
+        <select
             className="border rounded-xl p-2 text-sm"
             value={txToId}
             onChange={(e) => setTxToId(e.target.value)}
