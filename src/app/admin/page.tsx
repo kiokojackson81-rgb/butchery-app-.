@@ -135,6 +135,7 @@ export default function AdminPage() {
   const [codes, setCodes]       = useState<PersonCode[]>([]);
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
+  const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
 
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
@@ -158,6 +159,8 @@ export default function AdminPage() {
       setProducts(seedDefaultProducts());
       setExpenses(seedDefaultExpenses());
       setCodes([]); setScope({}); setPricebook({});
+    } finally {
+      setHydrated(true); // <<< mark as loaded
     }
   }, []);
 
@@ -169,9 +172,9 @@ export default function AdminPage() {
   const saveScopesNow   = () => { saveLS(K_SCOPE, scope);       alert("Assignments (attendants) saved ✅"); };
   const savePricebook   = () => { saveLS(K_PRICEBOOK, pricebook); alert("Outlet pricebook saved ✅"); };
 
-  /** ----- Autosave so settings persist immediately ----- */
-  useEffect(() => { saveLS(K_PRICEBOOK, pricebook); }, [pricebook]);
-  useEffect(() => { saveLS(K_SCOPE, scope);         }, [scope]);
+  /** ----- Autosave so settings persist immediately (guarded) ----- */
+  useEffect(() => { if (hydrated) saveLS(K_PRICEBOOK, pricebook); }, [hydrated, pricebook]); // <<< gated
+  useEffect(() => { if (hydrated) saveLS(K_SCOPE, scope);         }, [hydrated, scope]);     // <<< gated
 
   /** ----- CRUD helpers ----- */
   // Outlets
@@ -309,7 +312,7 @@ export default function AdminPage() {
         expensesKsh: a.expensesKsh + r.expensesKsh,
         cashAtTill: a.cashAtTill + r.cashAtTill,
         varianceKsh: a.varianceKsh + r.varianceKsh
-      }),
+      } ),
       { expectedKsh:0, depositedKsh:0, expensesKsh:0, cashAtTill:0, varianceKsh:0 }
     );
   }, [repRows]);
@@ -1239,7 +1242,38 @@ function parseLS<T>(key: string): T | null {
 function saveLS<T>(key: string, value: T) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
+/** Backup/Restore helpers (unchanged) */
+function exportJSON() {
+  try {
+    const dump = {
+      [K_OUTLETS]:   JSON.parse(localStorage.getItem(K_OUTLETS)   || "[]"),
+      [K_PRODUCTS]:  JSON.parse(localStorage.getItem(K_PRODUCTS)  || "[]"),
+      [K_EXPENSES]:  JSON.parse(localStorage.getItem(K_EXPENSES)  || "[]"),
+      [K_CODES]:     JSON.parse(localStorage.getItem(K_CODES)     || "[]"),
+      [K_SCOPE]:     JSON.parse(localStorage.getItem(K_SCOPE)     || "{}"),
+      [K_PRICEBOOK]: JSON.parse(localStorage.getItem(K_PRICEBOOK) || "{}"),
+    };
+    const a = document.createElement("a");
+    a.href = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dump, null, 2));
+    a.download = `butchery-admin-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+  } catch {}
+}
+function resetDefaults() {
+  saveLS(K_OUTLETS,   seedDefaultOutlets());
+  saveLS(K_PRODUCTS,  seedDefaultProducts());
+  saveLS(K_EXPENSES,  seedDefaultExpenses());
+  alert("Defaults restored. Reload to see them.");
+}
+function clearAll() {
+  [K_OUTLETS, K_PRODUCTS, K_EXPENSES, K_CODES, K_SCOPE, K_PRICEBOOK].forEach(k => localStorage.removeItem(k));
+  alert("All admin data cleared from this browser.");
+}
 function readJSON<T>(key: string, fallback: T): T {
-  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; }
-  catch { return fallback; }
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
