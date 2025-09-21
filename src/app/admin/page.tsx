@@ -120,15 +120,7 @@ function seedDefaultExpenses(): FixedExpense[] {
 export default function AdminPage() {
   const router = useRouter();
 
-  // ---------- Auth guard + warm welcome ----------
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const ok = sessionStorage.getItem("admin_auth") === "true";
-    if (!ok) {
-      router.replace("/admin/login");
-    }
-  }, [router]);
-
+  // ---------- warm welcome (kept) ----------
   const [welcome, setWelcome] = useState<string>("");
   useEffect(() => {
     const msg = sessionStorage.getItem("admin_welcome");
@@ -457,20 +449,18 @@ export default function AdminPage() {
             <p className="text-sm text-gray-600 mt-1">{welcome}</p>
           )}
         </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            className="border rounded-xl px-3 py-2 text-sm"
-            onClick={() => {
-              sessionStorage.removeItem("admin_auth");
-              sessionStorage.removeItem("admin_welcome");
-              router.replace("/admin/login");
-            }}
-            title="Sign out"
-          >
-            Logout
-          </button>
-        </div>
+        {/* ✅ Logout button */}
+        <button
+          className="border rounded-xl px-3 py-2 text-sm"
+          onClick={() => {
+            sessionStorage.removeItem("admin_auth");
+            sessionStorage.removeItem("admin_welcome");
+            router.replace("/admin/login");
+          }}
+          title="Sign out"
+        >
+          Logout
+        </button>
       </header>
 
       <nav className="flex gap-2 mb-6">
@@ -657,7 +647,7 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Product chips — click anywhere to toggle; keep checkbox for structure */}
+                  {/* Product chips */}
                   <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-3">
                     {activeProducts.map(p => {
                       const checked = sel.has(p.key);

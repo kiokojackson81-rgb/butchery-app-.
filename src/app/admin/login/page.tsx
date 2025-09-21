@@ -1,11 +1,10 @@
-// src/app/admin/login/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const ADMIN_EMAIL = "kiokojackson81@gmail.com";
-const ADMIN_PASSWORD = "Ads0k015";
+const ADMIN_PASSWORD = "Ads0k015@#"; // no spaces
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -14,22 +13,28 @@ export default function AdminLoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
 
+  // If already authed, skip the form
+  useEffect(() => {
+    if (sessionStorage.getItem("admin_auth") === "true") {
+      router.replace("/admin");
+    }
+  }, [router]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    // simple, local check (no network, no side-effects elsewhere)
-    if (email.trim().toLowerCase() === ADMIN_EMAIL && pw === ADMIN_PASSWORD) {
-      // Mark a lightweight session flag for optional checks
-      sessionStorage.setItem("admin_auth", "true");
-      sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — let’s make today legendary!");
-      // A tiny friendly delay so users see the message
-      alert("Welcome boss 👑 — systems are green and ready!");
-      router.replace("/admin");
+    const okEmail = email.trim().toLowerCase() === ADMIN_EMAIL;
+    const okPw = pw === ADMIN_PASSWORD;
+
+    if (!okEmail || !okPw) {
+      setError("Invalid email or password.");
       return;
     }
 
-    setError("Invalid email or password. Please try again, boss.");
+    sessionStorage.setItem("admin_auth", "true");
+    sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+    router.replace("/admin");
   };
 
   return (
@@ -38,7 +43,7 @@ export default function AdminLoginPage() {
         <header className="mb-5">
           <h1 className="text-2xl font-semibold">Admin Login</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Welcome boss! 🔐 Sign in to access the control room.
+            Sign in to access the control room.
           </p>
         </header>
 
@@ -79,20 +84,15 @@ export default function AdminLoginPage() {
             </div>
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <button
-            type="submit"
-            className="w-full rounded-xl bg-black text-white py-2"
-          >
+          <button type="submit" className="w-full rounded-xl bg-black text-white py-2">
             Sign in
           </button>
         </form>
 
         <footer className="mt-5 text-xs text-gray-600">
-          Tip: You can add a tiny check in your admin dashboard to read{" "}
-          <code>sessionStorage.admin_auth</code> and bounce back to{" "}
-          <code>/admin/login</code> if it’s not set — no other pages are touched.
+          This login only protects the <code>/admin</code> section. Attendant/Supervisor areas are unaffected.
         </footer>
       </div>
     </main>

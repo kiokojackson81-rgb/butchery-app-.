@@ -16,8 +16,8 @@ export default function AttendantLoginPage() {
       alert("Please enter your attendant code.");
       return;
     }
-    // Save code in session storage for outlet mapping
-    sessionStorage.setItem("attendant_code", code.trim());
+    // ✅ Save code in session storage for outlet mapping (always lowercase)
+    sessionStorage.setItem("attendant_code", code.trim().toLowerCase());
     // Redirect to attendant dashboard
     router.push("/attendant/dashboard");
   };
