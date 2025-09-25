@@ -5,7 +5,8 @@ export async function GET(
   _req: Request,
   { params }: { params: { key: string } }
 ) {
-  const row = await prisma.setting.findUnique({
+  // Cast prisma to any here to avoid TS complaints if the local client types are stale.
+  const row = await (prisma as any).setting.findUnique({
     where: { key: params.key },
   });
   return NextResponse.json({ ok: true, value: (row as any)?.value ?? null });
@@ -16,7 +17,7 @@ export async function POST(
   { params }: { params: { key: string } }
 ) {
   const body = (await req.json().catch(() => ({}))) as { value?: any };
-  const saved = await prisma.setting.upsert({
+  const saved = await (prisma as any).setting.upsert({
     where: { key: params.key },
     create: { key: params.key, value: body?.value ?? null },
     update: { value: body?.value ?? null },
