@@ -2,6 +2,7 @@
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 generator client {
@@ -141,11 +142,9 @@ model Setting {
 
 /// Tiny table for attendant assignments (code → outlet + products)
 model AttendantAssignment {
-  /// normalized attendant code (lowercased, no spaces)
-  code        String   @id
-  /// outlet name exactly as used in the rest of your app
+  id          String   @id @default(cuid())
+  code        String   @unique
   outlet      String
-  /// JSON array of product keys, e.g. ["beef","goat"]
-  productKeys Json
+  productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
 }
