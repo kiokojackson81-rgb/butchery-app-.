@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB } from "@/lib/settingsBridge";
+import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 
 /** =============== Types =============== */
 type Unit = "kg" | "pcs";
@@ -1230,6 +1230,27 @@ export default function AdminPage() {
                 <button className="border rounded-xl px-3 py-2 text-sm" onClick={exportJSON}>Download JSON</button>
                 <button className="border rounded-xl px-3 py-2 text-sm" onClick={resetDefaults}>Reset Defaults</button>
                 <button className="border rounded-xl px-3 py-2 text-sm" onClick={clearAll}>Clear All</button>
+                {/* Thin persistence helpers */}
+                <button
+                  className="border rounded-xl px-3 py-2 text-sm"
+                  title="Push all admin keys to database"
+                  onClick={async () => {
+                    try { await pushAllToDB(); alert("Pushed all admin settings to DB ✅"); }
+                    catch { alert("Failed to push to DB. Check network/DB."); }
+                  }}
+                >
+                  Force Sync to DB
+                </button>
+                <button
+                  className="border rounded-xl px-3 py-2 text-sm"
+                  title="Reload admin keys from database into localStorage"
+                  onClick={async () => {
+                    try { await hydrateLocalStorageFromDB(); alert("Hydrated from DB ✅. Reload to reflect in UI."); }
+                    catch { alert("Failed to hydrate from DB. Check network/DB."); }
+                  }}
+                >
+                  Refresh from DB
+                </button>
               </div>
             </div>
 
