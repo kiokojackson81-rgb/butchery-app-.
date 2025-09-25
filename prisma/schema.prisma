@@ -1,8 +1,7 @@
 // prisma/schema.prisma
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")            // pooled (pgbouncer) for serverless/runtime
-  directUrl = env("DATABASE_URL_UNPOOLED")   // unpooled for migrations/introspection
+  url       = env("DATABASE_URL")
 }
 
 generator client {
