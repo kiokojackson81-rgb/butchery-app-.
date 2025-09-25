@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 
 /* ================= Existing Review Keys (unchanged) ================= */
 const WASTE_KEY     = "attendant_waste_reviews";    // waste entries needing review
@@ -84,6 +85,9 @@ export default function SupervisorDashboard() {
 
   // Load review lists + outlets
   useEffect(() => {
+    // Ensure admin settings are hydrated from DB first (thin persistence)
+    (async () => { try { await hydrateLocalStorageFromDB(); } catch {} })();
+
     setWaste(read(WASTE_KEY));
     setExpenses(read(EXPENSES_KEY));
     setExcess(read(EXCESS_KEY));
@@ -237,6 +241,27 @@ export default function SupervisorDashboard() {
               </option>
             ))}
           </select>
+          {/* Thin persistence controls (optional) */}
+          <button
+            className="px-3 py-2 rounded-xl border text-sm"
+            title="Reload Admin settings from DB"
+            onClick={async () => {
+              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
+              catch { alert("Failed to hydrate from DB."); }
+            }}
+          >
+            Refresh Admin
+          </button>
+          <button
+            className="px-3 py-2 rounded-xl border text-sm"
+            title="Push Admin settings from this browser to DB"
+            onClick={async () => {
+              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
+              catch { alert("Failed to push to DB."); }
+            }}
+          >
+            Sync to DB
+          </button>
           <button className="px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
             Download PDF
           </button>
