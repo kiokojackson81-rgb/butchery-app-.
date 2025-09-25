@@ -1,29 +1,131 @@
-// prisma/schema.prisma
-
-// Learn more: https://pris.ly/d/prisma-schema
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-model MpesaPayment {
-  id                String   @id @default(cuid())
-  source            String   // "C2B" | "STK"
-  transType         String?
-  mpesaReceipt      String?  @unique
-  amount            Int
-  msisdn            String?
-  payerName         String?
-  businessShortcode String?
-  tillNumber        String?
-  billRef           String?
-  accountReference  String?
-  transTime         DateTime
-  outlet            String?
-  raw               Json
-  createdAt         DateTime @default(now())
+enum PersonRole {
+  attendant
+  supervisor
+  supplier
+}
+
+enum DepositStatus {
+  VALID
+  PENDING
+  INVALID
+}
+
+model Outlet {
+  id      String  @id @default(cuid())
+  name    String  @unique
+  code    String?
+  active  Boolean @default(true)
+}
+
+model Product {
+  id        String  @id @default(cuid())
+  key       String  @unique
+  name      String
+  unit      String  // "kg" | "pcs"
+  sellPrice Int
+  active    Boolean @default(true)
+}
+
+model PersonCode {
+  id     String     @id @default(cuid())
+  name   String?
+  code   String     @unique
+  role   PersonRole
+  active Boolean    @default(true)
+}
+
+model AttendantScope {
+  id         String         @id @default(cuid())
+  codeNorm   String         @unique
+  outletName String
+  products   ScopeProduct[]
+}
+
+model ScopeProduct {
+  id         String          @id @default(cuid())
+  scopeId    String
+  productKey String
+  scope      AttendantScope  @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeId, productKey])
+}
+
+model PricebookRow {
+  id         String  @id @default(cuid())
+  outletName String
+  productKey String
+  sellPrice  Int
+  active     Boolean @default(true)
+
+  @@unique([outletName, productKey])
+}
+
+model SupplyOpeningRow {
+  id         String  @id @default(cuid())
+  date       String  // YYYY-MM-DD
+  outletName String
+  itemKey    String
+  qty        Float
+  buyPrice   Float   @default(0)
+  unit       String  // "kg" | "pcs"
+
+  @@unique([date, outletName, itemKey])
+}
+
+model SupplyTransfer {
+  id             String   @id @default(cuid())
+  date           String   // YYYY-MM-DD
+  fromOutletName String
+  toOutletName   String
+  itemKey        String
+  qty            Float
+  unit           String
+  createdAt      DateTime @default(now())
+}
+
+model AttendantClosing {
+  id         String  @id @default(cuid())
+  date       String  // YYYY-MM-DD
+  outletName String
+  itemKey    String
+  closingQty Float
+  wasteQty   Float   @default(0)
+
+  @@unique([date, outletName, itemKey])
+}
+
+model AttendantDeposit {
+  id         String        @id @default(cuid())
+  date       String        // YYYY-MM-DD
+  outletName String
+  code       String?
+  note       String?
+  amount     Int
+  status     DepositStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+}
+
+model AttendantExpense {
+  id         String   @id @default(cuid())
+  date       String   // YYYY-MM-DD
+  outletName String
+  name       String
+  amount     Int
+  createdAt  DateTime  @default(now())
+}
+
+model ActivePeriod {
+  id            String   @id @default(cuid())
+  outletName    String   @unique
+  periodStartAt DateTime
 }

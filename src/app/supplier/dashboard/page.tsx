@@ -123,6 +123,11 @@ function saveLS<T>(key: string, value: T): void {
     // ignore
   }
 }
+async function postJSON<T>(url: string, body: any): Promise<T> {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 function toNumStr(s: string): number {
   return s.trim() === "" ? 0 : Number(s);
 }
@@ -280,7 +285,7 @@ export default function SupplierDashboard(): JSX.Element {
   };
 
   /* ===== Save (draft) ===== */
-  const saveDraft = (): void => {
+  const saveDraft = async (): Promise<void> => {
     if (!selectedOutletName) return;
     // Save full rows for supplier UI
     saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), rows);
@@ -293,14 +298,16 @@ export default function SupplierDashboard(): JSX.Element {
       return acc;
     }, {});
     saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
+    // Persist to server (non-blocking)
+    try { await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows }); } catch {}
     alert("Saved.");
   };
 
   /* ===== Submit (lock) ===== */
-  const submitDay = (): void => {
+  const submitDay = async (): Promise<void> => {
     if (!selectedOutletName) return;
     // Save full + minimal + cost
-    saveDraft();
+    await saveDraft();
     // Lock
     saveLS(supplierSubmittedKey(dateStr, selectedOutletName), true);
     setSubmitted(true);
@@ -362,7 +369,7 @@ export default function SupplierDashboard(): JSX.Element {
     if (!txToId && outlets.length > 1) setTxToId(outlets[1].id);
   }, [outlets, txFromId, txToId]);
 
-  const addTransfer = (): void => {
+  const addTransfer = async (): Promise<void> => {
     const fromName = (outletById[txFromId]?.name ?? "").trim();
     const toName = (outletById[txToId]?.name ?? "").trim();
     if (!fromName || !toName) {
@@ -403,6 +410,9 @@ export default function SupplierDashboard(): JSX.Element {
     adjOutletOpening(fromName, txProductKey, -qtyNum, p.unit);
     // 3) Adjust TO outlet (full + minimal)
     adjOutletOpening(toName, txProductKey, +qtyNum, p.unit);
+
+    // 4) Persist transfer to server (non-blocking)
+    try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
 
     alert("Transfer saved and applied to both outlets’ opening.");
     setTxQty("");

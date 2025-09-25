@@ -267,6 +267,11 @@ export default function AttendantDashboardPage() {
       varianceKsh: computed.varianceKsh,
     });
 
+    // Persist closing/waste to server (non-blocking)
+    try {
+      await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
+    } catch {}
+
     // snapshot for next period
     const openingSnapshot: Record<string, number> = {};
     (openingRowsRaw || []).forEach(r => { openingSnapshot[r.itemKey] = (openingSnapshot[r.itemKey] || 0) + Number(r.qty || 0); });

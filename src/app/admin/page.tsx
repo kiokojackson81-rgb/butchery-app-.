@@ -146,6 +146,29 @@ export default function AdminPage() {
   /** ----- Load once ----- */
   useEffect(() => {
     try {
+      // Optional bootstrap from server if LS empty
+      (async () => {
+        const needsBootstrap =
+          !localStorage.getItem("admin_outlets") ||
+          !localStorage.getItem("admin_products") ||
+          !localStorage.getItem("admin_codes") ||
+          !localStorage.getItem("attendant_scope") ||
+          !localStorage.getItem("admin_pricebook");
+        if (needsBootstrap) {
+          try {
+            const r = await fetch("/api/admin/bootstrap", { cache: "no-store" });
+            if (r.ok) {
+              const j = await r.json();
+              if (j.outlets) localStorage.setItem("admin_outlets", JSON.stringify(j.outlets));
+              if (j.products) localStorage.setItem("admin_products", JSON.stringify(j.products));
+              if (j.codes) localStorage.setItem("admin_codes", JSON.stringify(j.codes));
+              if (j.scope) localStorage.setItem("attendant_scope", JSON.stringify(j.scope));
+              if (j.pricebook) localStorage.setItem("admin_pricebook", JSON.stringify(j.pricebook));
+            }
+          } catch {}
+        }
+      })();
+
       const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
       const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
       const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
@@ -169,8 +192,16 @@ export default function AdminPage() {
   const saveProductsNow = () => { saveLS(K_PRODUCTS, products); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = () => { saveLS(K_EXPENSES, expenses); alert("Fixed Expenses saved ✅"); };
   const saveCodesNow    = () => { saveLS(K_CODES, codes);       alert("People & Codes saved ✅"); };
-  const saveScopesNow   = () => { saveLS(K_SCOPE, scope);       alert("Assignments (attendants) saved ✅"); };
-  const savePricebook   = () => { saveLS(K_PRICEBOOK, pricebook); alert("Outlet pricebook saved ✅"); };
+  const saveScopesNow   = async () => {
+    saveLS(K_SCOPE, scope);
+    try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope, pricebook: {} }) }); } catch {}
+    alert("Assignments (attendants) saved ✅");
+  };
+  const savePricebook   = async () => {
+    saveLS(K_PRICEBOOK, pricebook);
+    try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope: {}, pricebook }) }); } catch {}
+    alert("Outlet pricebook saved ✅");
+  };
 
   /** ----- Autosave so settings persist immediately (guarded) ----- */
   useEffect(() => { if (hydrated) saveLS(K_PRICEBOOK, pricebook); }, [hydrated, pricebook]); // <<< gated
