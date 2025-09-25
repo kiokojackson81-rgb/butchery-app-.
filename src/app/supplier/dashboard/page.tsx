@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
+import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 
 /* =========================
    Types (aligned with Admin)
@@ -630,6 +630,27 @@ export default function SupplierDashboard(): JSX.Element {
               </option>
             ))}
           </select>
+          {/* Thin persistence controls */}
+          <button
+            className="border rounded-xl px-3 py-2 text-sm"
+            title="Reload Admin settings from DB"
+            onClick={async () => {
+              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
+              catch { alert("Failed to hydrate from DB."); }
+            }}
+          >
+            Refresh Admin
+          </button>
+          <button
+            className="border rounded-xl px-3 py-2 text-sm"
+            title="Push Admin settings from this browser to DB"
+            onClick={async () => {
+              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
+              catch { alert("Failed to push to DB."); }
+            }}
+          >
+            Sync to DB
+          </button>
           {/* NEW: Logout next to date/select */}
           <button className="border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
