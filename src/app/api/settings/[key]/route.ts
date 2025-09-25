@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+// Ensure Node.js runtime (Prisma is not Edge-compatible)
+export const runtime = "nodejs";
 import { prisma } from "@/lib/db";
 
 export async function GET(
