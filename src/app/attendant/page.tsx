@@ -11,15 +11,38 @@ export default function AttendantLoginPage() {
 
   const isDisabled = useMemo(() => code.trim().length === 0, [code]);
 
-  const handleLogin = () => {
-    if (!code.trim()) {
-      alert("Please enter your attendant code.");
-      return;
+  const handleLogin = async () => {
+    const raw = code.trim();
+    if (!raw) { alert("Please enter your attendant code."); return; }
+
+    const norm = raw.replace(/\s+/g, "").toLowerCase();
+    try {
+      const res = await fetch("/api/auth/attendant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: norm })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const j = await res.json();
+
+      if (!j || !j.ok || !j.outlet) {
+        alert("Code not recognized or inactive. Please contact admin.");
+        return;
+      }
+
+      // Mirror minimal scope into localStorage for dashboard overlay logic
+      try {
+        const rawScope = localStorage.getItem("attendant_scope");
+        const map = rawScope ? JSON.parse(rawScope) as Record<string, { outlet: string; productKeys: string[] }> : {};
+        map[norm] = { outlet: j.outlet, productKeys: Array.isArray(j.productKeys) ? j.productKeys : [] };
+        localStorage.setItem("attendant_scope", JSON.stringify(map));
+      } catch {}
+
+      sessionStorage.setItem("attendant_code", norm);
+      router.push("/attendant/dashboard");
+    } catch (e) {
+      alert("Login failed. Check your network or try again.");
     }
-    // ✅ Save code in session storage for outlet mapping (always lowercase)
-    sessionStorage.setItem("attendant_code", code.trim().toLowerCase());
-    // Redirect to attendant dashboard
-    router.push("/attendant/dashboard");
   };
 
   return (

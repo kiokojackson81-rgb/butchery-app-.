@@ -138,3 +138,14 @@ model Setting {
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
+
+/// Tiny table for attendant assignments (code → outlet + products)
+model AttendantAssignment {
+  /// normalized attendant code (lowercased, no spaces)
+  code        String   @id
+  /// outlet name exactly as used in the rest of your app
+  outlet      String
+  /// JSON array of product keys, e.g. ["beef","goat"]
+  productKeys Json
+  updatedAt   DateTime @updatedAt
+}

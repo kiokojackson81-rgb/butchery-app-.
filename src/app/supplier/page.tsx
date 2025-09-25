@@ -63,47 +63,49 @@ export default function SupplierLoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError("");
-
-    const people = loadPeople();
     const input = norm(code);
+    if (!input) { setError("Enter your supplier code."); return; }
 
-    // Preferred: admin_codes with role === "supplier"
-    let found = people.find(
-      (p) => p.active === true && p.role === "supplier" && norm(p.code) === input
-    );
-
-    // Legacy fallback: admin_staff* (role may be missing)
-    if (!found) {
-      const legacy = loadLegacy();
-      const m = legacy.find(
-        (s) =>
-          s.active === true &&
-          (s.role === "supplier" || s.role == null) &&
-          norm(s.code) === input
-      );
-      if (m) {
-        found = {
-          id: m.id,
-          name: m.name,
-          code: m.code,
-          role: (m.role as PersonCode["role"]) || "supplier",
-          active: m.active,
-        };
+    // Try API first (DB-backed)
+    try {
+      const res = await fetch("/api/auth/supplier", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: input }),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        if (j?.ok) {
+          sessionStorage.setItem("supplier_code", j.code || input);
+          sessionStorage.setItem("supplier_name", j.name || "Supplier");
+          router.push("/supplier/dashboard");
+          return;
+        }
       }
-    }
+    } catch {}
 
-    if (!found) {
-      setError("Invalid supplier code.");
-      return;
-    }
+    // Fallback to local lists when API/DB unavailable
+    try {
+      const people = loadPeople();
+      let found = people.find((p) => p.active === true && p.role === "supplier" && norm(p.code) === input);
+      if (!found) {
+        const legacy = loadLegacy();
+        const m = legacy.find((s) => s.active === true && (s.role === "supplier" || s.role == null) && norm(s.code) === input);
+        if (m) {
+          found = { id: m.id, name: m.name, code: m.code, role: (m.role as PersonCode["role"]) || "supplier", active: m.active } as PersonCode;
+        }
+      }
+      if (found) {
+        sessionStorage.setItem("supplier_code", found.code);
+        sessionStorage.setItem("supplier_name", found.name || "Supplier");
+        router.push("/supplier/dashboard");
+        return;
+      }
+    } catch {}
 
-    // Session for dashboard
-    sessionStorage.setItem("supplier_code", found.code);
-    sessionStorage.setItem("supplier_name", found.name || "Supplier");
-
-    router.push("/supplier/dashboard");
+    setError("Invalid supplier code.");
   };
 
   return (

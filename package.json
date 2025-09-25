@@ -11,6 +11,8 @@
     "prisma:push": "prisma db push",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "db:check": "node scripts/checkDb.mjs",
+    "db:seed:assignments": "node scripts/seedAssignments.mjs",
     "postinstall": "prisma generate",
     "postbuild": "prisma migrate deploy"
   },

@@ -29,25 +29,47 @@ export default function SupervisorLogin() {
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
 
-  const login = () => {
+  const login = async () => {
     setErr("");
     const input = norm(code);
-    const people = loadPeople();
-    let found = people.find(p => p.active && p.role==="supervisor" && norm(p.code)===input);
+    if (!input) { setErr("Enter your supervisor code."); return; }
 
-    if(!found){
-      const legacy = loadLegacy();
-      const m = legacy.find(s => s.active && (s.role==="supervisor" || !s.role) && norm(s.code)===input);
-      if(m){
-        found = { id:m.id, name:m.name, code:m.code, role:"supervisor", active:m.active };
+    // Try API validation (DB-backed)
+    try {
+      const res = await fetch("/api/auth/supervisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: input })
+      });
+      if (res.ok) {
+        const j = await res.json();
+        if (j?.ok) {
+          sessionStorage.setItem("supervisor_code", j.code || input);
+          sessionStorage.setItem("supervisor_name", j.name || "Supervisor");
+          router.push("/supervisor/dashboard");
+          return;
+        }
       }
-    }
+    } catch {}
 
-    if(!found){ setErr("Invalid supervisor code."); return; }
+    // Fallback: local lists if API/DB unavailable
+    try {
+      const people = loadPeople();
+      let found = people.find(p => p.active && p.role === "supervisor" && norm(p.code) === input);
+      if (!found) {
+        const legacy = loadLegacy();
+        const m = legacy.find(s => s.active && (s.role === "supervisor" || !s.role) && norm(s.code) === input);
+        if (m) { found = { id: m.id, name: m.name, code: m.code, role: "supervisor", active: m.active }; }
+      }
+      if (found) {
+        sessionStorage.setItem("supervisor_code", found.code);
+        sessionStorage.setItem("supervisor_name", found.name || "Supervisor");
+        router.push("/supervisor/dashboard");
+        return;
+      }
+    } catch {}
 
-    sessionStorage.setItem("supervisor_code", found.code);
-    sessionStorage.setItem("supervisor_name", found.name || "Supervisor");
-    router.push("/supervisor/dashboard");
+    setErr("Invalid supervisor code.");
   };
 
   return (

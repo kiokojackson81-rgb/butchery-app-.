@@ -197,11 +197,29 @@ export default function AdminPage() {
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
   const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
+  // Push assignments to relational store
+  const pushAssignmentsToDB = async (map: ScopeMap) => {
+    const res = await fetch("/api/admin/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(map),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<{ ok: boolean; count: number }>
+  };
+
   const saveScopesNow   = async () => {
+    // 1) Persist to localStorage for offline safety
     saveLS(K_SCOPE, scope);
     try { await pushLocalStorageKeyToDB(K_SCOPE as any); } catch {}
-    try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope, pricebook: {} }) }); } catch {}
-    alert("Assignments (attendants) saved ✅");
+
+    // 2) Write-through to server AttendantAssignment
+    try {
+      const r = await pushAssignmentsToDB(scope);
+      alert(`Assignments saved to server ✅ (rows: ${r.count})`);
+    } catch {
+      alert("Saved locally, but failed to sync assignments to server.");
+    }
   };
   const importJSON = () => {
     try {
