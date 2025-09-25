@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB } from "@/lib/settingsBridge";
 
 /** =============== Types =============== */
 type Unit = "kg" | "pcs";
@@ -145,9 +146,12 @@ export default function AdminPage() {
 
   /** ----- Load once ----- */
   useEffect(() => {
-    try {
-      // Optional bootstrap from server if LS empty
-      (async () => {
+    (async () => {
+      try {
+        // 1) DB → localStorage (thin persistence)
+        await hydrateLocalStorageFromDB();
+
+        // 2) If still empty, bootstrap from server relational store
         const needsBootstrap =
           !localStorage.getItem("admin_outlets") ||
           !localStorage.getItem("admin_products") ||
@@ -167,38 +171,57 @@ export default function AdminPage() {
             }
           } catch {}
         }
-      })();
 
-      const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
-      const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
-      const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
-      const c = parseLS<PersonCode[]>(K_CODES) ?? [];
-      const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
-      const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
-      setOutlets(o); setProducts(p); setExpenses(e);
-      setCodes(c); setScope(s); setPricebook(pb);
-    } catch {
-      setOutlets(seedDefaultOutlets());
-      setProducts(seedDefaultProducts());
-      setExpenses(seedDefaultExpenses());
-      setCodes([]); setScope({}); setPricebook({});
-    } finally {
-      setHydrated(true); // <<< mark as loaded
-    }
+        // 3) Read from localStorage into state
+        const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
+        const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
+        const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
+        const c = parseLS<PersonCode[]>(K_CODES) ?? [];
+        const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
+        const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
+        setOutlets(o); setProducts(p); setExpenses(e);
+        setCodes(c); setScope(s); setPricebook(pb);
+      } catch {
+        setOutlets(seedDefaultOutlets());
+        setProducts(seedDefaultProducts());
+        setExpenses(seedDefaultExpenses());
+        setCodes([]); setScope({}); setPricebook({});
+      } finally {
+        setHydrated(true); // mark as loaded
+      }
+    })();
   }, []);
 
   /** ----- Explicit save buttons (unchanged) ----- */
-  const saveOutletsNow  = () => { saveLS(K_OUTLETS, outlets);  alert("Outlets & Codes saved ✅"); };
-  const saveProductsNow = () => { saveLS(K_PRODUCTS, products); alert("Products & Prices saved ✅"); };
-  const saveExpensesNow = () => { saveLS(K_EXPENSES, expenses); alert("Fixed Expenses saved ✅"); };
-  const saveCodesNow    = () => { saveLS(K_CODES, codes);       alert("People & Codes saved ✅"); };
+  const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
+  const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
+  const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
+  const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
   const saveScopesNow   = async () => {
     saveLS(K_SCOPE, scope);
+    try { await pushLocalStorageKeyToDB(K_SCOPE as any); } catch {}
     try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope, pricebook: {} }) }); } catch {}
     alert("Assignments (attendants) saved ✅");
   };
+  const importJSON = () => {
+    try {
+      const obj = JSON.parse(importText || "{}");
+      if (obj && typeof obj === "object") {
+        if (K_OUTLETS in obj) saveLS(K_OUTLETS, (obj as any)[K_OUTLETS]);
+        if (K_PRODUCTS in obj) saveLS(K_PRODUCTS, (obj as any)[K_PRODUCTS]);
+        if (K_EXPENSES in obj) saveLS(K_EXPENSES, (obj as any)[K_EXPENSES]);
+        if (K_CODES in obj) saveLS(K_CODES, (obj as any)[K_CODES]);
+        if (K_SCOPE in obj) saveLS(K_SCOPE, (obj as any)[K_SCOPE]);
+        if (K_PRICEBOOK in obj) saveLS(K_PRICEBOOK, (obj as any)[K_PRICEBOOK]);
+        alert("Imported. Reload to see changes.");
+      }
+    } catch {
+      alert("Invalid JSON. Please check and try again.");
+    }
+  };
   const savePricebook   = async () => {
     saveLS(K_PRICEBOOK, pricebook);
+    try { await pushLocalStorageKeyToDB(K_PRICEBOOK as any); } catch {}
     try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope: {}, pricebook }) }); } catch {}
     alert("Outlet pricebook saved ✅");
   };

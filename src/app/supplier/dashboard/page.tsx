@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 
 /* =========================
    Types (aligned with Admin)
@@ -189,6 +190,9 @@ export default function SupplierDashboard(): JSX.Element {
 
   /* Load admin data + session (once) */
   useEffect(() => {
+    // Hydrate from DB first (thin persistence); non-blocking for UI
+    (async () => { try { await hydrateLocalStorageFromDB(); } catch {} })();
+
     // Outlets (prefer v1 key, fallback to v2)
     const o1 = loadLS<Outlet[]>(K_OUTLETS, []);
     const o2 = o1.length ? o1 : loadLS<Outlet[]>(K_OUTLETS_V2, []);

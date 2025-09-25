@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -78,6 +79,13 @@ export default function AttendantDashboardPage() {
 
   const [tab, setTab] = useState<"stock" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
   const [submitted, setSubmitted] = useState(false);
+
+  // Thin persistence: ensure admin settings are hydrated from DB first
+  useEffect(() => {
+    (async () => {
+      try { await hydrateLocalStorageFromDB(); } catch {}
+    })();
+  }, []);
 
   // Trading period + header KPIs
   const [periodStartAt, setPeriodStartAt] = useState<string | null>(null);
