@@ -429,6 +429,16 @@ export default function AttendantDashboardPage() {
             disabled   // <-- locked to today
           />
           <button
+            className="px-3 py-2 rounded-xl border text-sm"
+            title="Reload Admin settings from DB"
+            onClick={async () => {
+              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
+              catch { alert("Failed to hydrate from DB."); }
+            }}
+          >
+            Refresh Admin
+          </button>
+          <button
             onClick={logout}
             className="px-3 py-2 rounded-xl border text-sm"
             title="Logout"
