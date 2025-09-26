@@ -391,7 +391,7 @@ export default function AttendantDashboardPage() {
 
   if (!outlet) {
     return (
-      <main className="p-6">
+      <main className="mobile-container sticky-safe p-6">
         <h1 className="text-lg font-semibold">Attendant Dashboard</h1>
         <p className="text-sm text-gray-600 mt-2">
           Resolving your outlet from the code… If it doesn’t redirect, go back to{" "}
@@ -402,7 +402,7 @@ export default function AttendantDashboardPage() {
   }
 
   return (
-    <main className="p-6 max-w-7xl mx-auto">
+    <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
@@ -421,15 +421,15 @@ export default function AttendantDashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mobile-scroll-x">
           <input
-            className="border rounded-xl p-2 text-sm opacity-80"
+            className="input-mobile border rounded-xl p-2 text-sm opacity-80"
             type="date"
             value={dateStr}
             disabled   // <-- locked to today
           />
           <button
-            className="px-3 py-2 rounded-xl border text-sm"
+            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
             title="Reload Admin settings from DB"
             onClick={async () => {
               try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
@@ -440,7 +440,7 @@ export default function AttendantDashboardPage() {
           </button>
           <button
             onClick={logout}
-            className="px-3 py-2 rounded-xl border text-sm"
+            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
             title="Logout"
           >
             Logout
@@ -449,7 +449,7 @@ export default function AttendantDashboardPage() {
       </header>
 
       {/* Tabs */}
-      <nav className="mb-4 flex flex-wrap gap-2">
+      <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2">
         <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>
         <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
@@ -463,7 +463,7 @@ export default function AttendantDashboardPage() {
         <>
           <section className="rounded-2xl border p-4 shadow-sm mb-4">
             <h2 className="font-semibold mb-2">Closing & Waste — {dateStr}</h2>
-            <div className="overflow-x-auto">
+            <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b">
@@ -485,7 +485,7 @@ export default function AttendantDashboardPage() {
                       <td>{fmt(r.opening)} {r.unit}</td>
                       <td>
                         <input
-                          className="border rounded-xl p-2 w-28"
+                          className="input-mobile border rounded-xl p-2 w-28"
                           type="number"
                           min={0}
                           step={r.unit === "kg" ? 0.01 : 1}
@@ -503,7 +503,7 @@ export default function AttendantDashboardPage() {
                           ) : (
                             <span className="text-xs text-gray-500">–</span>
                           )}
-                          <button className="text-xs border rounded-xl px-2 py-1"
+                          <button className="btn-mobile text-xs border rounded-xl px-2 py-1"
                             onClick={()=>{
                               const v = askWaste(r.unit, r.waste);
                               if (v !== null) setWaste(r.key, v);
@@ -512,7 +512,7 @@ export default function AttendantDashboardPage() {
                             {toNum(r.waste) > 0 ? "Edit" : "+ Add Waste"}
                           </button>
                           {toNum(r.waste) > 0 && (
-                            <button className="text-xs border rounded-xl px-2 py-1" onClick={()=>setWaste(r.key, "")}>Clear</button>
+                            <button className="btn-mobile text-xs border rounded-xl px-2 py-1" onClick={()=>setWaste(r.key, "")}>Clear</button>
                           )}
                         </div>
                       </td>
@@ -554,7 +554,7 @@ export default function AttendantDashboardPage() {
             <h2 className="font-semibold">Supply (Opening Stock) — {dateStr}</h2>
             <span className="text-xs text-gray-600">Read-only • Disputes go to Supervisor</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -576,7 +576,7 @@ export default function AttendantDashboardPage() {
                     <td>{fmt(r.qty)}</td>
                     <td>{catalog[r.itemKey]?.unit ?? "kg"}</td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={()=>{
+                      <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={()=>{
                         const reason = window.prompt(`Raise a dispute for ${catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()} (qty ${r.qty}). Describe the issue:`, "");
                         if (!reason) return;
                         alert("Dispute submitted to Supervisor.");
@@ -599,7 +599,7 @@ export default function AttendantDashboardPage() {
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
             <button className="border rounded-xl px-3 py-1 text-xs" onClick={addDeposit}>+ Add deposit</button>
           </div>
-          <div className="overflow-x-auto mt-2">
+          <div className="table-wrap mt-2">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left border-b">
@@ -615,17 +615,17 @@ export default function AttendantDashboardPage() {
                 {deposits.map((d)=>(
                   <tr key={d.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-40" placeholder="M-Pesa code" value={d.code}
+                      <input className="input-mobile border rounded-xl p-2 w-40" placeholder="M-Pesa code" value={d.code}
                         onChange={(e)=>upDeposit(d.id,{code:e.target.value})}/>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-28" type="number" min={0} step={1}
+                      <input className="input-mobile border rounded-xl p-2 w-28" type="number" min={0} step={1}
                         placeholder="Ksh" value={d.amount}
                         onChange={(e)=>upDeposit(d.id,{amount:e.target.value===""?"":Number(e.target.value)})}/>
                     </td>
                     <td><StatusPill status={d.status || "PENDING"} /></td>
                     <td>
-                      <input className="border rounded-xl p-2 w-60" placeholder="optional note or paste full SMS"
+                      <input className="input-mobile border rounded-xl p-2 w-60" placeholder="optional note or paste full SMS"
                         value={d.note || ""} onChange={(e)=>upDeposit(d.id,{note:e.target.value})}/>
                     </td>
                     <td><button className="text-xs border rounded-lg px-2 py-1" onClick={()=>rmDeposit(d.id)}>✕</button></td>
@@ -637,7 +637,7 @@ export default function AttendantDashboardPage() {
                   <td className="py-2 font-semibold">Total</td>
                   <td className="font-semibold">Ksh {fmt(deposits.reduce((a,d)=>a+toNum(d.amount),0))}</td>
                   <td colSpan={3} className="text-right">
-                    <button className="px-3 py-2 rounded-xl border" onClick={submitDeposits}>Submit Deposits</button>
+                    <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={submitDeposits}>Submit Deposits</button>
                   </td>
                 </tr>
               </tfoot>
@@ -653,7 +653,7 @@ export default function AttendantDashboardPage() {
             <h3 className="font-semibold">Expenses</h3>
             <button className="border rounded-xl px-3 py-1 text-xs" onClick={addExpense}>+ Add expense</button>
           </div>
-          <div className="overflow-x-auto mt-2">
+          <div className="table-wrap mt-2">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left border-b"><th className="py-2">Name</th><th>Amount (Ksh)</th><th></th></tr>
@@ -663,11 +663,11 @@ export default function AttendantDashboardPage() {
                 {expenses.map((e)=>(
                   <tr key={e.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-44" placeholder="e.g. Sharpen"
+                      <input className="input-mobile border rounded-xl p-2 w-44" placeholder="e.g. Sharpen"
                         value={e.name} onChange={(ev)=>upExpense(e.id,{name:ev.target.value})}/>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-32" type="number" min={0} step={1} placeholder="Ksh"
+                      <input className="input-mobile border rounded-xl p-2 w-32" type="number" min={0} step={1} placeholder="Ksh"
                         value={e.amount} onChange={(ev)=>upExpense(e.id,{amount:ev.target.value===""?"":Number(ev.target.value)})}/>
                     </td>
                     <td><button className="text-xs border rounded-lg px-2 py-1" onClick={()=>rmExpense(e.id)}>✕</button></td>
@@ -679,7 +679,7 @@ export default function AttendantDashboardPage() {
                   <td className="py-2 font-semibold">Total</td>
                   <td className="font-semibold">Ksh {fmt(expenses.reduce((a,e)=>a+toNum(e.amount),0))}</td>
                   <td className="text-right">
-                    <button className="px-3 py-2 rounded-xl border" onClick={submitExpenses}>Submit Expenses</button>
+                    <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={submitExpenses}>Submit Expenses</button>
                   </td>
                 </tr>
               </tfoot>
@@ -693,12 +693,12 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold">Till Payments (Active Period)</h3>
-            <button className="text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
+            <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
           </div>
           <div className="text-sm text-gray-600 mb-2">
             Total Till Payments: <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left border-b">
@@ -732,7 +732,7 @@ export default function AttendantDashboardPage() {
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold">Summary (Active Period)</h3>
             <button
-              className="border rounded-xl px-3 py-1 text-xs"
+              className="btn-mobile border rounded-xl px-3 py-1 text-xs"
               onClick={() => window.print()}
             >
               Download PDF

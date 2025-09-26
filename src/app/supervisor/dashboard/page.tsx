@@ -213,24 +213,24 @@ export default function SupervisorDashboard() {
   };
 
   return (
-    <main className="p-6 max-w-7xl mx-auto">
+    <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
       {/* Header / Filters */}
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-5">
+  <header className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <h1 className="text-2xl font-semibold">Supervisor Dashboard</h1>
           <p className="text-sm text-gray-600">
             Review waste/expenses/excess/deficit/deposits & monitor sales and deposits by outlet.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mobile-scroll-x">
           <input
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
           />
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             value={selectedOutlet}
             onChange={(e) => setSelectedOutlet(e.target.value)}
           >
@@ -243,7 +243,7 @@ export default function SupervisorDashboard() {
           </select>
           {/* Thin persistence controls (optional) */}
           <button
-            className="px-3 py-2 rounded-xl border text-sm"
+            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
             title="Reload Admin settings from DB"
             onClick={async () => {
               try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
@@ -253,7 +253,7 @@ export default function SupervisorDashboard() {
             Refresh Admin
           </button>
           <button
-            className="px-3 py-2 rounded-xl border text-sm"
+            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
             title="Push Admin settings from this browser to DB"
             onClick={async () => {
               try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
@@ -262,10 +262,10 @@ export default function SupervisorDashboard() {
           >
             Sync to DB
           </button>
-          <button className="px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
+          <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
             Download PDF
           </button>
-          <button className="px-3 py-2 rounded-xl border text-sm" onClick={logout}>
+          <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={logout}>
             Logout
           </button>
         </div>
@@ -289,7 +289,7 @@ export default function SupervisorDashboard() {
 
         {/* Per-outlet breakdown */}
         {selectedOutlet === "__ALL__" && (
-          <div className="overflow-x-auto mt-4">
+          <div className="table-wrap mt-4">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -331,7 +331,7 @@ export default function SupervisorDashboard() {
       </section>
 
       {/* Menu (added Supply View) */}
-      <nav className="flex gap-2 mb-4">
+      <nav className="flex gap-2 mb-4 mobile-scroll-x">
         <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>
           Waste Review
         </TabBtn>
@@ -384,6 +384,7 @@ export default function SupervisorDashboard() {
       {tab === "deposits" && (
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Deposits Monitor</h2>
+          <div className="table-wrap">
           <table className="w-full text-sm border">
             <thead>
               <tr className="text-left border-b">
@@ -413,6 +414,7 @@ export default function SupervisorDashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
 
@@ -450,7 +452,7 @@ function SupplyTable({ date, outlet }: { date: string; outlet: string }) {
   return (
     <div>
       <div className="text-sm font-medium mb-2">{outlet}</div>
-      <div className="overflow-x-auto">
+      <div className="table-wrap">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left border-b">

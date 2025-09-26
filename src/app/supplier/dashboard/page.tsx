@@ -602,7 +602,7 @@ export default function SupplierDashboard(): JSX.Element {
   };
 
   return (
-    <main className="p-6 max-w-6xl mx-auto">
+    <main className="mobile-container p-6 max-w-6xl mx-auto">
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Supplier Dashboard</h1>
@@ -612,15 +612,15 @@ export default function SupplierDashboard(): JSX.Element {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 mobile-scroll-x">
           <input
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             type="date"
             value={dateStr}
             onChange={(e) => setDateStr(e.target.value)}
           />
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             value={outletId}
             onChange={(e) => setOutletId(e.target.value)}
           >
@@ -632,7 +632,7 @@ export default function SupplierDashboard(): JSX.Element {
           </select>
           {/* Thin persistence controls */}
           <button
-            className="border rounded-xl px-3 py-2 text-sm"
+            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
             title="Reload Admin settings from DB"
             onClick={async () => {
               try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
@@ -642,7 +642,7 @@ export default function SupplierDashboard(): JSX.Element {
             Refresh Admin
           </button>
           <button
-            className="border rounded-xl px-3 py-2 text-sm"
+            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
             title="Push Admin settings from this browser to DB"
             onClick={async () => {
               try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
@@ -652,7 +652,7 @@ export default function SupplierDashboard(): JSX.Element {
             Sync to DB
           </button>
           {/* NEW: Logout next to date/select */}
-          <button className="border rounded-xl px-3 py-2 text-sm" onClick={logout}>
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
           </button>
         </div>
@@ -681,10 +681,10 @@ export default function SupplierDashboard(): JSX.Element {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 mt-3">
+        <div className="flex flex-wrap items-center gap-2 mt-3 mobile-scroll-x">
           <label className="text-sm text-gray-600">Add Item:</label>
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             defaultValue=""
             onChange={(e) => {
               addRow(e.target.value);
@@ -705,7 +705,7 @@ export default function SupplierDashboard(): JSX.Element {
           </select>
         </div>
 
-        <div className="overflow-x-auto mt-3">
+        <div className="table-wrap mt-3">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b">
@@ -735,7 +735,7 @@ export default function SupplierDashboard(): JSX.Element {
                     <td className="py-2">{name}</td>
                     <td>
                       <input
-                        className="border rounded-xl p-2 w-28"
+                        className="input-mobile border rounded-xl p-2 w-28"
                         type="number"
                         min={0}
                         step={unit === "kg" ? 0.01 : 1}
@@ -749,7 +749,7 @@ export default function SupplierDashboard(): JSX.Element {
                     <td>{unit}</td>
                     <td>
                       <input
-                        className="border rounded-xl p-2 w-28"
+                        className="input-mobile border rounded-xl p-2 w-28"
                         type="number"
                         min={0}
                         step={1}
@@ -764,7 +764,7 @@ export default function SupplierDashboard(): JSX.Element {
                     <td>
                       {!submitted && (
                         <button
-                          className="text-xs border rounded-lg px-2 py-1"
+                          className="btn-mobile text-xs border rounded-lg px-2 py-1"
                           onClick={() => removeRow(r.id)}
                         >
                           ✕
@@ -787,11 +787,11 @@ export default function SupplierDashboard(): JSX.Element {
           </table>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button className="border rounded-xl px-3 py-1 text-xs" onClick={printSummary}>
+        <div className="mt-3 flex flex-wrap gap-2 mobile-scroll-x">
+          <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={printSummary}>
             Print
           </button>
-          <button className="border rounded-xl px-3 py-1 text-xs" onClick={requestModification}>
+          <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={requestModification}>
             Request Modification
           </button>
         </div>
@@ -807,9 +807,9 @@ export default function SupplierDashboard(): JSX.Element {
       <section className="rounded-2xl border p-4 mb-6">
         <h2 className="font-semibold mb-2">Transfers (Between Outlets) — {dateStr}</h2>
 
-        <div className="grid md:grid-cols-5 gap-2 mb-3">
+        <div className="grid md:grid-cols-5 gap-2 mb-3 mobile-scroll-x">
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             value={txFromId}
             onChange={(e) => setTxFromId(e.target.value)}
           >
@@ -820,8 +820,8 @@ export default function SupplierDashboard(): JSX.Element {
             ))}
           </select>
 
-        <select
-            className="border rounded-xl p-2 text-sm"
+    <select
+      className="input-mobile border rounded-xl p-2 text-sm"
             value={txToId}
             onChange={(e) => setTxToId(e.target.value)}
           >
@@ -833,7 +833,7 @@ export default function SupplierDashboard(): JSX.Element {
           </select>
 
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             value={txProductKey}
             onChange={(e) => setTxProductKey(e.target.value)}
           >
@@ -848,7 +848,7 @@ export default function SupplierDashboard(): JSX.Element {
           </select>
 
           <input
-            className="border rounded-xl p-2 text-sm"
+            className="input-mobile border rounded-xl p-2 text-sm"
             type="number"
             min={0}
             step={productByKey[txProductKey]?.unit === "kg" ? 0.01 : 1}
@@ -857,12 +857,12 @@ export default function SupplierDashboard(): JSX.Element {
             onChange={(e) => setTxQty(e.target.value)}
           />
 
-          <button className="border rounded-xl px-3 py-2 text-sm" onClick={addTransfer}>
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addTransfer}>
             Save Transfer
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="table-wrap">
           <table className="w-full text-sm border">
             <thead>
               <tr className="bg-gray-100 text-left">
@@ -908,7 +908,7 @@ export default function SupplierDashboard(): JSX.Element {
       {/* Disputes (read + comment) */}
       <section className="rounded-2xl border p-4">
         <h2 className="font-semibold mb-2">Disputes for {selectedOutletName || "—"}</h2>
-        <div className="overflow-x-auto">
+        <div className="table-wrap">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b">

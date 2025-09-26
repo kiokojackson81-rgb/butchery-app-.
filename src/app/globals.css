@@ -15,3 +15,85 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+@layer components {
+  /* Tight page padding on phones; unchanged spacing on desktop */
+  .mobile-container {
+    max-width: 80rem; /* max-w-7xl */
+    margin-left: auto; /* mx-auto */
+    margin-right: auto;
+    padding-left: 0.75rem; /* px-3 */
+    padding-right: 0.75rem;
+  }
+  @media (min-width: 640px) {
+    .mobile-container {
+      padding-left: 1.5rem; /* sm:px-6 */
+      padding-right: 1.5rem;
+    }
+  }
+
+  /* Buttons: full-width on phones, auto on desktop; 44px target for thumbs */
+  .btn-mobile {
+    width: 100%;
+    min-height: 44px;
+  }
+  @media (min-width: 640px) {
+    .btn-mobile {
+      width: auto;
+    }
+  }
+
+  /* Inputs: full-width + text size ≥16px to avoid iOS zoom */
+  .input-mobile {
+    width: 100%;
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    .input-mobile {
+      font-size: 1rem; /* base font size in Tailwind is 1rem (16px) */
+    }
+  }
+
+  /* Horizontally scrollable containers (tabs, chip rows, filters) */
+  .mobile-scroll-x {
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Make wide tables scroll horizontally on phones (keep desktop unchanged) */
+  .table-wrap {
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  /* Optional: sticky action bar for key actions on phones */
+  .sticky-save-bottom {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    padding: 0.75rem;
+    z-index: 40;
+  }
+  @media (min-width: 640px) {
+    .sticky-save-bottom {
+      position: static;
+    }
+  }
+  .sticky-safe {
+    padding-bottom: 72px; /* pb-[72px] */
+  }
+  @media (min-width: 640px) {
+    .sticky-safe {
+      padding-bottom: 0; /* sm:pb-0 */
+    }
+  }
+  /* add to <main> so sticky bar doesn’t cover content */
+}
+
+/* Nicer taps on mobile */
+* { -webkit-tap-highlight-color: transparent; }

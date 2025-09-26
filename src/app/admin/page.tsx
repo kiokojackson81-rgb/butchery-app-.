@@ -516,8 +516,8 @@ export default function AdminPage() {
 
   /** ----- Render ----- */
   return (
-    <main className="p-6 max-w-7xl mx-auto">
-      <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
+    <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
+  <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
           <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
           {welcome && (
@@ -526,7 +526,7 @@ export default function AdminPage() {
         </div>
         {/* ✅ Logout button */}
         <button
-          className="border rounded-xl px-3 py-2 text-sm"
+          className="btn-mobile border rounded-xl px-3 py-2 text-sm"
           onClick={() => {
             sessionStorage.removeItem("admin_auth");
             sessionStorage.removeItem("admin_welcome");
@@ -538,7 +538,7 @@ export default function AdminPage() {
         </button>
       </header>
 
-      <nav className="flex gap-2 mb-6">
+      <nav className="flex gap-2 mb-6 mobile-scroll-x">
         <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
         <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
         <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
@@ -551,18 +551,18 @@ export default function AdminPage() {
       {/* ---------- OUTLETS & CODES ---------- */}
       {tab === "outlets" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Outlets & Attendant Codes</h2>
             <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>+ Add outlet</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveOutletsNow}>Submit / Save</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setOutlets(seedDefaultOutlets())}>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>+ Add outlet</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveOutletsNow}>Submit / Save</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setOutlets(seedDefaultOutlets())}>
                 Reset defaults
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -579,13 +579,13 @@ export default function AdminPage() {
                 {outlets.map(o => (
                   <tr key={o.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-56"
+       <input className="input-mobile border rounded-xl p-2 w-56"
                              value={o.name}
                              onChange={e => updateOutlet(o.id, { name: e.target.value })}
                              placeholder="Outlet name"/>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-40"
+       <input className="input-mobile border rounded-xl p-2 w-40"
                              value={o.code}
                              onChange={e => updateOutlet(o.id, { code: e.target.value })}
                              placeholder="Secret code"/>
@@ -598,7 +598,7 @@ export default function AdminPage() {
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeOutlet(o.id)}>✕</button>
+                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeOutlet(o.id)}>✕</button>
                     </td>
                   </tr>
                 ))}
@@ -611,15 +611,15 @@ export default function AdminPage() {
 
           {/* People & Codes */}
           <div className="mt-6 pt-4 border-t">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 mobile-scroll-x">
               <h3 className="font-semibold">People & Codes</h3>
               <div className="flex gap-2">
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={addCode}>+ Add code</button>
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveCodesNow}>Save Codes</button>
+                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={addCode}>+ Add code</button>
+                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={saveCodesNow}>Save Codes</button>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b">
@@ -637,17 +637,17 @@ export default function AdminPage() {
                   {codes.map(c => (
                     <tr key={c.id} className="border-b">
                       <td className="py-2">
-                        <input className="border rounded-xl p-2 w-44"
+                        <input className="input-mobile border rounded-xl p-2 w-44"
                           value={c.name} onChange={e=>updateCode(c.id,{name:e.target.value})}
                           placeholder="Person name"/>
                       </td>
                       <td>
-                        <input className="border rounded-xl p-2 w-44 font-mono"
+                        <input className="input-mobile border rounded-xl p-2 w-44 font-mono"
                           value={c.code} onChange={e=>updateCode(c.id,{code:e.target.value})}
                           placeholder="Unique code"/>
                       </td>
                       <td>
-                        <select className="border rounded-xl p-2"
+                        <select className="input-mobile border rounded-xl p-2"
                           value={c.role} onChange={e=>updateCode(c.id,{role:e.target.value as PersonCode["role"]})}>
                           <option value="attendant">attendant</option>
                           <option value="supervisor">supervisor</option>
@@ -662,7 +662,7 @@ export default function AdminPage() {
                         </label>
                       </td>
                       <td>
-                        <button className="text-xs border rounded-lg px-2 py-1" onClick={()=>removeCode(c.id)}>✕</button>
+                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={()=>removeCode(c.id)}>✕</button>
                       </td>
                     </tr>
                   ))}
@@ -776,18 +776,18 @@ export default function AdminPage() {
       {/* ---------- PRODUCTS (global) ---------- */}
       {tab === "products" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Products & Prices</h2>
             <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveProductsNow}>Submit / Save</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveProductsNow}>Submit / Save</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>
                 Reset defaults
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -806,19 +806,19 @@ export default function AdminPage() {
                 {products.map(p => (
                   <tr key={p.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-44"
+       <input className="input-mobile border rounded-xl p-2 w-44"
                              value={p.key}
                              onChange={e => updateProduct(p.id, { key: e.target.value })}
                              placeholder="unique key (e.g., beef)"/>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-56"
+       <input className="input-mobile border rounded-xl p-2 w-56"
                              value={p.name}
                              onChange={e => updateProduct(p.id, { name: e.target.value })}
                              placeholder="Display name"/>
                     </td>
                     <td>
-                      <select className="border rounded-xl p-2"
+          <select className="input-mobile border rounded-xl p-2"
                               value={p.unit}
                               onChange={e => updateProduct(p.id, { unit: e.target.value as Unit })}>
                         <option value="kg">kg</option>
@@ -826,7 +826,7 @@ export default function AdminPage() {
                       </select>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-36" type="number" min={0} step={1}
+       <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1}
                              value={p.sellPrice}
                              onChange={e => updateProduct(p.id, { sellPrice: n(e.target.value) })}
                              placeholder="Ksh"/>
@@ -839,7 +839,7 @@ export default function AdminPage() {
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeProduct(p.id)}>✕</button>
+                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeProduct(p.id)}>✕</button>
                     </td>
                   </tr>
                 ))}
@@ -855,19 +855,19 @@ export default function AdminPage() {
       {/* ---------- OUTLET PRICEBOOK ---------- */}
       {tab === "pricebook" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Outlet Pricebook</h2>
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-600">Outlet</label>
               <select
-                className="border rounded-xl p-2 text-sm"
+                className="input-mobile border rounded-xl p-2 text-sm"
                 value={pbOutlet}
                 onChange={(e)=>setPbOutlet(e.target.value)}
               >
                 <option value="">— select outlet —</option>
                 {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
               </select>
-              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={savePricebook}>Save</button>
+              <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={savePricebook}>Save</button>
             </div>
           </div>
 
@@ -875,11 +875,11 @@ export default function AdminPage() {
             <p className="text-sm text-gray-600">Choose an outlet to edit its prices & availability.</p>
           ) : (
             <>
-              <div className="flex gap-2 mb-3">
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>copyGlobalToOutlet(pbOutlet)}>Copy from Global</button>
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={()=>resetOutletPricebook(pbOutlet)}>Reset this Outlet</button>
+              <div className="flex gap-2 mb-3 mobile-scroll-x">
+                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>copyGlobalToOutlet(pbOutlet)}>Copy from Global</button>
+                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>resetOutletPricebook(pbOutlet)}>Reset this Outlet</button>
               </div>
-              <div className="overflow-x-auto">
+              <div className="table-wrap">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left border-b">
@@ -899,7 +899,7 @@ export default function AdminPage() {
                           <td className="py-2">{p.name} <span className="text-xs text-gray-500">({p.key})</span></td>
                           <td>
                             <input
-                              className="border rounded-xl p-2 w-36"
+                              className="input-mobile border rounded-xl p-2 w-36"
                               type="number" min={0} step={1}
                               value={row.sellPrice}
                               onChange={e=>setPBRow(pbOutlet, p.key, { sellPrice: n(e.target.value) })}
@@ -926,17 +926,17 @@ export default function AdminPage() {
       {/* ---------- SUPPLY VIEW (read-only) ---------- */}
       {tab === "supply" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Supply View</h2>
             <div className="flex items-center gap-2">
               <input
-                className="border rounded-xl p-2 text-sm"
+                className="input-mobile border rounded-xl p-2 text-sm"
                 type="date"
                 value={supDate}
                 onChange={(e)=>setSupDate(e.target.value)}
               />
               <select
-                className="border rounded-xl p-2 text-sm"
+                className="input-mobile border rounded-xl p-2 text-sm"
                 value={supOutletName}
                 onChange={(e)=>setSupOutletName(e.target.value)}
               >
@@ -946,7 +946,7 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -992,17 +992,17 @@ export default function AdminPage() {
       {/* ---------- REPORTS (read-only) ---------- */}
       {tab === "reports" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Reports</h2>
             <div className="flex items-center gap-2">
               <input
-                className="border rounded-xl p-2 text-sm"
+                className="input-mobile border rounded-xl p-2 text-sm"
                 type="date"
                 value={repDate}
                 onChange={(e)=>setRepDate(e.target.value)}
               />
               <select
-                className="border rounded-xl p-2 text-sm"
+                className="input-mobile border rounded-xl p-2 text-sm"
                 value={repMode}
                 onChange={(e)=>setRepMode(e.target.value as RangeMode)}
               >
@@ -1013,7 +1013,7 @@ export default function AdminPage() {
           </div>
 
           {/* Summary per outlet */}
-          <div className="overflow-x-auto mb-6">
+          <div className="table-wrap mb-6">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -1074,7 +1074,7 @@ export default function AdminPage() {
           {/* Sales by item + waste */}
           <div className="rounded-xl border p-3 mb-6">
             <h3 className="font-semibold mb-2">Sales by Item (and Waste)</h3>
-            <div className="overflow-x-auto">
+            <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b">
@@ -1116,7 +1116,7 @@ export default function AdminPage() {
           {/* Expenses monitor */}
           <div className="rounded-xl border p-3 mb-6">
             <h3 className="font-semibold mb-2">Expenses Monitor (range)</h3>
-            <div className="overflow-x-auto">
+            <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b">
@@ -1131,7 +1131,7 @@ export default function AdminPage() {
                       <td className="py-2">{row.outlet}</td>
                       <td>{fmt(row.total)}</td>
                       <td>
-                        <button className="border rounded-lg px-2 py-1 text-xs" onClick={()=>raiseExpenseDispute(row.outlet)}>
+                        <button className="btn-mobile border rounded-lg px-2 py-1 text-xs" onClick={()=>raiseExpenseDispute(row.outlet)}>
                           Dispute/Adjust
                         </button>
                       </td>
@@ -1166,18 +1166,18 @@ export default function AdminPage() {
       {/* ---------- EXPENSES ---------- */}
       {tab === "expenses" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
             <h2 className="font-semibold">Fixed Expenses</h2>
             <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={addExpense}>+ Add expense</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={saveExpensesNow}>Submit / Save</button>
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={() => setExpenses(seedDefaultExpenses())}>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addExpense}>+ Add expense</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveExpensesNow}>Submit / Save</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setExpenses(seedDefaultExpenses())}>
                 Reset defaults
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
@@ -1195,19 +1195,19 @@ export default function AdminPage() {
                 {expenses.map(e => (
                   <tr key={e.id} className="border-b">
                     <td className="py-2">
-                      <input className="border rounded-xl p-2 w-56"
+       <input className="input-mobile border rounded-xl p-2 w-56"
                              value={e.name}
                              onChange={ev => updateExpense(e.id, { name: ev.target.value })}
                              placeholder="Expense name"/>
                     </td>
                     <td>
-                      <input className="border rounded-xl p-2 w-36" type="number" min={0} step={1}
+       <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1}
                              value={e.amount}
                              onChange={ev => updateExpense(e.id, { amount: n(ev.target.value) })}
                              placeholder="Ksh"/>
                     </td>
                     <td>
-                      <select className="border rounded-xl p-2"
+          <select className="input-mobile border rounded-xl p-2"
                               value={e.frequency}
                               onChange={ev => updateExpense(e.id, { frequency: ev.target.value as FixedExpense["frequency"] })}>
                         <option value="daily">daily</option>
@@ -1222,7 +1222,7 @@ export default function AdminPage() {
                       </label>
                     </td>
                     <td>
-                      <button className="text-xs border rounded-lg px-2 py-1" onClick={() => removeExpense(e.id)}>✕</button>
+                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeExpense(e.id)}>✕</button>
                     </td>
                   </tr>
                 ))}
@@ -1244,13 +1244,13 @@ export default function AdminPage() {
             <div className="rounded-xl border p-3">
               <h3 className="font-medium mb-2">Current Settings (read-only)</h3>
               <textarea className="w-full h-64 border rounded-xl p-2 text-xs" readOnly value={payload} />
-              <div className="mt-2 flex gap-2">
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={exportJSON}>Download JSON</button>
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={resetDefaults}>Reset Defaults</button>
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={clearAll}>Clear All</button>
+              <div className="mt-2 flex gap-2 mobile-scroll-x">
+                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={exportJSON}>Download JSON</button>
+                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={resetDefaults}>Reset Defaults</button>
+                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={clearAll}>Clear All</button>
                 {/* Thin persistence helpers */}
                 <button
-                  className="border rounded-xl px-3 py-2 text-sm"
+                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
                   title="Push all admin keys to database"
                   onClick={async () => {
                     try { await pushAllToDB(); alert("Pushed all admin settings to DB ✅"); }
@@ -1260,7 +1260,7 @@ export default function AdminPage() {
                   Force Sync to DB
                 </button>
                 <button
-                  className="border rounded-xl px-3 py-2 text-sm"
+                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
                   title="Reload admin keys from database into localStorage"
                   onClick={async () => {
                     try { await hydrateLocalStorageFromDB(); alert("Hydrated from DB ✅. Reload to reflect in UI."); }
@@ -1279,7 +1279,7 @@ export default function AdminPage() {
                         value={importText}
                         onChange={e => setImportText(e.target.value)} />
               <div className="mt-2">
-                <button className="border rounded-xl px-3 py-2 text-sm" onClick={importJSON}>Import JSON</button>
+                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={importJSON}>Import JSON</button>
               </div>
             </div>
           </div>

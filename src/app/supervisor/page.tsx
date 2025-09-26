@@ -73,18 +73,18 @@ export default function SupervisorLogin() {
   };
 
   return (
-    <main className="p-6 max-w-2xl mx-auto">
+    <main className="mobile-container p-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Supervisor Login</h1>
 
       <div className="rounded-2xl border p-4 mb-4">
         <input
-          className="border rounded-xl p-3 w-full mb-3"
+          className="input-mobile border rounded-xl p-3 w-full mb-3"
           placeholder="Enter supervisor code (e.g. SUPV001)"
           value={code}
           onChange={(e)=>setCode(e.target.value)}
         />
         {err && <p className="text-red-600 text-sm mb-3">{err}</p>}
-        <button className="px-4 py-2 rounded-xl bg-black text-white w-full" onClick={login}>
+        <button className="btn-mobile px-4 py-2 rounded-xl bg-black text-white w-full" onClick={login}>
           Login
         </button>
       </div>

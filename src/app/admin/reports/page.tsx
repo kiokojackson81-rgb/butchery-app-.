@@ -77,12 +77,12 @@ export default function ReportsPage() {
   }, [rows]);
 
   return (
-    <main className="p-6 max-w-6xl mx-auto">
+    <main className="mobile-container p-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-semibold mb-6">Admin Reports</h1>
 
       <section className="rounded-2xl border p-4 mb-6">
         <h2 className="font-medium mb-3">Per Outlet Summary</h2>
-        <div className="overflow-x-auto">
+        <div className="table-wrap">
           <table className="w-full text-sm border">
             <thead>
               <tr className="bg-gray-100 text-left">
@@ -116,7 +116,7 @@ export default function ReportsPage() {
 
       <section className="rounded-2xl border p-4">
         <h2 className="font-medium mb-3">Detailed Rows</h2>
-        <div className="overflow-x-auto">
+        <div className="table-wrap">
           <table className="w-full text-sm border">
             <thead>
               <tr className="bg-gray-100 text-left">

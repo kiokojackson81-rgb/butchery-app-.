@@ -106,17 +106,17 @@ export default function AdminStaffPage() {
   };
 
   return (
-    <main className="p-6 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between mb-4">
+    <main className="mobile-container p-6 max-w-6xl mx-auto">
+      <header className="flex items-center justify-between mb-4 mobile-scroll-x">
         <h1 className="text-2xl font-semibold">Admin • Staff & Responsibilities</h1>
         <div className="flex items-center gap-2">
-          <select className="border rounded-xl p-2 text-sm" value={filterOutlet} onChange={e=>setFilterOutlet(e.target.value as any)}>
+          <select className="input-mobile border rounded-xl p-2 text-sm" value={filterOutlet} onChange={e=>setFilterOutlet(e.target.value as any)}>
             <option value="ALL">All outlets</option>
             {OUTLETS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
-          <button className="border rounded-xl px-3 py-2 text-sm" onClick={addStaff}>+ Add Staff</button>
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addStaff}>+ Add Staff</button>
           {/* NEW: bulk sync */}
-          <button className="border rounded-xl px-3 py-2 text-sm" title="Save outlet+products to attendant_scope for all active staff" onClick={syncAllScopes}>
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" title="Save outlet+products to attendant_scope for all active staff" onClick={syncAllScopes}>
             Sync All Scopes
           </button>
         </div>
@@ -130,21 +130,21 @@ export default function AdminStaffPage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="text-xs text-gray-500">Name</label>
-                <input className="border rounded-xl p-2 w-full" value={s.name} onChange={e=>update(s.id, { name: e.target.value })} placeholder="e.g. Musyoki" />
+                <input className="input-mobile border rounded-xl p-2 w-full" value={s.name} onChange={e=>update(s.id, { name: e.target.value })} placeholder="e.g. Musyoki" />
               </div>
               <div>
                 <label className="text-xs text-gray-500">Login Code</label>
-                <input className="border rounded-xl p-2 w-full font-mono" value={s.code} onChange={e=>update(s.id, { code: e.target.value })} placeholder="e.g. MusyokiA" />
+                <input className="input-mobile border rounded-xl p-2 w-full font-mono" value={s.code} onChange={e=>update(s.id, { code: e.target.value })} placeholder="e.g. MusyokiA" />
               </div>
               <div>
                 <label className="text-xs text-gray-500">Outlet</label>
-                <select className="border rounded-xl p-2 w-full" value={s.outlet} onChange={e=>update(s.id, { outlet: e.target.value as Outlet })}>
+                <select className="input-mobile border rounded-xl p-2 w-full" value={s.outlet} onChange={e=>update(s.id, { outlet: e.target.value as Outlet })}>
                   {OUTLETS.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-xs text-gray-500">Active</label>
-                <select className="border rounded-xl p-2 w-full" value={String(s.active)} onChange={e=>update(s.id, { active: e.target.value === "true" })}>
+                <select className="input-mobile border rounded-xl p-2 w-full" value={String(s.active)} onChange={e=>update(s.id, { active: e.target.value === "true" })}>
                   <option value="true">Active</option>
                   <option value="false">Inactive</option>
                 </select>
@@ -153,13 +153,13 @@ export default function AdminStaffPage() {
 
             <div className="mt-4">
               <div className="text-sm font-medium mb-1">Products accountable</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mobile-scroll-x">
                 {ITEMS.map(it => {
                   const on = s.products.includes(it.key);
                   return (
                     <button key={it.key}
                       onClick={()=>toggleProduct(s, it.key)}
-                      className={`px-3 py-1.5 rounded-xl border text-sm ${on ? "bg-black text-white" : "bg-white"}`}>
+                      className={`btn-mobile px-3 py-1.5 rounded-xl border text-sm ${on ? "bg-black text-white" : "bg-white"}`}>
                       {it.name}
                     </button>
                   );
@@ -168,17 +168,17 @@ export default function AdminStaffPage() {
             </div>
 
             {/* NEW: Scope controls (do NOT change login) */}
-            <div className="mt-4 flex items-center gap-2">
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>applyScope(s)}>
+            <div className="mt-4 flex items-center gap-2 mobile-scroll-x">
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={()=>applyScope(s)}>
                 {isScoped(s.code) ? "Update Scope" : "Apply Scope"}
               </button>
               {isScoped(s.code) && (
                 <>
                   <span className="text-xs rounded-lg border px-2 py-1">Scoped</span>
-                  <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>clearScope(s)}>Clear Scope</button>
+                  <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={()=>clearScope(s)}>Clear Scope</button>
                 </>
               )}
-              <button className="border rounded-xl px-3 py-2 text-sm" onClick={()=>removeStaff(s.id)}>Remove</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={()=>removeStaff(s.id)}>Remove</button>
             </div>
           </section>
         ))}

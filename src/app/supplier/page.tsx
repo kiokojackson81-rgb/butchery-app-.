@@ -109,12 +109,12 @@ export default function SupplierLoginPage() {
   };
 
   return (
-    <main className="p-6 max-w-2xl mx-auto">
+    <main className="mobile-container p-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Supplier Login</h1>
 
       <div className="rounded-2xl border p-4 mb-4">
         <input
-          className="border rounded-xl p-3 w-full mb-3"
+          className="input-mobile border rounded-xl p-3 w-full mb-3"
           placeholder="Enter supplier code (e.g. SUPP001)"
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -124,7 +124,7 @@ export default function SupplierLoginPage() {
 
         <button
           onClick={handleLogin}
-          className="px-4 py-2 rounded-xl bg-black text-white w-full"
+          className="btn-mobile px-4 py-2 rounded-xl bg-black text-white w-full"
         >
           Login
         </button>

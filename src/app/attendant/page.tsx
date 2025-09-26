@@ -81,7 +81,7 @@ export default function AttendantLoginPage() {
                 <input
                   type="text"
                   autoFocus
-                  className="mt-1 border border-neutral-700 bg-neutral-800/70 rounded-xl w-full p-3 outline-none focus:border-neutral-500"
+                  className="input-mobile mt-1 border border-neutral-700 bg-neutral-800/70 rounded-xl w-full p-3 outline-none focus:border-neutral-500"
                   placeholder="e.g. BRIGHT-01"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
@@ -92,7 +92,7 @@ export default function AttendantLoginPage() {
               <button
                 onClick={handleLogin}
                 disabled={isDisabled}
-                className={`mt-4 w-full px-4 py-3 rounded-xl font-medium transition ${
+                className={`btn-mobile mt-4 w-full px-4 py-3 rounded-xl font-medium transition ${
                   isDisabled
                     ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
                     : "bg-white text-black hover:bg-neutral-200"
@@ -104,7 +104,7 @@ export default function AttendantLoginPage() {
               <button
                 type="button"
                 onClick={() => setShowHelp((s) => !s)}
-                className="mt-3 w-full text-xs text-neutral-400 underline underline-offset-4 hover:text-neutral-200"
+                className="btn-mobile mt-3 w-full text-xs text-neutral-400 underline underline-offset-4 hover:text-neutral-200"
               >
                 {showHelp ? "Hide help" : "I don’t know my code"}
               </button>

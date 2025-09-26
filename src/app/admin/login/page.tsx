@@ -38,7 +38,7 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <main className="min-h-[70vh] flex items-center justify-center p-6">
+    <main className="mobile-container min-h-[70vh] flex items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl border p-6 shadow-sm">
         <header className="mb-5">
           <h1 className="text-2xl font-semibold">Admin Login</h1>
@@ -51,7 +51,7 @@ export default function AdminLoginPage() {
           <div>
             <label className="block text-sm mb-1">Email</label>
             <input
-              className="border rounded-xl p-2 w-full"
+              className="input-mobile border rounded-xl p-2 w-full"
               type="email"
               placeholder="Enter admin email"
               value={email}
@@ -65,7 +65,7 @@ export default function AdminLoginPage() {
             <label className="block text-sm mb-1">Password</label>
             <div className="flex gap-2">
               <input
-                className="border rounded-xl p-2 w-full"
+                className="input-mobile border rounded-xl p-2 w-full"
                 type={showPw ? "text" : "password"}
                 placeholder="Enter password"
                 value={pw}
@@ -75,7 +75,7 @@ export default function AdminLoginPage() {
               />
               <button
                 type="button"
-                className="border rounded-xl px-3"
+                className="btn-mobile border rounded-xl px-3"
                 onClick={() => setShowPw((v) => !v)}
                 title={showPw ? "Hide password" : "Show password"}
               >
@@ -86,7 +86,7 @@ export default function AdminLoginPage() {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <button type="submit" className="w-full rounded-xl bg-black text-white py-2">
+          <button type="submit" className="btn-mobile w-full rounded-xl bg-black text-white py-2">
             Sign in
           </button>
         </form>
