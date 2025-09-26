@@ -148,3 +148,39 @@ model AttendantAssignment {
   productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
 }
+
+/// Mapping between person login codes and WhatsApp phone numbers (E.164)
+model PhoneMapping {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  role      String
+  phoneE164 String
+  outlet    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Chatrace API settings (singleton row id=1)
+model ChatraceSetting {
+  id        Int      @id @default(1)
+  apiBase   String
+  apiKey    String
+  fromPhone String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Supply requests originating from WhatsApp or other sources
+model SupplyRequest {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  outlet      String
+  productKey  String
+  qty         Float
+  status      String
+  source      String
+  requestedBy String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

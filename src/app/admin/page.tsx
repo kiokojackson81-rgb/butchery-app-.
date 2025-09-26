@@ -138,6 +138,11 @@ export default function AdminPage() {
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
 
+  // WhatsApp phones mapping state (code -> phone E.164)
+  const [phones, setPhones] = useState<Record<string, string>>({});
+  // Chatrace settings card state
+  const [chatSettings, setChatSettings] = useState<{ apiBase: string; apiKey: string; fromPhone?: string }>({ apiBase: "", apiKey: "", fromPhone: "" });
+
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
     [outlets, products, expenses, codes, scope, pricebook]
@@ -192,6 +197,34 @@ export default function AdminPage() {
     })();
   }, []);
 
+  // Load current phone mappings (once)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/phones", { cache: "no-store" });
+        if (r.ok) {
+          const list = (await r.json()) as Array<{ code: string; phoneE164: string }>;
+          const m: Record<string, string> = {};
+          list.forEach((row) => { if (row?.code) m[row.code] = row.phoneE164 || ""; });
+          setPhones(m);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  // Load Chatrace settings (once)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/chatrace-settings", { cache: "no-store" });
+        if (r.ok) {
+          const s = (await r.json()) as { apiBase?: string; apiKey?: string; fromPhone?: string } | null;
+          if (s) setChatSettings({ apiBase: s.apiBase || "", apiKey: s.apiKey || "", fromPhone: s.fromPhone || "" });
+        }
+      } catch {}
+    })();
+  }, []);
+
   /** ----- Explicit save buttons (unchanged) ----- */
   const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
@@ -219,6 +252,47 @@ export default function AdminPage() {
       alert(`Assignments saved to server ✅ (rows: ${r.count})`);
     } catch {
       alert("Saved locally, but failed to sync assignments to server.");
+    }
+  };
+
+  /** Phones mapping upsert (server write-through) */
+  const savePhoneFor = async (code: string, role: PersonCode["role"], outletName?: string) => {
+    const phone = (phones[code] || "").trim();
+    if (!code || !phone) { alert("Missing code or phone"); return; }
+    const payload = { code, role, phoneE164: phone, outlet: outletName };
+    const r = await fetch("/api/admin/phones", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!r.ok) throw new Error(await r.text());
+  };
+  const saveAllPhones = async () => {
+    try {
+      const codeToOutlet: Record<string, string | undefined> = {};
+      // Resolve outlet for attendants via scope
+      Object.keys(phones).forEach((code) => {
+        const norm = normCode(code);
+        codeToOutlet[code] = scope[norm]?.outlet;
+      });
+      for (const c of codes) {
+        const code = (c.code || "").trim();
+        if (!code) continue;
+        const phone = (phones[code] || "").trim();
+        if (!phone) continue;
+        await savePhoneFor(code, c.role, codeToOutlet[code]);
+      }
+      alert("Phone mappings saved ✅");
+    } catch {
+      alert("Failed to save one or more phone mappings");
+    }
+  };
+
+  const saveChatraceSettings = async () => {
+    const { apiBase, apiKey, fromPhone } = chatSettings;
+    if (!apiBase || !apiKey) { alert("apiBase and apiKey are required"); return; }
+    try {
+      const r = await fetch("/api/admin/chatrace-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiBase, apiKey, fromPhone }) });
+      if (!r.ok) throw new Error(await r.text());
+      alert("Chatrace settings saved ✅");
+    } catch {
+      alert("Failed to save Chatrace settings");
     }
   };
   const importJSON = () => {
@@ -579,26 +653,26 @@ export default function AdminPage() {
                 {outlets.map(o => (
                   <tr key={o.id} className="border-b">
                     <td className="py-2">
-       <input className="input-mobile border rounded-xl p-2 w-56"
-                             value={o.name}
-                             onChange={e => updateOutlet(o.id, { name: e.target.value })}
-                             placeholder="Outlet name"/>
+                      <input className="input-mobile border rounded-xl p-2 w-56"
+                        value={o.name}
+                        onChange={e => updateOutlet(o.id, { name: e.target.value })}
+                        placeholder="Outlet name"/>
                     </td>
                     <td>
-       <input className="input-mobile border rounded-xl p-2 w-40"
-                             value={o.code}
-                             onChange={e => updateOutlet(o.id, { code: e.target.value })}
-                             placeholder="Secret code"/>
+                      <input className="input-mobile border rounded-xl p-2 w-40"
+                        value={o.code}
+                        onChange={e => updateOutlet(o.id, { code: e.target.value })}
+                        placeholder="Secret code"/>
                     </td>
                     <td>
                       <label className="inline-flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={o.active}
-                               onChange={e => updateOutlet(o.id, { active: e.target.checked })}/>
+                          onChange={e => updateOutlet(o.id, { active: e.target.checked })}/>
                         Active
                       </label>
                     </td>
                     <td>
-                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeOutlet(o.id)}>✕</button>
+                      <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeOutlet(o.id)}>✕</button>
                     </td>
                   </tr>
                 ))}
@@ -625,6 +699,7 @@ export default function AdminPage() {
                   <tr className="text-left border-b">
                     <th className="py-2">Name</th>
                     <th>Login Code</th>
+                    <th>Phone (WhatsApp)</th>
                     <th>Role</th>
                     <th>Status</th>
                     <th style={{width:1}}></th>
@@ -632,7 +707,7 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {codes.length === 0 && (
-                    <tr><td className="py-3 text-gray-500" colSpan={5}>No codes yet.</td></tr>
+                    <tr><td className="py-3 text-gray-500" colSpan={6}>No codes yet.</td></tr>
                   )}
                   {codes.map(c => (
                     <tr key={c.id} className="border-b">
@@ -645,6 +720,27 @@ export default function AdminPage() {
                         <input className="input-mobile border rounded-xl p-2 w-44 font-mono"
                           value={c.code} onChange={e=>updateCode(c.id,{code:e.target.value})}
                           placeholder="Unique code"/>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <input
+                            className="input-mobile border rounded-xl p-2 w-52 font-mono"
+                            placeholder="+2547…"
+                            value={phones[c.code] || ""}
+                            onChange={(e)=>setPhones(prev=>({ ...prev, [c.code]: e.target.value }))}
+                          />
+                          <button
+                            className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                            title="Save this phone mapping"
+                            onClick={async ()=>{
+                              try {
+                                const outletName = scope[normCode(c.code)]?.outlet;
+                                await savePhoneFor(c.code, c.role, outletName);
+                                alert("Saved ✅");
+                              } catch { alert("Failed to save"); }
+                            }}
+                          >Save</button>
+                        </div>
                       </td>
                       <td>
                         <select className="input-mobile border rounded-xl p-2"
@@ -668,6 +764,9 @@ export default function AdminPage() {
                   ))}
                 </tbody>
               </table>
+              <div className="mt-2">
+                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={saveAllPhones}>Save Phones</button>
+              </div>
             </div>
           </div>
 
@@ -1281,6 +1380,43 @@ export default function AdminPage() {
               <div className="mt-2">
                 <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={importJSON}>Import JSON</button>
               </div>
+            </div>
+          </div>
+
+          {/* Chatrace Settings */}
+          <div className="rounded-xl border p-3 mt-4">
+            <h3 className="font-medium mb-2">Chatrace Settings</h3>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label className="text-sm">
+                <div className="text-gray-600 mb-1">API Base URL</div>
+                <input
+                  className="input-mobile border rounded-xl p-2 w-full"
+                  placeholder="https://api.chatrace.com"
+                  value={chatSettings.apiBase}
+                  onChange={(e)=>setChatSettings(prev=>({ ...prev, apiBase: e.target.value }))}
+                />
+              </label>
+              <label className="text-sm">
+                <div className="text-gray-600 mb-1">API Key</div>
+                <input
+                  className="input-mobile border rounded-xl p-2 w-full"
+                  placeholder="sk_live_…"
+                  value={chatSettings.apiKey}
+                  onChange={(e)=>setChatSettings(prev=>({ ...prev, apiKey: e.target.value }))}
+                />
+              </label>
+              <label className="text-sm">
+                <div className="text-gray-600 mb-1">From Phone (optional)</div>
+                <input
+                  className="input-mobile border rounded-xl p-2 w-full"
+                  placeholder="+2547…"
+                  value={chatSettings.fromPhone || ""}
+                  onChange={(e)=>setChatSettings(prev=>({ ...prev, fromPhone: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="mt-3">
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveChatraceSettings}>Save Chatrace</button>
             </div>
           </div>
         </section>

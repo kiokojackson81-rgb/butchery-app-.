@@ -293,6 +293,11 @@ export default function AttendantDashboardPage() {
     try { await postJSON("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot }); }
     catch {}
 
+    // Fire low-stock notifications (non-blocking)
+    try {
+      await postJSON("/api/notify/low-stock", { outlet, closingMap });
+    } catch {}
+
     setSubmitted(true);
     setTab("summary"); // go straight to Summary tab
     await refreshPeriodAndHeader(outlet);
