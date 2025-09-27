@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -38,10 +39,8 @@ function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 function today() { return new Date().toISOString().split("T")[0]; }
 function id() { return Math.random().toString(36).slice(2); }
-function readJSON<T>(k: string, fallback: T): T {
-  try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
-}
-function writeJSON(k: string, v: any) { localStorage.setItem(k, JSON.stringify(v)); }
+function readJSON<T>(k: string, fallback: T): T { return safeReadJSON<T>(k, fallback); }
+function writeJSON(k: string, v: any) { safeWriteJSON(k, v); }
 
 /** ========= Waste helper ========= */
 function askWaste(unit: Unit, current: number | ""): number | null {
@@ -97,19 +96,17 @@ export default function AttendantDashboardPage() {
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
-    const rawOutlets = localStorage.getItem(ADMIN_OUTLETS_KEY);
     const code = sessionStorage.getItem("attendant_code") || "";
     try {
-      if (rawOutlets && code) {
-        const list = JSON.parse(rawOutlets) as AdminOutlet[];
+      const list = safeReadJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
+      if (list && code) {
         const found = list.find(o => o.active && o.code && code.trim().toLowerCase() === o.code.trim().toLowerCase());
         if (found) setOutlet(found.name as Outlet);
       }
     } catch {}
 
-    const rawProd = localStorage.getItem(ADMIN_PRODUCTS_KEY);
-    if (rawProd) {
-      const arr = JSON.parse(rawProd) as AdminProduct[];
+    const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
+    if (arr && arr.length > 0) {
       const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
       setCatalog(map);
     }
@@ -120,9 +117,7 @@ export default function AttendantDashboardPage() {
     const code = sessionStorage.getItem("attendant_code") || "";
     if (!code) return;
     try {
-      const raw = localStorage.getItem(SCOPE_KEY);
-      if (!raw) return;
-      const map = JSON.parse(raw) as Record<string, { outlet: Outlet; productKeys: ItemKey[] }>;
+      const map = safeReadJSON<Record<string, { outlet: Outlet; productKeys: ItemKey[] }>>(SCOPE_KEY, {} as any);
       const scope = map[code];
       if (!scope) return;
 
@@ -143,9 +138,7 @@ export default function AttendantDashboardPage() {
   useEffect(() => {
     if (!outlet) return;
     try {
-      const raw = localStorage.getItem(PRICEBOOK_KEY);
-      if (!raw) return;
-      const all = JSON.parse(raw) as Record<string, Record<ItemKey, { sellPrice: number; active: boolean }>>;
+      const all = safeReadJSON<Record<string, Record<ItemKey, { sellPrice: number; active: boolean }>>>(PRICEBOOK_KEY, {} as any);
       const pb = all[outlet];
       if (!pb) return;
 
@@ -188,28 +181,21 @@ export default function AttendantDashboardPage() {
     setRows(built);
 
     // deposits
-    const depListRaw = localStorage.getItem(depositsKey(dateStr, outlet));
-    if (depListRaw) {
-      const arr = JSON.parse(depListRaw) as Deposit[];
-      setDeposits(arr.map(d => ({ ...d, id: d.id || id() })));
+    const depList = safeReadJSON<Deposit[]>(depositsKey(dateStr, outlet), []);
+    if (depList && depList.length > 0) {
+      setDeposits(depList.map(d => ({ ...d, id: d.id || id() })));
     } else {
-      const depRaw = localStorage.getItem(depositKey(dateStr, outlet));
-      if (depRaw) {
-        const total = Number(JSON.parse(depRaw) || 0);
-        setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
-      } else setDeposits([]);
+      const total = Number(safeReadJSON<number>(depositKey(dateStr, outlet), 0) || 0);
+      setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
     }
 
     // expenses
-    const exRaw = localStorage.getItem(expensesKey(dateStr, outlet));
-    if (exRaw) {
-      const ex = JSON.parse(exRaw) as Array<{ name: string; amount: number }>;
-      setExpenses(ex.map(e => ({ id: id(), name: e.name, amount: e.amount })));
-    } else setExpenses([]);
+    const ex = safeReadJSON<Array<{ name: string; amount: number }>>(expensesKey(dateStr, outlet), []);
+    setExpenses((ex || []).map(e => ({ id: id(), name: e.name, amount: e.amount })));
 
     // till count
-    const t = localStorage.getItem(countedTillKey(dateStr, outlet));
-    setCountedTill(t ? Number(t) : "");
+  const t = safeReadJSON<number | null>(countedTillKey(dateStr, outlet), null);
+  setCountedTill(typeof t === "number" && !Number.isNaN(t) ? t : "");
 
     // API-backed bits
     refreshPeriodAndHeader(outlet).catch(()=>{});

@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 /* ================= Existing Review Keys (unchanged) ================= */
 const WASTE_KEY     = "attendant_waste_reviews";    // waste entries needing review
@@ -53,14 +54,7 @@ type KPIRow = {
 function ymd() {
   return new Date().toISOString().split("T")[0];
 }
-function readJSON<T>(k: string, fb: T): T {
-  try {
-    const raw = localStorage.getItem(k);
-    return raw ? (JSON.parse(raw) as T) : fb;
-  } catch {
-    return fb;
-  }
-}
+function readJSON<T>(k: string, fb: T): T { return safeReadJSON<T>(k, fb); }
 function fmt(n: number) {
   return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
@@ -556,19 +550,8 @@ function ReviewTable({
 }
 
 /* ===== Small helpers ===== */
-function read(key: string): ReviewItem[] {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as ReviewItem[]) : [];
-  } catch {
-    return [];
-  }
-}
-function save(key: string, value: any) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
+function read(key: string): ReviewItem[] { return safeReadJSON<ReviewItem[]>(key, []); }
+function save(key: string, value: any) { try { safeWriteJSON(key, value); } catch {} }
 
 function TabBtn({
   children,

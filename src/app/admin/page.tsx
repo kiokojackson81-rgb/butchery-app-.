@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON, removeItem as lsRemoveItem } from "@/utils/safeStorage";
 
 /** =============== Types =============== */
 type Unit = "kg" | "pcs";
@@ -142,6 +143,9 @@ export default function AdminPage() {
   const [phones, setPhones] = useState<Record<string, string>>({});
   // Chatrace settings card state
   const [chatSettings, setChatSettings] = useState<{ apiBase: string; apiKey: string; fromPhone?: string }>({ apiBase: "", apiKey: "", fromPhone: "" });
+  // Low-stock thresholds (productKey -> min qty)
+  const [thresholds, setThresholds] = useState<Record<string, number>>({});
+  const [loadingThresholds, setLoadingThresholds] = useState<boolean>(false);
 
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
@@ -158,21 +162,21 @@ export default function AdminPage() {
 
         // 2) If still empty, bootstrap from server relational store
         const needsBootstrap =
-          !localStorage.getItem("admin_outlets") ||
-          !localStorage.getItem("admin_products") ||
-          !localStorage.getItem("admin_codes") ||
-          !localStorage.getItem("attendant_scope") ||
-          !localStorage.getItem("admin_pricebook");
+          (safeReadJSON<any[]>("admin_outlets", []).length === 0) ||
+          (safeReadJSON<any[]>("admin_products", []).length === 0) ||
+          (safeReadJSON<any[]>("admin_codes", []).length === 0) ||
+          (Object.keys(safeReadJSON<Record<string, unknown>>("attendant_scope", {})).length === 0) ||
+          (Object.keys(safeReadJSON<Record<string, unknown>>("admin_pricebook", {})).length === 0);
         if (needsBootstrap) {
           try {
             const r = await fetch("/api/admin/bootstrap", { cache: "no-store" });
             if (r.ok) {
               const j = await r.json();
-              if (j.outlets) localStorage.setItem("admin_outlets", JSON.stringify(j.outlets));
-              if (j.products) localStorage.setItem("admin_products", JSON.stringify(j.products));
-              if (j.codes) localStorage.setItem("admin_codes", JSON.stringify(j.codes));
-              if (j.scope) localStorage.setItem("attendant_scope", JSON.stringify(j.scope));
-              if (j.pricebook) localStorage.setItem("admin_pricebook", JSON.stringify(j.pricebook));
+              if (j.outlets) safeWriteJSON("admin_outlets", j.outlets);
+              if (j.products) safeWriteJSON("admin_products", j.products);
+              if (j.codes) safeWriteJSON("admin_codes", j.codes);
+              if (j.scope) safeWriteJSON("attendant_scope", j.scope);
+              if (j.pricebook) safeWriteJSON("admin_pricebook", j.pricebook);
             }
           } catch {}
         }
@@ -224,6 +228,20 @@ export default function AdminPage() {
       } catch {}
     })();
   }, []);
+
+  // Load Low-stock thresholds (once; can be refreshed)
+  const refreshThresholds = async () => {
+    setLoadingThresholds(true);
+    try {
+      const r = await fetch("/api/admin/low-stock-thresholds", { cache: "no-store" });
+      if (r.ok) {
+        const j = (await r.json()) as { ok: boolean; thresholds: Record<string, number> | null };
+        setThresholds(j?.thresholds || {});
+      }
+    } catch {}
+    finally { setLoadingThresholds(false); }
+  };
+  useEffect(() => { refreshThresholds(); }, []);
 
   /** ----- Explicit save buttons (unchanged) ----- */
   const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
@@ -293,6 +311,35 @@ export default function AdminPage() {
       alert("Chatrace settings saved ✅");
     } catch {
       alert("Failed to save Chatrace settings");
+    }
+  };
+  const saveThresholds = async () => {
+    try {
+      // Persist only numeric values (including 0 if explicitly set)
+      const body: Record<string, number> = {};
+      Object.keys(thresholds).forEach((k) => {
+        const v = thresholds[k];
+        if (typeof v === "number" && !Number.isNaN(v)) body[k] = v;
+      });
+      const r = await fetch("/api/admin/low-stock-thresholds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thresholds: body }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      alert("Thresholds saved ✅");
+    } catch {
+      alert("Failed to save thresholds");
+    }
+  };
+  const resetThresholdsToSystemDefaults = async () => {
+    try {
+      const r = await fetch("/api/admin/low-stock-thresholds", { method: "DELETE" });
+      if (!r.ok) throw new Error(await r.text());
+      setThresholds({});
+      alert("Reset to system defaults ✅");
+    } catch {
+      alert("Failed to reset thresholds");
     }
   };
   const importJSON = () => {
@@ -1419,6 +1466,45 @@ export default function AdminPage() {
               <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveChatraceSettings}>Save Chatrace</button>
             </div>
           </div>
+
+          {/* Low Stock Thresholds */}
+          <div className="rounded-xl border p-3 mt-4">
+            <h3 className="font-medium mb-2">Low Stock Thresholds</h3>
+            <p className="text-xs text-gray-600 mb-3">Below these minimums, a WhatsApp alert is sent after attendant submission. Leave blank to ignore an item. Use Reset to fall back to system defaults.</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {products.filter(p=>p.active).map(p => (
+                <label key={`thr-${p.id}`} className="text-sm">
+                  <div className="text-gray-600 mb-1 flex items-center justify-between gap-2">
+                    <span>{p.name} <span className="text-xs text-gray-400">({p.key})</span></span>
+                    <span className="text-[11px] text-gray-400">{p.unit}</span>
+                  </div>
+                  <input
+                    className="input-mobile border rounded-xl p-2 w-full max-w-28"
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="—"
+                    value={Number.isFinite(thresholds[p.key]) ? String(thresholds[p.key]) : ""}
+                    onChange={(e)=>{
+                      const raw = e.target.value;
+                      setThresholds(prev => {
+                        const next = { ...prev } as Record<string, number>;
+                        if (raw === "") { delete next[p.key]; return next; }
+                        const num = Number(raw);
+                        if (!Number.isNaN(num)) next[p.key] = num;
+                        return next;
+                      });
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 flex gap-2 mobile-scroll-x">
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveThresholds} disabled={loadingThresholds}>Save Thresholds</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={resetThresholdsToSystemDefaults}>Reset to System Defaults</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={refreshThresholds} disabled={loadingThresholds}>{loadingThresholds ? "Refreshing…" : "Refresh"}</button>
+            </div>
+          </div>
         </section>
       )}
     </main>
@@ -1465,23 +1551,22 @@ function getWeekDates(dateStr: string): string[] {
   return out;
 }
 function parseLS<T>(key: string): T | null {
-  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : null; }
-  catch { return null; }
+  return safeReadJSON<T | null>(key, null);
 }
 function saveLS<T>(key: string, value: T) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try { safeWriteJSON(key, value); } catch {}
 }
 /** Backup/Restore helpers (unchanged) */
 function exportJSON() {
   try {
     const dump = {
-      [K_OUTLETS]:   JSON.parse(localStorage.getItem(K_OUTLETS)   || "[]"),
-      [K_PRODUCTS]:  JSON.parse(localStorage.getItem(K_PRODUCTS)  || "[]"),
-      [K_EXPENSES]:  JSON.parse(localStorage.getItem(K_EXPENSES)  || "[]"),
-      [K_CODES]:     JSON.parse(localStorage.getItem(K_CODES)     || "[]"),
-      [K_SCOPE]:     JSON.parse(localStorage.getItem(K_SCOPE)     || "{}"),
-      [K_PRICEBOOK]: JSON.parse(localStorage.getItem(K_PRICEBOOK) || "{}"),
-    };
+      [K_OUTLETS]:   safeReadJSON(K_OUTLETS,   [] as any),
+      [K_PRODUCTS]:  safeReadJSON(K_PRODUCTS,  [] as any),
+      [K_EXPENSES]:  safeReadJSON(K_EXPENSES,  [] as any),
+      [K_CODES]:     safeReadJSON(K_CODES,     [] as any),
+      [K_SCOPE]:     safeReadJSON(K_SCOPE,     {} as any),
+      [K_PRICEBOOK]: safeReadJSON(K_PRICEBOOK, {} as any),
+    } as const;
     const a = document.createElement("a");
     a.href = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dump, null, 2));
     a.download = `butchery-admin-backup-${new Date().toISOString().slice(0,10)}.json`;
@@ -1495,14 +1580,7 @@ function resetDefaults() {
   alert("Defaults restored. Reload to see them.");
 }
 function clearAll() {
-  [K_OUTLETS, K_PRODUCTS, K_EXPENSES, K_CODES, K_SCOPE, K_PRICEBOOK].forEach(k => localStorage.removeItem(k));
+  [K_OUTLETS, K_PRODUCTS, K_EXPENSES, K_CODES, K_SCOPE, K_PRICEBOOK].forEach(k => lsRemoveItem(k));
   alert("All admin data cleared from this browser.");
 }
-function readJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }

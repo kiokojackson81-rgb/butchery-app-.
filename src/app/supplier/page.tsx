@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { readJSON as safeReadJSON } from "@/utils/safeStorage";
 
 /** Primary storage keys (match your Admin page) */
 const ADMIN_CODES_KEY = "admin_codes";   // People & Codes from Admin
@@ -34,25 +35,12 @@ function norm(s: string): string {
   return s.replace(/\s+/g, "").trim().toLowerCase();
 }
 
-function loadPeople(): PersonCode[] {
-  try {
-    const raw = localStorage.getItem(ADMIN_CODES_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw) as PersonCode[];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
+function loadPeople(): PersonCode[] { return safeReadJSON<PersonCode[]>(ADMIN_CODES_KEY, []); }
 function loadLegacy(): LegacyStaff[] {
   try {
     for (const key of LEGACY_STAFF_KEYS) {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const arr = JSON.parse(raw) as LegacyStaff[];
-        if (Array.isArray(arr)) return arr;
-      }
+      const arr = safeReadJSON<any[]>(key, []);
+      if (Array.isArray(arr) && arr.length) return arr as LegacyStaff[];
     }
   } catch {}
   return [];
