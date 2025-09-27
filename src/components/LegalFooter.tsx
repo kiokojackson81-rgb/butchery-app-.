@@ -34,10 +34,6 @@ export default function LegalFooter() {
       <a href="/terms" style={A}>Terms</a>
       <span style={Dot}>•</span>
       <a href="/cookies" style={A}>Cookies</a>
-      <span style={Dot}>•</span>
-      <a href="mailto:support@barakafresh.com" style={A}>
-        support@barakafresh.com
-      </a>
     </div>
   );
 }
