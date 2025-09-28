@@ -4,6 +4,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import crypto from "crypto";
 import { sendWaText } from "@/lib/wa";
+import {
+  sendClosingStockSubmitted,
+  sendLowStockAlert,
+  sendSupplyReceived,
+  sendSupplyRequest,
+  sendWasteRejected,
+} from "@/lib/wa-send-presets";
 import { prisma } from "@/lib/db";
 
 // Optional: simple guard for minimal abuse protection (token via env)
@@ -38,6 +45,14 @@ export async function POST(req: Request) {
       case "closing_submitted": {
         const amount = Number(payload?.depositAmount || 0);
         if (phone) await sendWaText(phone, `✅ Closing submitted. Deposit recorded: Ksh ${amount || 0}.`);
+        // approved template (non-breaking addition)
+        try {
+          const outlet = String(payload?.outlet || payload?.data?.outlet || "");
+          const summary = String(payload?.summary || payload?.summaryLine || payload?.totals || "");
+          if (phone && (outlet || summary)) {
+            await sendClosingStockSubmitted(phone, outlet, summary);
+          }
+        } catch {}
         break;
       }
       case "low_stock": {
@@ -52,6 +67,14 @@ export async function POST(req: Request) {
           ...supervisors.map((s: any) => sendWaText(s.phoneE164, msg)),
         ]);
         if (phone) await sendWaText(phone, "✅ Notified supplier & supervisor.");
+        // approved template (non-breaking addition)
+        try {
+          const item = String(payload?.item || payload?.product || payload?.productKey || "");
+          const qtyStr = String(payload?.qty ?? payload?.quantity ?? "");
+          if (phone && (item || qtyStr)) {
+            await sendLowStockAlert(phone, item, qtyStr);
+          }
+        } catch {}
         break;
       }
       case "supply_request": {
@@ -74,10 +97,37 @@ export async function POST(req: Request) {
           ...supervisors.map((s: any) => sendWaText(s.phoneE164, notice)),
         ]);
         if (phone) await sendWaText(phone, `✅ Request received for ${qty} ${productKey}.`);
+        // approved template (non-breaking addition)
+        try {
+          const listLine = String(payload?.listLine || payload?.list || payload?.note || payload?.items || `${qty} ${productKey}`);
+          if (phone) {
+            await sendSupplyRequest(phone, outlet, listLine);
+          }
+        } catch {}
         break;
       }
       case "deposit_confirmed": {
         if (phone) await sendWaText(phone, `✅ Deposit confirmed. Thank you.`);
+        break;
+      }
+      case "supply_received": {
+        // approved template only if enough context present
+        try {
+          const outlet = String(payload?.outlet || payload?.data?.outlet || "");
+          const grn = String(payload?.grn || payload?.grnNo || payload?.note || "");
+          if (phone && (outlet || grn)) {
+            await sendSupplyReceived(phone, outlet, grn);
+          }
+        } catch {}
+        break;
+      }
+      case "waste_rejected": {
+        try {
+          const reason = String(payload?.reason || payload?.note || payload?.message || "");
+          if (phone && reason) {
+            await sendWasteRejected(phone, reason);
+          }
+        } catch {}
         break;
       }
       default: {
