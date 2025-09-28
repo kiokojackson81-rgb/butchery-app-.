@@ -30,9 +30,9 @@ export async function POST(req: Request) {
     // Non-breaking: also create a short-lived server session so values persist across reloads/devices
     // We bind the session to this attendant code and outlet.
     // Find or create a minimal Attendant record using this code as a unique loginCode.
-    let att = await prisma.attendant.findFirst({ where: { loginCode: row.code } }).catch(() => null as any);
+    let att = await (prisma as any).attendant.findFirst({ where: { loginCode: row.code } }).catch(() => null as any);
     if (!att) {
-      att = await prisma.attendant.create({ data: { name: row.code, loginCode: row.code } }).catch(() => null as any);
+      att = await (prisma as any).attendant.create({ data: { name: row.code, loginCode: row.code } }).catch(() => null as any);
     }
     if (att) {
       const { token } = await createSession(att.id, row.outlet ?? undefined);

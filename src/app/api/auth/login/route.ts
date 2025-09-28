@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "loginCode required" }, { status: 400 });
     }
 
-    const att = await prisma.attendant.findUnique({ where: { loginCode } });
+  const att = await (prisma as any).attendant.findUnique({ where: { loginCode } });
     if (!att) {
       return NextResponse.json({ ok: false, error: "Invalid code" }, { status: 401 });
     }
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     let outletCodeFound: string | undefined;
     if (outletCode) {
       // Our schema does not enforce unique on code, so use findFirst safely
-      const outlet = await prisma.outlet.findFirst({ where: { code: outletCode } });
+  const outlet = await (prisma as any).outlet.findFirst({ where: { code: outletCode } });
       if (!outlet) {
         return NextResponse.json({ ok: false, error: "Outlet not found" }, { status: 400 });
       }

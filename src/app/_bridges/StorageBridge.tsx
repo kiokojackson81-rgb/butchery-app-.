@@ -7,6 +7,7 @@ const DB_KEYS = [
   "admin_outlets",
   "admin_products",
   "admin_pricebook",
+  "admin_pricebook_",
   "attendant_scope",
   "attendant_waste_reviews",
   "attendant_expenses_reviews",
@@ -71,6 +72,7 @@ export default function StorageBridge() {
 
     const inFlight = new Map<string, Promise<string | null>>();
     const dbCache = new Map<string, string | null>();
+    const coalescedWrites = new Map<string, string | null>();
 
     // Patch getItem: initiate DB hydrate for DB-backed keys
     ls.getItem = (key: string): string | null => {
@@ -97,7 +99,22 @@ export default function StorageBridge() {
     ls.setItem = (key: string, value: string) => {
       if (shouldDBPersist(key)) {
         dbCache.set(key, value);
-        dbSet([{ key, value }]).catch(() => {});
+        const isEmptyLike = (v: string) => {
+          const t = (v ?? "").trim();
+          return t === "" || t === "null" || t === "{}" || t === "[]";
+        };
+        if (inFlight.has(key) && isEmptyLike(value)) {
+          // Coalesce: delay writing empty initializer until hydration completes
+          coalescedWrites.set(key, value);
+          const p = inFlight.get(key)!;
+          p.finally(() => {
+            const latest = coalescedWrites.get(key) ?? value;
+            coalescedWrites.delete(key);
+            dbSet([{ key, value: latest }]).catch(() => {});
+          });
+        } else {
+          dbSet([{ key, value }]).catch(() => {});
+        }
       }
       return originalSetItem(key, value);
     };
@@ -185,6 +202,7 @@ export default function StorageBridge() {
 
     const inFlight = new Map<string, Promise<string | null>>();
     const dbCache = new Map<string, string | null>();
+  const coalescedWrites = new Map<string, string | null>();
 
     // Patch getItem: hydrate from DB on first access
     ss.getItem = (key: string): string | null => {
@@ -211,7 +229,19 @@ export default function StorageBridge() {
     ss.setItem = (key: string, value: string) => {
       if (shouldDBPersistSession(key)) {
         dbCache.set(key, value);
-        dbSetStrings([{ key, value }]).catch(() => {});
+        const isEmptyLike = (v: string) => (v ?? "").trim() === "";
+        if (inFlight.has(key) && isEmptyLike(value)) {
+          // Coalesce empty initializer while hydration is pending
+          coalescedWrites.set(key, value);
+          const p = inFlight.get(key)!;
+          p.finally(() => {
+            const latest = coalescedWrites.get(key) ?? value;
+            coalescedWrites.delete(key);
+            dbSetStrings([{ key, value: latest }]).catch(() => {});
+          });
+        } else {
+          dbSetStrings([{ key, value }]).catch(() => {});
+        }
       }
       return originalSetItem(key, value);
     };
@@ -230,6 +260,57 @@ export default function StorageBridge() {
       ss.setItem = originalSetItem;
       ss.removeItem = originalRemoveItem;
     };
+  }, []);
+
+  // Proactive hydrate: prefetch today/outlet keys early to minimize first read latency
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!me.ok) return;
+        const j = await me.json().catch(() => null as any);
+        const outlet: string | null = j?.outletCode ?? j?.outlet?.code ?? null;
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, "0");
+        const dd = String(today.getDate()).padStart(2, "0");
+        const dateKey = `${yyyy}-${mm}-${dd}`;
+        const keys: string[] = [];
+
+        if (outlet) {
+          keys.push(
+            `supplier_opening_${dateKey}_${outlet}`,
+            `supplier_opening_full_${dateKey}_${outlet}`,
+            `supplier_cost_${dateKey}_${outlet}`,
+            `supplier_transfers_${dateKey}_${outlet}`,
+            `supplier_submitted_${dateKey}_${outlet}`,
+            `attendant_closing_${dateKey}_${outlet}`,
+            `attendant_waste_${dateKey}_${outlet}`,
+            `attendant_deposits_${dateKey}_${outlet}`,
+            `attendant_expenses_${dateKey}_${outlet}`,
+            `attendant_tillcount_${dateKey}_${outlet}`,
+            `attendant_summary_${dateKey}_${outlet}`,
+            `admin_pricebook_${outlet}`
+          );
+        }
+
+        // Common admin keys
+        keys.push("admin_outlets", "admin_products", "admin_pricebook", "attendant_code");
+
+        // De-dup and limit to persisted keys only
+        const unique = Array.from(new Set(keys)).filter((k) => shouldDBPersist(k));
+        if (unique.length === 0) return;
+        const map = await dbGet(unique);
+        for (const k of unique) {
+          const v = map[k];
+          if (v == null) {
+            try { window.localStorage.removeItem(k); } catch {}
+          } else {
+            try { window.localStorage.setItem(k, v); } catch {}
+          }
+        }
+      } catch {}
+    })();
   }, []);
 
   return null;
