@@ -118,5 +118,119 @@ export default function StorageBridge() {
     };
   }, []);
 
+  // Also persist a small whitelist of sessionStorage keys across devices.
+  // These are simple string values (not JSON) used by existing pages.
+  useEffect(() => {
+    const ss = window.sessionStorage;
+    const originalGetItem = ss.getItem.bind(ss);
+    const originalSetItem = ss.setItem.bind(ss);
+    const originalRemoveItem = ss.removeItem.bind(ss);
+
+    const SESSION_DB_KEYS = [
+      // exact keys
+      "admin_auth",
+      "admin_welcome",
+      "attendant_code",
+      "supervisor_code",
+      "supervisor_name",
+      "supplier_code",
+      "supplier_name",
+    ];
+    const SESSION_PREFIXES = [
+      // future-proof: any new supervisor_/supplier_/admin_ flags
+      "supervisor_",
+      "supplier_",
+      "admin_",
+    ];
+
+    function shouldDBPersistSession(key: string) {
+      return (
+        SESSION_DB_KEYS.includes(key) ||
+        SESSION_PREFIXES.some((p) => key.startsWith(p))
+      );
+    }
+
+    async function dbGetStrings(keys: string[]): Promise<Record<string, string | null>> {
+      if (keys.length === 0) return {};
+      const res = await fetch("/api/state/bulk-get", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ keys }),
+      });
+      const js = await res.json().catch(() => null as any);
+      const map: Record<string, string | null> = {};
+      if (js?.ok && js?.data) {
+        for (const k of keys) {
+          const v = js.data[k];
+          // We store plain strings; coerce others to string if needed
+          map[k] = v == null ? null : typeof v === "string" ? v : String(v);
+        }
+      } else {
+        for (const k of keys) map[k] = null;
+      }
+      return map;
+    }
+
+    async function dbSetStrings(items: Array<{ key: string; value: string | null }>) {
+      const payload = items.filter((i) => shouldDBPersistSession(i.key));
+      if (payload.length === 0) return;
+      await fetch("/api/state/bulk-set", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ items: payload }),
+      }).catch(() => {});
+    }
+
+    const inFlight = new Map<string, Promise<string | null>>();
+    const dbCache = new Map<string, string | null>();
+
+    // Patch getItem: hydrate from DB on first access
+    ss.getItem = (key: string): string | null => {
+      if (!shouldDBPersistSession(key)) return originalGetItem(key);
+      if (dbCache.has(key)) return dbCache.get(key) ?? null;
+      if (!inFlight.has(key)) {
+        const p = dbGetStrings([key]).then((map) => {
+          const v = map[key] ?? null;
+          dbCache.set(key, v);
+          if (v == null) {
+            try { originalRemoveItem(key); } catch {}
+            return null;
+          } else {
+            try { originalSetItem(key, v); } catch {}
+            return v;
+          }
+        });
+        inFlight.set(key, p);
+      }
+      return originalGetItem(key);
+    };
+
+    // Patch setItem: write-through to DB
+    ss.setItem = (key: string, value: string) => {
+      if (shouldDBPersistSession(key)) {
+        dbCache.set(key, value);
+        dbSetStrings([{ key, value }]).catch(() => {});
+      }
+      return originalSetItem(key, value);
+    };
+
+    // Patch removeItem: delete in DB
+    ss.removeItem = (key: string) => {
+      if (shouldDBPersistSession(key)) {
+        dbCache.set(key, null);
+        dbSetStrings([{ key, value: null }]).catch(() => {});
+      }
+      return originalRemoveItem(key);
+    };
+
+    return () => {
+      ss.getItem = originalGetItem;
+      ss.setItem = originalSetItem;
+      ss.removeItem = originalRemoveItem;
+    };
+  }, []);
+
   return null;
 }
