@@ -217,3 +217,11 @@ model Session {
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
 }
+
+/// Tiny KV table to back selected localStorage keys in the DB
+model AppState {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
