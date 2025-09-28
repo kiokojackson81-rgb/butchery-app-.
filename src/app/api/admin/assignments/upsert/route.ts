@@ -15,15 +15,17 @@ export async function POST(req: Request) {
 
     if (!code || !outlet) return NextResponse.json({ ok: false, error: "code & outlet required" }, { status: 400 });
 
-    const existing = await (prisma as any).attendantAssignment.findFirst({ where: { code } });
+    // Store normalized code (lowercase, no whitespace) so login can match reliably
+    const norm = code.trim().replace(/\s+/g, "").toLowerCase();
+    const existing = await (prisma as any).attendantAssignment.findFirst({ where: { code: norm } });
     if (existing) {
       await (prisma as any).attendantAssignment.update({
         where: { id: existing.id },
-        data: { outlet, productKeys },
+        data: { code: norm, outlet, productKeys },
       });
     } else {
       await (prisma as any).attendantAssignment.create({
-        data: { id: `aa_${Date.now()}`, code, outlet, productKeys },
+        data: { id: `aa_${Date.now()}`, code: norm, outlet, productKeys },
       });
     }
     return NextResponse.json({ ok: true });

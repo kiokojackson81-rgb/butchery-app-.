@@ -16,7 +16,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "loginCode required" }, { status: 400 });
     }
 
-  const att = await (prisma as any).attendant.findUnique({ where: { loginCode } });
+    // Normalize the code like attendant login
+    const norm = loginCode.trim().replace(/\s+/g, "").toLowerCase();
+
+    const att = await (prisma as any).attendant.findFirst({ where: { loginCode: norm } });
     if (!att) {
       return NextResponse.json({ ok: false, error: "Invalid code" }, { status: 401 });
     }
@@ -31,8 +34,8 @@ export async function POST(req: Request) {
       outletCodeFound = outlet.code ?? undefined;
     }
 
-  await createSession(att.id, outletCodeFound);
-  return NextResponse.json({ ok: true });
+    await createSession(att.id, outletCodeFound);
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Login failed" }, { status: 500 });
   }

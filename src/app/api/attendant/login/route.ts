@@ -8,11 +8,11 @@ import { createSession, serializeSessionCookie } from '@/lib/session';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const codeRaw = (body?.code ?? '').toString();
+  const body = await req.json().catch(() => ({}));
+  const codeRaw = (body?.code ?? '').toString();
 
-    // normalize like your UI does (trim)
-    const code = codeRaw.trim();
+  // Normalize: remove spaces and lowercase for consistent DB matching
+  const code = codeRaw.trim().replace(/\s+/g, "").toLowerCase();
 
     if (!code) {
       return NextResponse.json({ error: 'Missing code' }, { status: 400 });
@@ -32,6 +32,7 @@ export async function POST(req: Request) {
     // Find or create a minimal Attendant record using this code as a unique loginCode.
     let att = await (prisma as any).attendant.findFirst({ where: { loginCode: row.code } }).catch(() => null as any);
     if (!att) {
+      // Row.code is already normalized (from AttendantAssignment). Persist normalized for consistency.
       att = await (prisma as any).attendant.create({ data: { name: row.code, loginCode: row.code } }).catch(() => null as any);
     }
     if (att) {
