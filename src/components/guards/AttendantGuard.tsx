@@ -12,13 +12,20 @@ export default function AttendantGuard({ children }: { children: React.ReactNode
     (async () => {
       try {
         const r = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!r.ok) throw new Error("no session");
-        const j = await r.json();
-        if (!j?.ok) throw new Error("no session");
-        if (!cancelled) setReady(true);
-      } catch {
-        if (!cancelled) router.replace("/attendant");
-      }
+        if (r.ok) {
+          if (!cancelled) setReady(true);
+          return;
+        }
+      } catch {}
+      // Legacy fallback
+      try {
+        const legacy = sessionStorage.getItem("attendant_code");
+        if (legacy) {
+          if (!cancelled) setReady(true);
+          return;
+        }
+      } catch {}
+      if (!cancelled) router.replace("/attendant");
     })();
     return () => { cancelled = true; };
   }, [router]);
