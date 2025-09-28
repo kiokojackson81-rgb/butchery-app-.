@@ -35,8 +35,8 @@ export async function POST(req: Request) {
       att = await (prisma as any).attendant.create({ data: { name: row.code, loginCode: row.code } }).catch(() => null as any);
     }
     if (att) {
-      const { token } = await createSession(att.id, row.outlet ?? undefined);
-      const res = NextResponse.json(
+      await createSession(att.id, row.outlet ?? undefined);
+      return NextResponse.json(
         {
           ok: true,
           code: row.code,
@@ -46,8 +46,6 @@ export async function POST(req: Request) {
         },
         { status: 200 }
       );
-      res.headers.append('Set-Cookie', serializeSessionCookie(token));
-      return res;
     }
 
     // Fallback if we couldn't create an attendant (DB issue): return original response

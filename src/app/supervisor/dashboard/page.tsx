@@ -81,15 +81,77 @@ export default function SupervisorDashboard() {
   useEffect(() => {
     // Ensure admin settings are hydrated from DB first (thin persistence)
     (async () => { try { await hydrateLocalStorageFromDB(); } catch {} })();
+    (async () => {
+      try {
+        // 1) Sync any local pending items to server (best-effort)
+        const allLocal = [
+          ...read(WASTE_KEY).map(r => ({ type: "waste",    outlet: r.outlet, date: r.date, payload: r })),
+          ...read(EXPENSES_KEY).map(r => ({ type: "expense",  outlet: r.outlet, date: r.date, payload: r })),
+          ...read(EXCESS_KEY).map(r => ({ type: "excess",   outlet: r.outlet, date: r.date, payload: r })),
+          ...read(DEFICIT_KEY).map(r => ({ type: "deficit",  outlet: r.outlet, date: r.date, payload: r })),
+          ...read(DEPOSITS_KEY).map(r => ({ type: "deposit", outlet: r.outlet, date: r.date, payload: r })),
+        ].filter(x => (x?.payload?.state || "pending") === "pending");
+        if (allLocal.length) {
+          try {
+            await fetch("/api/supervisor/reviews", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({ items: allLocal })
+            });
+          } catch {}
+        }
 
-    setWaste(read(WASTE_KEY));
-    setExpenses(read(EXPENSES_KEY));
-    setExcess(read(EXCESS_KEY));
-    setDeficit(read(DEFICIT_KEY));
-    setDeposits(read(DEPOSITS_KEY));
+        // 2) Fetch server lists (all, keep UI behavior unchanged)
+        const res = await fetch("/api/supervisor/reviews", { cache: "no-store" });
+        if (res.ok) {
+          const j = await res.json().catch(()=>null as any);
+          const items: any[] = j?.items || [];
+          // Partition by type; keep shape compatible with existing UI
+          const toView = (t: string) => items.filter(i => i.type === t).map(i => ({
+            id: i.id,
+            date: new Date(i.date).toISOString().slice(0,10),
+            outlet: i.outlet,
+            item: i.payload?.item || i.payload?.itemKey || i.payload?.item_name,
+            amount: Number(i.payload?.amount ?? i.payload?.qty ?? 0),
+            note: i.payload?.note || i.payload?.description || "",
+            state: (i.status || "pending") as "pending"|"approved"|"rejected",
+          }));
+          const w = toView("waste");
+          const exps = toView("expense");
+          const exs = toView("excess");
+          const defs = toView("deficit");
+          const deps = toView("deposit");
+          // write-through to local so Approve/Reject local mirror stays in sync
+          save(WASTE_KEY, w);
+          save(EXPENSES_KEY, exps);
+          save(EXCESS_KEY, exs);
+          save(DEFICIT_KEY, defs);
+          save(DEPOSITS_KEY, deps);
+          setWaste(w);
+          setExpenses(exps);
+          setExcess(exs);
+          setDeficit(defs);
+          setDeposits(deps);
+        } else {
+          // Fallback to local if server fails
+          setWaste(read(WASTE_KEY));
+          setExpenses(read(EXPENSES_KEY));
+          setExcess(read(EXCESS_KEY));
+          setDeficit(read(DEFICIT_KEY));
+          setDeposits(read(DEPOSITS_KEY));
+        }
+      } catch {
+        setWaste(read(WASTE_KEY));
+        setExpenses(read(EXPENSES_KEY));
+        setExcess(read(EXCESS_KEY));
+        setDeficit(read(DEFICIT_KEY));
+        setDeposits(read(DEPOSITS_KEY));
+      }
 
-    const outs = readJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
-    setOutlets((outs || []).filter(o => o?.name));
+      const outs = readJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
+      setOutlets((outs || []).filter(o => o?.name));
+    })();
   }, []);
 
   const updateState = (
@@ -97,9 +159,16 @@ export default function SupervisorDashboard() {
     id: string,
     state: "approved" | "rejected"
   ) => {
-    const list = read(key).map((r: ReviewItem) =>
-      r.id === id ? { ...r, state } : r
-    );
+    // 1) Server first (best-effort)
+    (async () => {
+      try {
+        const url = new URL(`/api/supervisor/reviews/${encodeURIComponent(id)}/${state}`, window.location.origin);
+        await fetch(url.toString(), { method: "POST", cache: "no-store" });
+      } catch {}
+    })();
+
+    // 2) Mirror change locally to preserve current UX
+    const list = read(key).map((r: ReviewItem) => (r.id === id ? { ...r, state } : r));
     save(key, list);
     if (key === WASTE_KEY) setWaste(list);
     if (key === EXPENSES_KEY) setExpenses(list);

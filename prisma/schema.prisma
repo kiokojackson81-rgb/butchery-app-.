@@ -225,3 +225,15 @@ model AppState {
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
+
+/// Supervisor review queue items (DB-backed, replaces local-only queues)
+model ReviewItem {
+  id        String   @id @default(cuid())
+  type      String   // "waste" | "expense" | "excess" | "deficit" | "deposit"
+  outlet    String
+  date      DateTime
+  payload   Json
+  status    String   @default("pending") // pending|approved|rejected
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -39,3 +39,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
   }
 }
+
+// DELETE /api/admin/scope?code=<loginCode>
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const code = (searchParams.get("code") || "").trim();
+    if (!code) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
+
+    await (prisma as any).attendantAssignment.delete({ where: { code } }).catch(() => {});
+    // Also clear normalized scope if stored in AttendantScope
+    const codeNorm = code.replace(/\s+/g, "").toLowerCase();
+    await (prisma as any).attendantScope.delete({ where: { codeNorm } }).catch(() => {});
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+  }
+}

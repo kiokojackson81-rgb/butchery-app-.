@@ -86,11 +86,36 @@ export default function AdminStaffPage() {
     if (!s.code) return alert("Set a login code first.");
     const m = { ...scope, [s.code]: { outlet: s.outlet, productKeys: s.products } };
     setScope(m); writeScope(m);
-    alert(`Scope saved for ${s.name || s.code}. Attendant will see only ${s.outlet} and ${s.products.length} products.`);
+    // Write-through to server (best-effort)
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/scope", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ [s.code]: { outlet: s.outlet, productKeys: s.products } }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        alert(`Scope saved for ${s.name || s.code} \u2705`);
+      } catch {
+        alert(`Saved locally, but failed to sync scope for ${s.name || s.code} to server.`);
+      }
+    })();
   };
   const clearScope = (s: Staff) => {
     if (!s.code) return;
     const m = { ...scope }; delete m[s.code]; setScope(m); writeScope(m);
+    // Mirror clear to server
+    (async () => {
+      try {
+        const url = new URL("/api/admin/scope", window.location.origin);
+        url.searchParams.set("code", s.code);
+        const res = await fetch(url.toString(), { method: "DELETE", cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+      } catch {
+        // non-blocking
+      }
+    })();
   };
   const isScoped = (code: string) => !!scope[code];
 
@@ -101,7 +126,21 @@ export default function AdminStaffPage() {
       if (s.active && s.code) m[s.code] = { outlet: s.outlet, productKeys: s.products };
     });
     setScope(m); writeScope(m);
-    alert("All active staff synced into attendant_scope.");
+    // Push entire map to server (best-effort)
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/scope", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(m),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        alert("All active staff scopes synced to server \u2705");
+      } catch {
+        alert("Scopes saved locally, but failed to sync all to server.");
+      }
+    })();
   };
 
   return (

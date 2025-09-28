@@ -113,7 +113,12 @@ function ymd(d = new Date()): string {
 function loadLS<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
 function saveLS<T>(key: string, value: T): void { try { safeWriteJSON(key, value); } catch {} }
 async function postJSON<T>(url: string, body: any): Promise<T> {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(body),
+  });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }

@@ -31,10 +31,8 @@ export async function POST(req: Request) {
       outletCodeFound = outlet.code ?? undefined;
     }
 
-    const { token } = await createSession(att.id, outletCodeFound);
-    const res = NextResponse.json({ ok: true });
-    res.headers.append("Set-Cookie", serializeSessionCookie(token));
-    return res;
+  await createSession(att.id, outletCodeFound);
+  return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Login failed" }, { status: 500 });
   }

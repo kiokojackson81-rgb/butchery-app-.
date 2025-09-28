@@ -157,28 +157,25 @@ export default function AdminPage() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) DB → localStorage (thin persistence)
-        await hydrateLocalStorageFromDB();
-
-        // 2) If still empty, bootstrap from server relational store
-        const needsBootstrap =
-          (safeReadJSON<any[]>("admin_outlets", []).length === 0) ||
-          (safeReadJSON<any[]>("admin_products", []).length === 0) ||
-          (safeReadJSON<any[]>("admin_codes", []).length === 0) ||
-          (Object.keys(safeReadJSON<Record<string, unknown>>("attendant_scope", {})).length === 0) ||
-          (Object.keys(safeReadJSON<Record<string, unknown>>("admin_pricebook", {})).length === 0);
-        if (needsBootstrap) {
-          try {
-            const r = await fetch("/api/admin/bootstrap", { cache: "no-store" });
-            if (r.ok) {
-              const j = await r.json();
-              if (j.outlets) safeWriteJSON("admin_outlets", j.outlets);
-              if (j.products) safeWriteJSON("admin_products", j.products);
-              if (j.codes) safeWriteJSON("admin_codes", j.codes);
-              if (j.scope) safeWriteJSON("attendant_scope", j.scope);
-              if (j.pricebook) safeWriteJSON("admin_pricebook", j.pricebook);
+        // 1) DB-first: try relational bootstrap first
+        let bootstrapped = false;
+        try {
+          const r = await fetch("/api/admin/bootstrap", { cache: "no-store" });
+          if (r.ok) {
+            const j = await r.json();
+            if (j) {
+              if (j.outlets)   { safeWriteJSON("admin_outlets", j.outlets);   bootstrapped = true; }
+              if (j.products)  { safeWriteJSON("admin_products", j.products); bootstrapped = true; }
+              if (j.codes)     { safeWriteJSON("admin_codes", j.codes);       bootstrapped = true; }
+              if (j.scope)     { safeWriteJSON("attendant_scope", j.scope);   bootstrapped = true; }
+              if (j.pricebook) { safeWriteJSON("admin_pricebook", j.pricebook); bootstrapped = true; }
             }
-          } catch {}
+          }
+        } catch {}
+
+        // 2) Fallback: hydrate thin settings if bootstrap didn’t fill
+        if (!bootstrapped) {
+          try { await hydrateLocalStorageFromDB(); } catch {}
         }
 
         // 3) Read from localStorage into state
@@ -253,6 +250,7 @@ export default function AdminPage() {
     const res = await fetch("/api/admin/scope", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify(map),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -278,7 +276,7 @@ export default function AdminPage() {
     const phone = (phones[code] || "").trim();
     if (!code || !phone) { alert("Missing code or phone"); return; }
     const payload = { code, role, phoneE164: phone, outlet: outletName };
-    const r = await fetch("/api/admin/phones", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const r = await fetch("/api/admin/phones", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify(payload) });
     if (!r.ok) throw new Error(await r.text());
   };
   const saveAllPhones = async () => {
@@ -306,7 +304,7 @@ export default function AdminPage() {
     const { apiBase, apiKey, fromPhone } = chatSettings;
     if (!apiBase || !apiKey) { alert("apiBase and apiKey are required"); return; }
     try {
-      const r = await fetch("/api/admin/chatrace-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiBase, apiKey, fromPhone }) });
+  const r = await fetch("/api/admin/chatrace-settings", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ apiBase, apiKey, fromPhone }) });
       if (!r.ok) throw new Error(await r.text());
       alert("Chatrace settings saved ✅");
     } catch {
@@ -324,6 +322,7 @@ export default function AdminPage() {
       const r = await fetch("/api/admin/low-stock-thresholds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({ thresholds: body }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -334,7 +333,7 @@ export default function AdminPage() {
   };
   const resetThresholdsToSystemDefaults = async () => {
     try {
-      const r = await fetch("/api/admin/low-stock-thresholds", { method: "DELETE" });
+  const r = await fetch("/api/admin/low-stock-thresholds", { method: "DELETE", cache: "no-store" });
       if (!r.ok) throw new Error(await r.text());
       setThresholds({});
       alert("Reset to system defaults ✅");
@@ -361,7 +360,7 @@ export default function AdminPage() {
   const savePricebook   = async () => {
     saveLS(K_PRICEBOOK, pricebook);
     try { await pushLocalStorageKeyToDB(K_PRICEBOOK as any); } catch {}
-    try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope: {}, pricebook }) }); } catch {}
+  try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ scope: {}, pricebook }) }); } catch {}
     alert("Outlet pricebook saved ✅");
   };
 
@@ -1414,6 +1413,19 @@ export default function AdminPage() {
                   }}
                 >
                   Refresh from DB
+                </button>
+                <button
+                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                  title="Check DB persistence health"
+                  onClick={async () => {
+                    try {
+                      const r = await fetch("/api/admin/persistence/health", { cache: "no-store" });
+                      const j = await r.json().catch(()=>null as any);
+                      alert("Health: " + JSON.stringify(j));
+                    } catch {}
+                  }}
+                >
+                  Check DB Health
                 </button>
               </div>
             </div>
