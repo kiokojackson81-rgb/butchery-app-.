@@ -21,6 +21,8 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  // Note: Exclude Next's generated .next/types from standalone tsc to avoid module-not-found noise.
+  // Next.js runs its own type analysis during `next build`.
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules"]
 }

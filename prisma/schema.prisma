@@ -26,6 +26,7 @@ model Outlet {
   name    String  @unique
   code    String?
   active  Boolean @default(true)
+  attendants Attendant[]
 }
 
 model Product {
@@ -147,4 +148,72 @@ model AttendantAssignment {
   outlet      String
   productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
+}
+
+/// Mapping between person login codes and WhatsApp phone numbers (E.164)
+model PhoneMapping {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  role      String
+  phoneE164 String
+  outlet    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Chatrace API settings (singleton row id=1)
+model ChatraceSetting {
+  id        Int      @id @default(1)
+  apiBase   String
+  apiKey    String
+  fromPhone String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Supply requests originating from WhatsApp or other sources
+model SupplyRequest {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  outlet      String
+  productKey  String
+  qty         Float
+  status      String
+  source      String
+  requestedBy String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Minimal auth/session models for persistent attendant login and outlet binding
+model Attendant {
+  id         String     @id @default(cuid())
+  name       String
+  outletId   String?
+  outletRef  Outlet?    @relation(fields: [outletId], references: [id])
+  loginCode  String?    @unique
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  sessions   Session[]
+  loginCodes LoginCode[]
+}
+
+model LoginCode {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  attendantId String
+  attendant   Attendant @relation(fields: [attendantId], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+}
+
+model Session {
+  id          String    @id @default(cuid())
+  attendantId String
+  attendant   Attendant @relation(fields: [attendantId], references: [id])
+  outletCode  String?
+  token       String    @unique
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
 }

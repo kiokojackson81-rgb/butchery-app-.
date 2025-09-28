@@ -3,6 +3,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 export default function AttendantLoginPage() {
   const [code, setCode] = useState("");
@@ -30,12 +31,11 @@ export default function AttendantLoginPage() {
         return;
       }
 
-      // Mirror minimal scope into localStorage for dashboard overlay logic
+      // Mirror minimal scope into localStorage for dashboard overlay logic (SSR-safe)
       try {
-        const rawScope = localStorage.getItem("attendant_scope");
-        const map = rawScope ? JSON.parse(rawScope) as Record<string, { outlet: string; productKeys: string[] }> : {};
+        const map = safeReadJSON<Record<string, { outlet: string; productKeys: string[] }>>("attendant_scope", {});
         map[norm] = { outlet: j.outlet, productKeys: Array.isArray(j.productKeys) ? j.productKeys : [] };
-        localStorage.setItem("attendant_scope", JSON.stringify(map));
+        safeWriteJSON("attendant_scope", map);
       } catch {}
 
       sessionStorage.setItem("attendant_code", norm);

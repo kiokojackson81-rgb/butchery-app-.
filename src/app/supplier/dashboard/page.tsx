@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 /* =========================
    Types (aligned with Admin)
@@ -109,21 +110,8 @@ function rid(): string {
 function ymd(d = new Date()): string {
   return d.toISOString().split("T")[0];
 }
-function loadLS<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function saveLS<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
-  }
-}
+function loadLS<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
+function saveLS<T>(key: string, value: T): void { try { safeWriteJSON(key, value); } catch {} }
 async function postJSON<T>(url: string, body: any): Promise<T> {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(await r.text());

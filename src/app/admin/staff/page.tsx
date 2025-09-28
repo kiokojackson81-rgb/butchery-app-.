@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 // ===== Types kept exactly as your original =====
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
@@ -36,15 +37,13 @@ const OUTLETS: Outlet[] = ["Bright", "Baraka A", "Baraka B", "Baraka C"];
 
 // ===== Utilities (unchanged + small extras) =====
 function uid() { return Math.random().toString(36).slice(2); }
-function readStaff(): Staff[] {
-  try { const raw = localStorage.getItem(ADMIN_STAFF_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-function writeStaff(list: Staff[]) { localStorage.setItem(ADMIN_STAFF_KEY, JSON.stringify(list)); }
+function readStaff(): Staff[] { return safeReadJSON<Staff[]>(ADMIN_STAFF_KEY, []); }
+function writeStaff(list: Staff[]) { try { safeWriteJSON(ADMIN_STAFF_KEY, list); } catch {} }
 
 // Scope store: code -> { outlet, productKeys }
 type ScopeMap = Record<string, { outlet: Outlet; productKeys: ItemKey[] }>
-function readScope(): ScopeMap { try { return JSON.parse(localStorage.getItem(SCOPE_KEY) || "{}"); } catch { return {}; } }
-function writeScope(map: ScopeMap) { localStorage.setItem(SCOPE_KEY, JSON.stringify(map)); }
+function readScope(): ScopeMap { return safeReadJSON<ScopeMap>(SCOPE_KEY, {} as any); }
+function writeScope(map: ScopeMap) { try { safeWriteJSON(SCOPE_KEY, map); } catch {} }
 
 export default function AdminStaffPage() {
   const [list, setList] = useState<Staff[]>([]);

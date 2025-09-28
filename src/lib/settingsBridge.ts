@@ -1,3 +1,5 @@
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
+
 const KEYS = [
   "admin_outlets",
   "admin_products",
@@ -22,7 +24,8 @@ export async function hydrateLocalStorageFromDB(keys: KnownKey[] = KEYS as any) 
     try {
       const value = await fetchSetting(key as KnownKey);
       if (value !== null && value !== undefined) {
-        localStorage.setItem(key as string, JSON.stringify(value));
+        // SSR-safe write
+        safeWriteJSON(key as string, value);
       }
     } catch {}
   }
@@ -31,8 +34,7 @@ export async function hydrateLocalStorageFromDB(keys: KnownKey[] = KEYS as any) 
 /** localStorage → DB (call inside your existing Save handlers) */
 export async function pushLocalStorageKeyToDB(key: KnownKey) {
   try {
-    const raw = localStorage.getItem(key as string);
-    const value = raw ? JSON.parse(raw) : null;
+    const value = safeReadJSON<any>(key as string, null);
     await fetch(`/api/settings/${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

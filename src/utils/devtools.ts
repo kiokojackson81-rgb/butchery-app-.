@@ -1,10 +1,12 @@
 // src/utils/devtools.ts
+import { readJSON as safeReadJSON, writeJSON as safeWriteJSON, removeItem as safeRemoveItem } from "@/utils/safeStorage";
 
 function collectAllStorage(): Record<string, unknown> {
   const all: Record<string, unknown> = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)!;
-    const v = localStorage.getItem(k);
+  if (typeof window === "undefined") return all;
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const k = window.localStorage.key(i)!;
+    const v = window.localStorage.getItem(k);
     try {
       all[k] = v === null ? null : JSON.parse(v);
     } catch {
@@ -24,22 +26,22 @@ export function exportJSON(): string {
 export function importJSON(payload: string): void {
   const data = JSON.parse(payload) as Record<string, unknown>;
   Object.entries(data).forEach(([k, v]) => {
-    localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v));
+    try { safeWriteJSON(k, typeof v === "string" ? (v as any) : v); } catch {}
   });
 }
 
 export function clearAll(): void {
-  // Dev-only: wipes ALL localStorage keys
-  localStorage.clear();
+  if (typeof window === "undefined") return;
+  try { window.localStorage.clear(); } catch {}
 }
 
 export function resetDefaults(): void {
-  // Wipe then seed minimal app defaults (adjust to your app)
-  localStorage.clear();
-  localStorage.setItem("admin_outlets", JSON.stringify([]));
-  localStorage.setItem("admin_products", JSON.stringify([]));
-  localStorage.setItem("admin_expenses", JSON.stringify([]));
-  localStorage.setItem("admin_codes", JSON.stringify({}));
-  localStorage.setItem("attendant_scope", JSON.stringify({}));
-  localStorage.setItem("admin_pricebook", JSON.stringify({}));
+  if (typeof window === "undefined") return;
+  try { window.localStorage.clear(); } catch {}
+  try { safeWriteJSON("admin_outlets", []); } catch {}
+  try { safeWriteJSON("admin_products", []); } catch {}
+  try { safeWriteJSON("admin_expenses", []); } catch {}
+  try { safeWriteJSON("admin_codes", {} as any); } catch {}
+  try { safeWriteJSON("attendant_scope", {} as any); } catch {}
+  try { safeWriteJSON("admin_pricebook", {} as any); } catch {}
 }
