@@ -18,30 +18,17 @@ export default function AttendantLoginPage() {
 
     const norm = raw.replace(/\s+/g, "").toLowerCase();
     try {
-      const res = await fetch("/api/auth/attendant", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: norm })
+        cache: "no-store",
+        body: JSON.stringify({ loginCode: norm })
       });
-      if (!res.ok) throw new Error(await res.text());
-      const j = await res.json();
-
-      if (!j || !j.ok || !j.outlet) {
-        alert("Code not recognized or inactive. Please contact admin.");
-        return;
-      }
-
-      // Mirror minimal scope into localStorage for dashboard overlay logic (SSR-safe)
-      try {
-        const map = safeReadJSON<Record<string, { outlet: string; productKeys: string[] }>>("attendant_scope", {});
-        map[norm] = { outlet: j.outlet, productKeys: Array.isArray(j.productKeys) ? j.productKeys : [] };
-        safeWriteJSON("attendant_scope", map);
-      } catch {}
-
-      sessionStorage.setItem("attendant_code", norm);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
       router.push("/attendant/dashboard");
     } catch (e) {
-      alert("Login failed. Check your network or try again.");
+      alert("Login failed. Check your code or try again.");
     }
   };
 

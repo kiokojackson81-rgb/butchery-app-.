@@ -8,9 +8,19 @@ export default function AttendantGuard({ children }: { children: React.ReactNode
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const code = sessionStorage.getItem("attendant_code");
-    if (!code) { router.replace("/attendant"); return; }
-    setReady(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!r.ok) throw new Error("no session");
+        const j = await r.json();
+        if (!j?.ok) throw new Error("no session");
+        if (!cancelled) setReady(true);
+      } catch {
+        if (!cancelled) router.replace("/attendant");
+      }
+    })();
+    return () => { cancelled = true; };
   }, [router]);
 
   if (!ready) return null;

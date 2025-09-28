@@ -96,20 +96,31 @@ export default function AttendantDashboardPage() {
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
-    const code = sessionStorage.getItem("attendant_code") || "";
-    try {
-      const list = safeReadJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
-      if (list && code) {
-        const found = list.find(o => o.active && o.code && code.trim().toLowerCase() === o.code.trim().toLowerCase());
-        if (found) setOutlet(found.name as Outlet);
-      }
-    } catch {}
+    (async () => {
+      // Prefer server session
+      try {
+        const me = await fetch("/api/auth/me", { cache: "no-store" });
+        if (me.ok) {
+          const j = await me.json();
+          const code = (j?.outletCode || "").toString();
+          if (code) {
+            // Resolve outlet name from admin outlets
+            try {
+              const list = safeReadJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
+              const found = list.find(o => o.active && (o.code || "").trim().toLowerCase() === code.trim().toLowerCase());
+              if (found?.name) setOutlet(found.name as Outlet);
+            } catch {}
+          }
+        }
+      } catch {}
 
-    const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
-    if (arr && arr.length > 0) {
-      const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
-      setCatalog(map);
-    }
+      // Catalog from admin products (local mirror hydrated at mount)
+      const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
+      if (arr && arr.length > 0) {
+        const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
+        setCatalog(map);
+      }
+    })();
   }, []);
 
   /** ===== Scope & pricebook overlays (unchanged) ===== */
