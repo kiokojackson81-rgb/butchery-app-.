@@ -143,6 +143,33 @@ export default function AdminPage() {
   const [svEdit, setSvEdit] = useState<Record<string, { outlet: string; productKeys: string[] }>>({});
   const [svNew, setSvNew] = useState<{ code: string; outlet: string; products: string }>({ code: "", outlet: "", products: "" });
 
+  // Canonical product key map and helpers
+  const productKeyMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    products.forEach(p => { if (p?.key) m[p.key.toLowerCase()] = p.key; });
+    return m;
+  }, [products]);
+  const canonicalizeProductKeys = (tokens: string[]) => {
+    const seen = new Set<string>();
+    const canonical: string[] = [];
+    const invalid: string[] = [];
+    tokens.forEach(t => {
+      const k = (t || "").trim();
+      if (!k) return;
+      const found = productKeyMap[k.toLowerCase()];
+      if (found) {
+        if (!seen.has(found)) { seen.add(found); canonical.push(found); }
+      } else {
+        invalid.push(k);
+      }
+    });
+    return { canonical, invalid };
+  };
+  const svNewValidation = useMemo(() => {
+    const toks = (svNew.products || "").split(',').map(s=>s.trim()).filter(Boolean);
+    return canonicalizeProductKeys(toks);
+  }, [svNew.products, productKeyMap]);
+
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
   // Chatrace settings card state
@@ -887,17 +914,23 @@ export default function AdminPage() {
                   </label>
                   <label className="text-xs flex-1 min-w-56">
                     <div className="text-gray-600 mb-1">Products (comma separated)</div>
-                    <input className="border rounded-lg px-2 py-1 text-xs w-full" placeholder="beef, goat, liver"
+                    <input className={`border rounded-lg px-2 py-1 text-xs w-full${svNewValidation.invalid.length ? ' border-red-500' : ''}`} placeholder="beef, goat, liver"
                       value={svNew.products}
                       onChange={e=>setSvNew(prev=>({ ...prev, products: e.target.value }))}
                     />
                   </label>
+                  {svNewValidation.invalid.length > 0 && (
+                    <div className="text-[11px] text-red-600">
+                      Invalid: {svNewValidation.invalid.join(', ')}
+                    </div>
+                  )}
                   <button
                     className="text-xs border rounded-lg px-3 py-1"
+                    disabled={svNewValidation.invalid.length > 0 || !(svNew.code||'').trim() || !(svNew.outlet||'').trim()}
                     onClick={async()=>{
                       const code = (svNew.code || "").trim();
                       const outlet = (svNew.outlet || "").trim();
-                      const productKeys = (svNew.products || "").split(',').map(s=>s.trim()).filter(Boolean);
+                      const productKeys = svNewValidation.canonical;
                       if (!code || !outlet) { alert('Code and Outlet are required'); return; }
                       try {
                         const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, outlet, productKeys }) });
@@ -941,13 +974,20 @@ export default function AdminPage() {
                           </td>
                           <td className="truncate max-w-[280px]">
                             {svEdit[row.code] ? (
-                              <input className="border rounded-lg px-2 py-0.5 text-xs w-full" placeholder="comma,separated,keys"
+                              <>
+                              <input className={`border rounded-lg px-2 py-0.5 text-xs w-full${canonicalizeProductKeys(svEdit[row.code].productKeys || []).invalid.length ? ' border-red-500' : ''}`} placeholder="comma,separated,keys"
                                 value={(svEdit[row.code].productKeys || []).join(', ')}
                                 onChange={e=>{
                                   const arr = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
                                   setSvEdit(prev=>({ ...prev, [row.code]: { ...prev[row.code], productKeys: arr } }));
                                 }}
                               />
+                              {canonicalizeProductKeys(svEdit[row.code].productKeys || []).invalid.length > 0 && (
+                                <div className="text-[11px] text-red-600 mt-1">
+                                  Invalid: {canonicalizeProductKeys(svEdit[row.code].productKeys || []).invalid.join(', ')}
+                                </div>
+                              )}
+                              </>
                             ) : (
                               <span title={(row.productKeys||[]).join(', ')}>{(row.productKeys||[]).join(', ')}</span>
                             )}
@@ -977,10 +1017,11 @@ export default function AdminPage() {
                               </div>
                             ) : (
                               <div className="flex gap-2">
-                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={async()=>{
+                                <button className="text-xs border rounded-lg px-2 py-0.5" disabled={canonicalizeProductKeys(svEdit[row.code].productKeys || []).invalid.length > 0 || !(svEdit[row.code].outlet||'').trim()} onClick={async()=>{
                                   const patch = svEdit[row.code];
+                                  const canon = canonicalizeProductKeys(patch.productKeys || []).canonical;
                                   try {
-                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: patch.productKeys }) });
+                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: canon }) });
                                     if (!r.ok) throw new Error(await r.text());
                                     setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
                                     const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
