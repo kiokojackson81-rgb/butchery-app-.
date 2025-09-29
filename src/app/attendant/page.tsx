@@ -18,11 +18,11 @@ export default function AttendantLoginPage() {
 
     const norm = raw.replace(/\s+/g, "").toLowerCase();
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/attendant/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ loginCode: norm })
+        body: JSON.stringify({ code: norm })
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
