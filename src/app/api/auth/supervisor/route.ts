@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
+import { normalizeCode } from "@/lib/normalizeCode";
 
 export async function POST(req: Request) {
   try {
@@ -11,7 +12,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
     }
 
-    const norm = code.replace(/\s+/g, "").toLowerCase();
+  const norm = normalizeCode(code);
 
     // Fetch people/codes from Setting store
     const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
@@ -20,8 +21,8 @@ export async function POST(req: Request) {
     const found = list.find((p: any) => {
       const role = (p?.role || "").toString().toLowerCase();
       const active = !!p?.active;
-      const c = (p?.code || "").toString();
-      return active && role === "supervisor" && c.replace(/\s+/g, "").toLowerCase() === norm;
+  const c = normalizeCode((p?.code || "").toString());
+  return active && role === "supervisor" && c === norm;
     });
 
     if (!found) {

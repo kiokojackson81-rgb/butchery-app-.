@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { createSession, serializeSessionCookie } from "@/lib/session";
+import { normalizeCode } from "@/lib/normalizeCode";
+import { resolveAssignment } from "@/lib/resolveAssignment";
 
 export async function POST(req: Request) {
   try {
@@ -17,10 +19,22 @@ export async function POST(req: Request) {
     }
 
     // Normalize the code like attendant login
-    const norm = loginCode.trim().replace(/\s+/g, "").toLowerCase();
+    const norm = normalizeCode(loginCode);
 
-    const att = await (prisma as any).attendant.findFirst({ where: { loginCode: norm } });
+    // Prefer existing attendant row
+    let att = await (prisma as any).attendant.findFirst({ where: { loginCode: norm } });
+
+    // Fallback: resolve assignment from DB-first AttendantAssignment and create a minimal attendant row
     if (!att) {
+      const resolved = await resolveAssignment(norm);
+      if (resolved) {
+        att = await (prisma as any).attendant.create({ data: { name: norm, loginCode: norm } }).catch(() => null as any);
+        if (!att) {
+          return NextResponse.json({ ok: false, error: "Failed to create attendant" }, { status: 500 });
+        }
+        await createSession(att.id, resolved.outlet);
+        return NextResponse.json({ ok: true });
+      }
       return NextResponse.json({ ok: false, error: "Invalid code" }, { status: 401 });
     }
 
@@ -34,7 +48,7 @@ export async function POST(req: Request) {
       outletCodeFound = outlet.code ?? undefined;
     }
 
-    await createSession(att.id, outletCodeFound);
+  await createSession(att.id, outletCodeFound);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Login failed" }, { status: 500 });

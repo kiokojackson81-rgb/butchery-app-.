@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/normalizeCode";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,8 @@ export async function POST(req: Request) {
 
     if (!name || !loginCode) return NextResponse.json({ ok: false, error: "name & loginCode required" }, { status: 400 });
 
-    const existing = await (prisma as any).attendant.findFirst({ where: { loginCode } });
+    const norm = normalizeCode(loginCode);
+    const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: norm } });
     if (existing) {
       await (prisma as any).attendant.update({
         where: { id: existing.id },
@@ -25,7 +27,7 @@ export async function POST(req: Request) {
       });
     } else {
       await (prisma as any).attendant.create({
-        data: { id: `att_${Date.now()}`, name, loginCode },
+        data: { id: `att_${Date.now()}`, name, loginCode: norm },
       });
     }
     return NextResponse.json({ ok: true });

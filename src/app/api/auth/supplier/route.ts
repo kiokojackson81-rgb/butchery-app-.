@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
+import { normalizeCode } from "@/lib/normalizeCode";
 
 export async function POST(req: Request) {
   try {
@@ -10,7 +11,7 @@ export async function POST(req: Request) {
     if (!code || typeof code !== "string") {
       return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
     }
-    const norm = code.replace(/\s+/g, "").toLowerCase();
+  const norm = normalizeCode(code);
 
     const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
     const list = Array.isArray((row as any)?.value) ? (row as any).value : [];
@@ -18,8 +19,8 @@ export async function POST(req: Request) {
     const found = list.find((p: any) => {
       const role = (p?.role || "").toString().toLowerCase();
       const active = !!p?.active;
-      const c = (p?.code || "").toString();
-      return active && role === "supplier" && c.replace(/\s+/g, "").toLowerCase() === norm;
+  const c = normalizeCode((p?.code || "").toString());
+  return active && role === "supplier" && c === norm;
     });
 
     if (!found) return NextResponse.json({ ok: false, error: "Code not found" }, { status: 404 });
