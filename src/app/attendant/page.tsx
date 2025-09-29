@@ -24,9 +24,10 @@ export default function AttendantLoginPage() {
         cache: "no-store",
         body: JSON.stringify({ code: norm })
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
-      router.push("/attendant/dashboard");
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
+  try { sessionStorage.setItem("attendant_code", norm); } catch {}
+  router.replace("/attendant/dashboard");
     } catch (e) {
       alert("Login failed. Check your code or try again.");
     }
