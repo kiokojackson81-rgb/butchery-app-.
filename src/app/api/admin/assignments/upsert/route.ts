@@ -18,10 +18,10 @@ export async function POST(req: Request) {
     const norm = code.trim().replace(/\s+/g, "").toLowerCase();
     // Use SQL UPSERT by unique code to avoid relying on id column presence
     await (prisma as any).$executeRawUnsafe(
-      'INSERT INTO "AttendantAssignment" (code, outlet, "productKeys", "updatedAt") VALUES ($1, $2, $3, NOW())\n       ON CONFLICT (code) DO UPDATE SET outlet = EXCLUDED.outlet, "productKeys" = EXCLUDED."productKeys", "updatedAt" = NOW()',
+      'INSERT INTO "AttendantAssignment" (code, outlet, "productKeys", "updatedAt") VALUES ($1, $2, $3::jsonb, NOW())\n       ON CONFLICT (code) DO UPDATE SET outlet = EXCLUDED.outlet, "productKeys" = EXCLUDED."productKeys", "updatedAt" = NOW()',
       norm,
       outlet,
-      productKeys ?? []
+      JSON.stringify(productKeys ?? [])
     );
     return NextResponse.json({ ok: true });
   } catch (e: any) {

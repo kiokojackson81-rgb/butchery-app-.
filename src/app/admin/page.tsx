@@ -139,6 +139,8 @@ export default function AdminPage() {
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
   const [serverAssignments, setServerAssignments] = useState<Array<{ code: string; outlet: string; productKeys: string[] }>>([]);
+  const [svFilter, setSvFilter] = useState("");
+  const [svEdit, setSvEdit] = useState<Record<string, { outlet: string; productKeys: string[] }>>({});
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -859,9 +861,12 @@ export default function AdminPage() {
               <div className="rounded-xl border p-3 mb-3 bg-gray-50">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-sm font-medium">Server Assignments</div>
-                  <button className="text-xs underline" onClick={async()=>{
+                  <div className="flex items-center gap-2">
+                    <input className="border rounded-lg px-2 py-1 text-xs" placeholder="Filter code/outlet…" value={svFilter} onChange={e=>setSvFilter(e.target.value)} />
+                    <button className="text-xs underline" onClick={async()=>{
                     try { const r = await fetch('/api/admin/assignments/list', { cache: 'no-store' }); if (r.ok) setServerAssignments(await r.json()); } catch {}
                   }}>Refresh</button>
+                  </div>
                 </div>
                 <div className="table-wrap">
                   <table className="w-full text-xs">
@@ -870,24 +875,81 @@ export default function AdminPage() {
                         <th className="py-1">Code</th>
                         <th>Outlet</th>
                         <th>Products</th>
-                        <th>Sync</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {serverAssignments.map((row) => (
+                      {serverAssignments
+                        .filter(row => {
+                          const q = svFilter.trim().toLowerCase();
+                          if (!q) return true;
+                          return row.code.toLowerCase().includes(q) || (row.outlet || "").toLowerCase().includes(q);
+                        })
+                        .map((row) => (
                         <tr key={`sv-${row.code}`} className="border-b">
                           <td className="py-1 font-mono">{row.code}</td>
-                          <td>{row.outlet}</td>
-                          <td className="truncate max-w-[280px]" title={(row.productKeys||[]).join(', ')}>
-                            {(row.productKeys||[]).join(', ')}
-                          </td>
                           <td>
-                            <button className="text-xs border rounded-lg px-2 py-0.5" title="Pull this into local scope"
-                              onClick={()=>{
-                                const key = row.code.replace(/\s+/g, '').toLowerCase();
-                                setScope(prev=>({ ...prev, [key]: { outlet: row.outlet, productKeys: (row.productKeys||[]) as any } }));
-                              }}
-                            >Pull</button>
+                            {svEdit[row.code] ? (
+                              <input className="border rounded-lg px-2 py-0.5 text-xs" value={svEdit[row.code].outlet}
+                                onChange={e=>setSvEdit(prev=>({ ...prev, [row.code]: { ...prev[row.code], outlet: e.target.value } }))}
+                              />
+                            ) : (
+                              row.outlet
+                            )}
+                          </td>
+                          <td className="truncate max-w-[280px]">
+                            {svEdit[row.code] ? (
+                              <input className="border rounded-lg px-2 py-0.5 text-xs w-full" placeholder="comma,separated,keys"
+                                value={(svEdit[row.code].productKeys || []).join(', ')}
+                                onChange={e=>{
+                                  const arr = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+                                  setSvEdit(prev=>({ ...prev, [row.code]: { ...prev[row.code], productKeys: arr } }));
+                                }}
+                              />
+                            ) : (
+                              <span title={(row.productKeys||[]).join(', ')}>{(row.productKeys||[]).join(', ')}</span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap">
+                            {!svEdit[row.code] ? (
+                              <div className="flex gap-2">
+                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={()=>{
+                                  setSvEdit(prev=>({ ...prev, [row.code]: { outlet: row.outlet || '', productKeys: (row.productKeys||[]) } }));
+                                }}>Edit</button>
+                                <button className="text-xs border rounded-lg px-2 py-0.5" title="Pull this into local scope"
+                                  onClick={()=>{
+                                    const key = row.code.replace(/\s+/g, '').toLowerCase();
+                                    setScope(prev=>({ ...prev, [key]: { outlet: row.outlet, productKeys: (row.productKeys||[]) as any } }));
+                                  }}
+                                >Pull</button>
+                                <button className="text-xs border rounded-lg px-2 py-0.5 text-red-700" onClick={async()=>{
+                                  if (!confirm(`Delete assignment ${row.code}?`)) return;
+                                  try {
+                                    const u = new URL('/api/admin/scope', location.origin);
+                                    u.searchParams.set('code', row.code);
+                                    const r = await fetch(u.toString(), { method: 'DELETE' });
+                                    if (!r.ok) throw new Error(await r.text());
+                                    setServerAssignments(prev=>prev.filter(x=>x.code!==row.code));
+                                  } catch { alert('Failed to delete'); }
+                                }}>Delete</button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-2">
+                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={async()=>{
+                                  const patch = svEdit[row.code];
+                                  try {
+                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: patch.productKeys }) });
+                                    if (!r.ok) throw new Error(await r.text());
+                                    setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
+                                    const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
+                                    if (r2.ok) setServerAssignments(await r2.json());
+                                  } catch { alert('Failed to save'); }
+                                }}>Save</button>
+                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={()=>{
+                                  setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
+                                }}>Cancel</button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
