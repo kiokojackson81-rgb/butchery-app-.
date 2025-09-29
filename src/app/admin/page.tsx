@@ -141,6 +141,7 @@ export default function AdminPage() {
   const [serverAssignments, setServerAssignments] = useState<Array<{ code: string; outlet: string; productKeys: string[] }>>([]);
   const [svFilter, setSvFilter] = useState("");
   const [svEdit, setSvEdit] = useState<Record<string, { outlet: string; productKeys: string[] }>>({});
+  const [svNew, setSvNew] = useState<{ code: string; outlet: string; products: string }>({ code: "", outlet: "", products: "" });
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -868,6 +869,47 @@ export default function AdminPage() {
                   }}>Refresh</button>
                   </div>
                 </div>
+                {/* Quick-add */}
+                <div className="flex items-end gap-2 mb-3 flex-wrap">
+                  <label className="text-xs">
+                    <div className="text-gray-600 mb-1">Code</div>
+                    <input className="border rounded-lg px-2 py-1 text-xs font-mono w-44" placeholder="e.g. a123"
+                      value={svNew.code}
+                      onChange={e=>setSvNew(prev=>({ ...prev, code: e.target.value }))}
+                    />
+                  </label>
+                  <label className="text-xs">
+                    <div className="text-gray-600 mb-1">Outlet</div>
+                    <input className="border rounded-lg px-2 py-1 text-xs w-44" placeholder="Outlet name"
+                      value={svNew.outlet}
+                      onChange={e=>setSvNew(prev=>({ ...prev, outlet: e.target.value }))}
+                    />
+                  </label>
+                  <label className="text-xs flex-1 min-w-56">
+                    <div className="text-gray-600 mb-1">Products (comma separated)</div>
+                    <input className="border rounded-lg px-2 py-1 text-xs w-full" placeholder="beef, goat, liver"
+                      value={svNew.products}
+                      onChange={e=>setSvNew(prev=>({ ...prev, products: e.target.value }))}
+                    />
+                  </label>
+                  <button
+                    className="text-xs border rounded-lg px-3 py-1"
+                    onClick={async()=>{
+                      const code = (svNew.code || "").trim();
+                      const outlet = (svNew.outlet || "").trim();
+                      const productKeys = (svNew.products || "").split(',').map(s=>s.trim()).filter(Boolean);
+                      if (!code || !outlet) { alert('Code and Outlet are required'); return; }
+                      try {
+                        const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, outlet, productKeys }) });
+                        if (!r.ok) throw new Error(await r.text());
+                        setSvNew({ code: '', outlet: '', products: '' });
+                        const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
+                        if (r2.ok) setServerAssignments(await r2.json());
+                      } catch { alert('Failed to add assignment'); }
+                    }}
+                  >Add</button>
+                </div>
+
                 <div className="table-wrap">
                   <table className="w-full text-xs">
                     <thead>
