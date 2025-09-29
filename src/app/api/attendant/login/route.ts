@@ -32,30 +32,58 @@ export async function POST(req: Request) {
       att = await (prisma as any).attendant.create({ data: { name: code, loginCode: code } }).catch(() => null as any);
     }
     if (att) {
-      await createSession(att.id, resolved.outlet ?? undefined);
-      return NextResponse.json(
+      const { token, expiresAt } = await createSession(att.id, resolved.outlet ?? undefined);
+      // Also attach cookie explicitly on the response to avoid any proxy nuances
+      const res = NextResponse.json(
         {
           ok: true,
           code,
           outlet: resolved.outlet,
           productKeys: resolved.productKeys,
-          updatedAt: new Date().toISOString(),
+          updatedAt: expiresAt,
         },
         { status: 200 }
       );
+      try {
+        // Set cookie via both helpers to maximize compatibility across runtimes/proxies
+        res.cookies.set({
+          name: "bk_sess",
+          value: token,
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 24 * 3600,
+        });
+        res.headers.append("Set-Cookie", serializeSessionCookie(token));
+      } catch {}
+      return res;
     }
 
     // Fallback if we couldn't create an attendant (DB issue): return original response
-    return NextResponse.json(
+    const res = NextResponse.json(
       {
         ok: true,
         code,
         outlet: resolved.outlet,
         productKeys: resolved.productKeys,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       },
       { status: 200 }
     );
+    try {
+      // Best-effort cookie set if DB write path above failed but we still want client to proceed
+      res.cookies.set({
+        name: "bk_sess",
+        value: "",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 24 * 3600,
+      });
+    } catch {}
+    return res;
   } catch (err: any) {
     console.error('Attendant login error:', err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
