@@ -2,31 +2,27 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { normalizeCode } from "@/lib/normalizeCode";
+import { rateLimit } from "@/lib/rateLimit";
 
 export async function POST(req: Request) {
   try {
+    const rl = rateLimit(req, "auth:supplier", 20, 60_000);
+    if (!rl.allowed) return NextResponse.json({ ok: false, code: "ERR_RATE_LIMIT", message: "Too many attempts" }, { status: 429 });
+
     const { code } = await req.json();
     if (!code || typeof code !== "string") {
-      return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
+      return NextResponse.json({ ok: false, code: "ERR_BAD_REQUEST", message: "Code required" }, { status: 400 });
     }
-  const norm = normalizeCode(code);
-
-    const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
-    const list = Array.isArray((row as any)?.value) ? (row as any).value : [];
-
-    const found = list.find((p: any) => {
-      const role = (p?.role || "").toString().toLowerCase();
-      const active = !!p?.active;
-  const c = normalizeCode((p?.code || "").toString());
-  return active && role === "supplier" && c === norm;
-    });
-
-    if (!found) return NextResponse.json({ ok: false, error: "Code not found" }, { status: 404 });
-    return NextResponse.json({ ok: true, name: found?.name || "Supplier", code: found?.code });
+    const norm = normalizeCode(code);
+    const person = await (prisma as any).personCode.findUnique({ where: { code: norm } });
+    if (!person || person.role !== "supplier" || person.active !== true) {
+      return NextResponse.json({ ok: false, code: "ERR_NOT_FOUND", message: "Code not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, name: person.name || "Supplier", code: person.code });
   } catch (e) {
-    console.error("supplier login error", e);
-    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+    console.error("/api/auth/supplier POST error", e);
+    return NextResponse.json({ ok: false, code: "ERR_SERVER", message: "Server error" }, { status: 500 });
   }
 }

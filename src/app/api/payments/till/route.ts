@@ -14,6 +14,7 @@ export async function POST(_req: Request) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true });
+  // Keep shape stable for client: { ok: true, total, rows }
+  return NextResponse.json({ ok: true, total: 0, rows: [] });
 }
 

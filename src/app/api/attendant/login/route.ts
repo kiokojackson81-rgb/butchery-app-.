@@ -3,24 +3,27 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/lib/db';
 import { createSession, serializeSessionCookie } from '@/lib/session';
 import { resolveAssignment } from '@/lib/resolveAssignment';
 import { normalizeCode } from '@/lib/normalizeCode';
+import { rateLimit } from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
   try {
+    const rl = rateLimit(req, 'auth:attendant', 30, 60_000);
+    if (!rl.allowed) return NextResponse.json({ ok: false, code: 'ERR_RATE_LIMIT', message: 'Too many attempts' }, { status: 429 });
   const body = await req.json().catch(() => ({}));
   const codeRaw = (body?.code ?? '').toString();
   const code = normalizeCode(codeRaw);
 
     if (!code) {
-      return NextResponse.json({ error: 'Missing code' }, { status: 400 });
+      return NextResponse.json({ ok: false, code: 'ERR_BAD_REQUEST', message: 'Missing code' }, { status: 400 });
     }
 
     const resolved = await resolveAssignment(code);
     if (!resolved) {
-      return NextResponse.json({ error: 'Invalid code' }, { status: 401 });
+      return NextResponse.json({ ok: false, code: 'ERR_UNAUTHORIZED', message: 'Invalid code' }, { status: 401 });
     }
 
     // Non-breaking: also create a short-lived server session so values persist across reloads/devices
@@ -85,8 +88,8 @@ export async function POST(req: Request) {
     } catch {}
     return res;
   } catch (err: any) {
-    console.error('Attendant login error:', err);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    console.error('/api/attendant/login POST error', err);
+    return NextResponse.json({ ok: false, code: 'ERR_SERVER', message: 'Server error' }, { status: 500 });
   }
 }
 

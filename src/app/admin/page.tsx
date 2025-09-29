@@ -277,10 +277,49 @@ export default function AdminPage() {
   useEffect(() => { refreshThresholds(); }, []);
 
   /** ----- Explicit save buttons (unchanged) ----- */
-  const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
+  const saveOutletsNow  = async () => {
+    saveLS(K_OUTLETS, outlets);
+    try { await pushLocalStorageKeyToDB(K_OUTLETS as any); } catch {}
+    try {
+      const r = await fetch("/api/admin/outlets/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          outlets: outlets.map(o => ({ name: o.name, code: o.code || null, active: !!o.active })),
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      alert("Outlets & Codes saved ✅");
+    } catch {
+      alert("Saved settings, but failed to mirror outlets to DB.");
+    }
+  };
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
-  const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
+  const saveCodesNow    = async () => {
+    saveLS(K_CODES, codes);
+    try { await pushLocalStorageKeyToDB(K_CODES as any); } catch {}
+    try {
+      const r = await fetch("/api/admin/codes/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          codes: codes.map(c => ({
+            name: (c.name || "").trim(),
+            code: (c.code || "").trim(),
+            role: c.role,
+            active: !!c.active,
+          })),
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      alert("People & Codes saved ✅");
+    } catch {
+      alert("Saved settings, but failed to mirror people codes to DB.");
+    }
+  };
   // Push assignments to relational store
   const pushAssignmentsToDB = async (map: ScopeMap) => {
     const res = await fetch("/api/admin/scope", {
@@ -313,7 +352,7 @@ export default function AdminPage() {
 
   const normalizeAssignmentsNow = async () => {
     try {
-      const r = await fetch("/api/admin/assignments/normalize", { method: "POST" });
+      const r = await fetch("/api/admin/assignments/normalize", { method: "POST", cache: "no-store" });
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json().catch(()=>({} as any));
       alert(`Normalized ✅ (changed: ${j.changed ?? 0})`);
@@ -926,7 +965,7 @@ export default function AdminPage() {
                       if (!code || !outlet) { alert('Code and Outlet are required'); return; }
                       if (invalid.length > 0) { alert('Invalid product keys: ' + invalid.join(', ')); return; }
                       try {
-                        const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, outlet, productKeys }) });
+                        const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, outlet, productKeys }) });
                         if (!r.ok) throw new Error(await r.text());
                         setSvNew({ code: '', outlet: '', products: '' });
                         const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
@@ -995,7 +1034,7 @@ export default function AdminPage() {
                                   try {
                                     const u = new URL('/api/admin/scope', location.origin);
                                     u.searchParams.set('code', row.code);
-                                    const r = await fetch(u.toString(), { method: 'DELETE' });
+                                    const r = await fetch(u.toString(), { method: 'DELETE', cache: 'no-store' });
                                     if (!r.ok) throw new Error(await r.text());
                                     setServerAssignments(prev=>prev.filter(x=>x.code!==row.code));
                                   } catch { alert('Failed to delete'); }
@@ -1009,7 +1048,7 @@ export default function AdminPage() {
                                   if (!(patch.outlet || '').trim()) { alert('Outlet is required'); return; }
                                   if (invalid.length > 0) { alert('Invalid product keys: ' + invalid.join(', ')); return; }
                                   try {
-                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: canon }) });
+                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: canon }) });
                                     if (!r.ok) throw new Error(await r.text());
                                     setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
                                     const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });

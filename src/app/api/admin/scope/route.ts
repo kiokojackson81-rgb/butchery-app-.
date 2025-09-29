@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   try {
     const scope = await req.json();
     if (!scope || typeof scope !== "object") {
-      return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
+      return NextResponse.json({ ok: false, code: "ERR_BAD_REQUEST", message: "Invalid payload" }, { status: 400 });
     }
 
     const entries = Object.entries(scope) as Array<[
@@ -37,8 +37,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, count: entries.length });
   } catch (e) {
-    console.error("save scope error", e);
-    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+    console.error("/api/admin/scope POST error", e);
+    return NextResponse.json({ ok: false, code: "ERR_SERVER", message: "Server error" }, { status: 500 });
   }
 }
 
@@ -47,7 +47,7 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const code = (searchParams.get("code") || "").trim();
-    if (!code) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
+  if (!code) return NextResponse.json({ ok: false, code: "ERR_BAD_REQUEST", message: "code required" }, { status: 400 });
 
   await (prisma as any).$executeRawUnsafe('DELETE FROM "AttendantAssignment" WHERE code = $1', code).catch(()=>{});
     // Also clear normalized scope if stored in AttendantScope
@@ -55,6 +55,7 @@ export async function DELETE(req: Request) {
     await (prisma as any).attendantScope.delete({ where: { codeNorm } }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+    console.error("/api/admin/scope DELETE error", e);
+    return NextResponse.json({ ok: false, code: "ERR_SERVER", message: "Server error" }, { status: 500 });
   }
 }

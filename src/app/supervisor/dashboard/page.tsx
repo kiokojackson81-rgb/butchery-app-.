@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
+import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 /* ================= Existing Review Keys (unchanged) ================= */
@@ -51,8 +51,10 @@ type KPIRow = {
   wasteQty: number;
 };
 
-function ymd() {
-  return new Date().toISOString().split("T")[0];
+function todayLocal() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().split("T")[0];
 }
 function readJSON<T>(k: string, fb: T): T { return safeReadJSON<T>(k, fb); }
 function fmt(n: number) {
@@ -61,9 +63,21 @@ function fmt(n: number) {
 
 export default function SupervisorDashboard() {
   /* ========= Filters ========= */
-  const [date, setDate] = useState<string>(ymd());
+  const [date, setDate] = useState<string>(todayLocal());
   const [outlets, setOutlets] = useState<AdminOutlet[]>([]);
   const [selectedOutlet, setSelectedOutlet] = useState<string>("__ALL__");
+  const [refreshTick, setRefreshTick] = useState(0); // bump to re-fetch supply tables
+
+  // Header KPIs + active period (server-first with graceful fallback)
+  const [periodStartAt, setPeriodStartAt] = useState<string | null>(null);
+  const [serverKpi, setServerKpi] = useState<{
+    expected: number; // map from weightSales
+    deposits: number; // verifiedDeposits
+    expenses: number; // expenses
+    cashAtTill: number; // amountToDeposit
+    variance: number; // not provided by API; keep 0
+  } | null>(null);
+  const [kpiOffline, setKpiOffline] = useState(false);
 
   /* ========= Tabs (added "supply") ========= */
   const [tab, setTab] = useState<
@@ -153,6 +167,50 @@ export default function SupervisorDashboard() {
       setOutlets((outs || []).filter(o => o?.name));
     })();
   }, []);
+
+  // Fetch active period + KPIs for a single outlet (server-first)
+  useEffect(() => {
+    if (!selectedOutlet || selectedOutlet === "__ALL__") {
+      setPeriodStartAt(null);
+      setServerKpi(null);
+      setKpiOffline(false);
+      return;
+    }
+    (async () => {
+      try {
+        const pa = await fetch(`/api/period/active?outlet=${encodeURIComponent(selectedOutlet)}`, { cache: "no-store" });
+        if (pa.ok) {
+          const j = await pa.json();
+          setPeriodStartAt(j?.active?.periodStartAt ?? null);
+        } else {
+          setPeriodStartAt(null);
+        }
+      } catch {
+        setPeriodStartAt(null);
+      }
+      try {
+        const r = await fetch(`/api/metrics/header?outlet=${encodeURIComponent(selectedOutlet)}`, { cache: "no-store" });
+        if (r.ok) {
+          const h = await r.json();
+          const t = h?.totals || {};
+          setServerKpi({
+            expected: Number(t.weightSales || 0),
+            deposits: Number(t.verifiedDeposits || 0),
+            expenses: Number(t.expenses || 0),
+            cashAtTill: Number(t.amountToDeposit || 0),
+            variance: 0,
+          });
+          setKpiOffline(false);
+        } else {
+          setServerKpi(null);
+          setKpiOffline(true);
+        }
+      } catch {
+        setServerKpi(null);
+        setKpiOffline(true);
+      }
+    })();
+  }, [selectedOutlet]);
 
   const updateState = (
     key: string,
@@ -266,7 +324,7 @@ export default function SupervisorDashboard() {
   );
 
   /* ========= Actions ========= */
-  const downloadPDF = () => window.print();
+  const downloadPDF = () => { try { window.print(); } catch {} };
   const logout = () => {
     try {
       sessionStorage.removeItem("supervisor_code");
@@ -284,6 +342,19 @@ export default function SupervisorDashboard() {
           <p className="text-sm text-gray-600">
             Review waste/expenses/excess/deficit/deposits & monitor sales and deposits by outlet.
           </p>
+          {selectedOutlet !== "__ALL__" && (
+            <p className="mt-1 text-xs">
+              {periodStartAt ? (
+                <span className="inline-flex items-center rounded-xl border px-2 py-0.5 bg-green-50 border-green-200 text-green-700">
+                  Active period since {new Date(periodStartAt).toLocaleTimeString()}
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-xl border px-2 py-0.5 bg-yellow-50 border-yellow-200 text-yellow-700">
+                  Period inactive or unavailable
+                </span>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 mobile-scroll-x">
           <input
@@ -304,27 +375,6 @@ export default function SupervisorDashboard() {
               </option>
             ))}
           </select>
-          {/* Thin persistence controls (optional) */}
-          <button
-            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
-            title="Reload Admin settings from DB"
-            onClick={async () => {
-              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
-              catch { alert("Failed to hydrate from DB."); }
-            }}
-          >
-            Refresh Admin
-          </button>
-          <button
-            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
-            title="Push Admin settings from this browser to DB"
-            onClick={async () => {
-              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
-              catch { alert("Failed to push to DB."); }
-            }}
-          >
-            Sync to DB
-          </button>
           <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
             Download PDF
           </button>
@@ -339,13 +389,23 @@ export default function SupervisorDashboard() {
         <h2 className="font-semibold mb-3">
           Summary — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})
         </h2>
-        <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <KPI label="Expected Sales (Ksh)" value={`Ksh ${fmt(agg.expected)}`} />
-          <KPI label="Deposits (Ksh)" value={`Ksh ${fmt(agg.deposits)}`} />
-          <KPI label="Expenses (Ksh)" value={`Ksh ${fmt(agg.expenses)}`} />
-          <KPI label="Cash at Till (Ksh)" value={`Ksh ${fmt(agg.cashAtTill)}`} />
-          <KPI label="Variance (Ksh)" value={`Ksh ${fmt(agg.variance)}`} />
-        </div>
+        {selectedOutlet !== "__ALL__" && kpiOffline && (
+          <div className="text-xs text-yellow-700 mb-2">server unavailable — showing local totals</div>
+        )}
+        {(() => {
+          const vals = selectedOutlet !== "__ALL__" && serverKpi
+            ? serverKpi
+            : agg;
+          return (
+            <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <KPI label="Expected Sales (Ksh)" value={`Ksh ${fmt(vals.expected)}`} />
+              <KPI label="Deposits (Ksh)" value={`Ksh ${fmt(vals.deposits)}`} />
+              <KPI label="Expenses (Ksh)" value={`Ksh ${fmt(vals.expenses)}`} />
+              <KPI label="Cash at Till (Ksh)" value={`Ksh ${fmt(vals.cashAtTill)}`} />
+              <KPI label="Variance (Ksh)" value={`Ksh ${fmt((vals as any).variance || 0)}`} />
+            </div>
+          );
+        })()}
         <div className="grid md:grid-cols-3 gap-3 mt-3">
           <KPI label="Waste (Qty)" value={fmt(agg.wasteQty)} />
         </div>
@@ -488,14 +548,24 @@ export default function SupervisorDashboard() {
             Supply View — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})
           </h2>
 
+          {/* Lock state + Transfers (only for single-outlet view) */}
+          {selectedOutlet !== "__ALL__" && (
+            <LockAndTransfer
+              date={date}
+              outlet={selectedOutlet}
+              allOutlets={outlets.map(o => o.name)}
+              onChanged={() => setRefreshTick(t => t + 1)}
+            />
+          )}
+
           {selectedOutlet === "__ALL__" ? (
             <div className="space-y-6">
               {outlets.map((o) => (
-                <SupplyTable key={o.name} date={date} outlet={o.name} />
+                <SupplyTable key={o.name} date={date} outlet={o.name} refreshTick={refreshTick} />
               ))}
             </div>
           ) : (
-            <SupplyTable date={date} outlet={selectedOutlet} />
+            <SupplyTable date={date} outlet={selectedOutlet} refreshTick={refreshTick} />
           )}
         </section>
       )}
@@ -503,13 +573,31 @@ export default function SupervisorDashboard() {
   );
 }
 
-/* ===== Reusable supply table (reads supplier_opening_*) ===== */
-function SupplyTable({ date, outlet }: { date: string; outlet: string }) {
-  const rows =
-    readJSON<Array<{ itemKey: string; qty: number }>>(
-      supplierOpeningKey(date, outlet),
-      []
-    ) || [];
+/* ===== Reusable supply table (server-first; falls back to local) ===== */
+function SupplyTable({ date, outlet, refreshTick = 0 }: { date: string; outlet: string; refreshTick?: number }) {
+  const [rows, setRows] = useState<Array<{ itemKey: string; qty: number }>>([]);
+
+  useEffect(() => {
+    (async () => {
+      let list: Array<{ itemKey: string; qty: number }> = [];
+      try {
+        const qs = new URLSearchParams({ date, outlet }).toString();
+        const r = await fetch(`/api/supply/opening?${qs}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.ok && Array.isArray(j.minimal)) {
+            list = j.minimal;
+            // Mirror to local
+            saveLocal(supplierOpeningKey(date, outlet), list);
+          }
+        }
+      } catch {}
+      if (!list.length) {
+        list = readJSON<Array<{ itemKey: string; qty: number }>>(supplierOpeningKey(date, outlet), []);
+      }
+      setRows(list || []);
+    })();
+  }, [date, outlet, refreshTick]);
   const totalQty = rows.reduce((a, r) => a + (Number(r.qty) || 0), 0);
 
   return (
@@ -546,6 +634,145 @@ function SupplyTable({ date, outlet }: { date: string; outlet: string }) {
             </tr>
           </tfoot>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Lock + Transfer controls (single-outlet view) ===== */
+function LockAndTransfer({
+  date,
+  outlet,
+  allOutlets,
+  onChanged,
+}: {
+  date: string;
+  outlet: string;
+  allOutlets: string[];
+  onChanged: () => void;
+}) {
+  const [locked, setLocked] = useState<boolean>(false);
+  const [offlineNote, setOfflineNote] = useState<string | null>(null);
+  const [toOutlet, setToOutlet] = useState<string>("");
+  const [itemKey, setItemKey] = useState<string>("");
+  const [qty, setQty] = useState<string>("");
+
+  // fetch lock state
+  useEffect(() => {
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ date, outlet }).toString();
+        const r = await fetch(`/api/supply/lock?${qs}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          setLocked(!!j?.locked);
+          setOfflineNote(null);
+        } else {
+          setOfflineNote("offline – last saved");
+        }
+      } catch {
+        setOfflineNote("offline – last saved");
+      }
+    })();
+  }, [date, outlet]);
+
+  const refreshOpening = async () => {
+    try {
+      const qs = new URLSearchParams({ date, outlet }).toString();
+      const r = await fetch(`/api/supply/opening?${qs}`, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.ok && Array.isArray(j.minimal)) {
+          saveLocal(supplierOpeningKey(date, outlet), j.minimal);
+        }
+      }
+    } catch {}
+    onChanged();
+  };
+
+  const toggleLock = async () => {
+    try {
+      const res = await fetch(`/api/supply/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ date, outlet, locked: !locked }),
+      });
+      if (res.ok) {
+        // re-GET lock + opening
+        try {
+          const qs = new URLSearchParams({ date, outlet }).toString();
+          const r = await fetch(`/api/supply/lock?${qs}`, { cache: "no-store" });
+          if (r.ok) {
+            const j = await r.json();
+            setLocked(!!j?.locked);
+            setOfflineNote(null);
+          } else {
+            setOfflineNote("offline – last saved");
+          }
+        } catch {
+          setOfflineNote("offline – last saved");
+        }
+        await refreshOpening();
+      }
+    } catch {}
+  };
+
+  const submitTransfer = async () => {
+    const qtyNum = Number(qty);
+    if (!toOutlet || toOutlet === outlet) return alert("Pick a different outlet");
+    if (!itemKey.trim()) return alert("Enter item key");
+    if (!Number.isFinite(qtyNum) || qtyNum <= 0) return alert("Enter qty > 0");
+    try {
+      const res = await fetch(`/api/supply/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ date, fromOutletName: outlet, toOutletName: toOutlet, itemKey: itemKey.trim().toLowerCase(), qty: qtyNum }),
+      });
+      if (res.ok) {
+        // refresh current + counterparty openings
+        await refreshOpening();
+        try {
+          const qsB = new URLSearchParams({ date, outlet: toOutlet }).toString();
+          const rB = await fetch(`/api/supply/opening?${qsB}`, { cache: "no-store" });
+          if (rB.ok) {
+            const jB = await rB.json();
+            if (jB?.ok && Array.isArray(jB.minimal)) {
+              saveLocal(supplierOpeningKey(date, toOutlet), jB.minimal);
+            }
+          }
+        } catch {}
+        onChanged();
+        setItemKey(""); setQty("");
+      }
+    } catch {}
+  };
+
+  const otherOutlets = allOutlets.filter(o => o && o !== outlet);
+
+  return (
+    <div className="rounded-xl border p-3 mb-4 flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-2">
+        <span className="text-sm">Opening Lock:</span>
+        <button className={`text-xs rounded-xl border px-3 py-1 ${locked ? "bg-red-600 text-white" : ""}`} onClick={toggleLock}>
+          {locked ? "Locked" : "Unlocked"}
+        </button>
+        {offlineNote && <span className="text-xs text-gray-600">{offlineNote}</span>}
+      </div>
+      <div className="h-6 w-px bg-gray-200" />
+      <div className="flex items-center gap-2 text-sm">
+        <span>Transfer:</span>
+        <span className="text-gray-600">from</span>
+        <span className="font-medium">{outlet}</span>
+        <span className="text-gray-600">to</span>
+        <select className="input-mobile border rounded-xl p-1 text-sm" value={toOutlet} onChange={e=>setToOutlet(e.target.value)}>
+          <option value="">Select outlet</option>
+          {otherOutlets.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <input className="input-mobile border rounded-xl p-1 text-sm w-32" placeholder="item key (e.g. beef)" value={itemKey} onChange={e=>setItemKey(e.target.value)} />
+        <input className="input-mobile border rounded-xl p-1 text-sm w-24" type="number" min={0} step={0.01} placeholder="qty" value={qty} onChange={e=>setQty(e.target.value)} />
+        <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={submitTransfer}>Submit</button>
       </div>
     </div>
   );
@@ -621,6 +848,7 @@ function ReviewTable({
 /* ===== Small helpers ===== */
 function read(key: string): ReviewItem[] { return safeReadJSON<ReviewItem[]>(key, []); }
 function save(key: string, value: any) { try { safeWriteJSON(key, value); } catch {} }
+function saveLocal(key: string, value: any) { try { safeWriteJSON(key, value); } catch {} }
 
 function TabBtn({
   children,
