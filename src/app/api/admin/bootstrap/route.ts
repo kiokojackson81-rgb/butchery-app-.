@@ -13,7 +13,15 @@ export async function GET() {
       (prisma as any).attendantAssignment.findMany({ orderBy: { code: "asc" } }),
     ]);
 
-    return NextResponse.json({ ok: true, outlets, attendants, assignments });
+    // Map assignments to scope map for legacy consumer
+    const scope: Record<string, { outlet: string; productKeys: string[] }> = {};
+    (assignments || []).forEach((a: any) => {
+      const key = String(a.code || "").replace(/\s+/g, "").toLowerCase();
+      if (!key) return;
+      scope[key] = { outlet: a.outlet || "", productKeys: Array.isArray(a.productKeys) ? a.productKeys : [] };
+    });
+
+    return NextResponse.json({ ok: true, outlets, attendants, assignments, scope });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }

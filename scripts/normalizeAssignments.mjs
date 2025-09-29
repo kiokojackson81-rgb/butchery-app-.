@@ -11,27 +11,55 @@ function norm(s) {
   return (s || "").toString().trim().replace(/\s+/g, "").toLowerCase();
 }
 
+async function safeSelectRows() {
+  try {
+    // Try with productKeys + updatedAt
+    return await prisma.$queryRaw`SELECT code, outlet, "productKeys", "updatedAt" FROM "AttendantAssignment"`;
+  } catch {
+    // Fallback minimal shape
+    return await prisma.$queryRaw`SELECT code, outlet FROM "AttendantAssignment"`;
+  }
+}
+
+async function rowByCode(code) {
+  const rows = await prisma.$queryRaw`SELECT code, outlet, "productKeys", "updatedAt" FROM "AttendantAssignment" WHERE code = ${code}`;
+  return rows?.[0] || null;
+}
+
+async function updateCode(oldCode, newCode) {
+  await prisma.$executeRaw`UPDATE "AttendantAssignment" SET code = ${newCode} WHERE code = ${oldCode}`;
+}
+
+async function deleteByCode(code) {
+  await prisma.$executeRaw`DELETE FROM "AttendantAssignment" WHERE code = ${code}`;
+}
+
 async function main() {
-  const all = await prisma.attendantAssignment.findMany();
+  const all = await safeSelectRows();
   let changed = 0;
   for (const row of all) {
-    const want = norm(row.code);
-    if (row.code !== want) {
-      // Handle potential conflict: if another row already exists with normalized code, merge then delete duplicate
-      const clash = await prisma.attendantAssignment.findUnique({ where: { code: want } }).catch(() => null);
-      if (clash) {
-        // Merge: prefer keeping productKeys/outlet from the most recently updated
-        const keep = row.updatedAt > clash.updatedAt ? row : clash;
-        const drop = keep.id === row.id ? clash : row;
-        await prisma.attendantAssignment.update({ where: { id: keep.id }, data: { code: want, outlet: keep.outlet, productKeys: keep.productKeys } });
-        await prisma.attendantAssignment.delete({ where: { id: drop.id } });
-        console.log(`Merged duplicate codes into ${want}`);
+    const src = row.code;
+    const want = norm(src);
+    if (!src || src === want) continue;
+    const clash = await rowByCode(want);
+    if (clash) {
+      // Prefer most recent if updatedAt available; otherwise prefer the normalized target row
+      let keep = clash;
+      let drop = row;
+      if (row.updatedAt && clash.updatedAt && row.updatedAt > clash.updatedAt) {
+        // We want to keep current row, rename it to want and then drop the clash
+        await updateCode(src, want).catch(() => {});
+        await deleteByCode(clash.code).catch(() => {});
       } else {
-        await prisma.attendantAssignment.update({ where: { id: row.id }, data: { code: want } });
-        console.log(`Renamed ${row.code} -> ${want}`);
+        // Drop current row, keep clash
+        await deleteByCode(src).catch(() => {});
       }
-      changed++;
+      console.log(`Merged duplicate into ${want}`);
+    } else {
+      await updateCode(src, want);
+      console.log(`Renamed ${src} -> ${want}`);
     }
+    changed++;
   }
   console.log(`Done. Changed ${changed} row(s).`);
 }

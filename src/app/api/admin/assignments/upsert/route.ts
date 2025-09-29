@@ -15,21 +15,17 @@ export async function POST(req: Request) {
 
     if (!code || !outlet) return NextResponse.json({ ok: false, error: "code & outlet required" }, { status: 400 });
 
-    // Store normalized code (lowercase, no whitespace) so login can match reliably
     const norm = code.trim().replace(/\s+/g, "").toLowerCase();
-    const existing = await (prisma as any).attendantAssignment.findFirst({ where: { code: norm } });
-    if (existing) {
-      await (prisma as any).attendantAssignment.update({
-        where: { id: existing.id },
-        data: { code: norm, outlet, productKeys },
-      });
-    } else {
-      await (prisma as any).attendantAssignment.create({
-        data: { id: `aa_${Date.now()}`, code: norm, outlet, productKeys },
-      });
-    }
+    // Use SQL UPSERT by unique code to avoid relying on id column presence
+    await (prisma as any).$executeRawUnsafe(
+      'INSERT INTO "AttendantAssignment" (code, outlet, "productKeys", "updatedAt") VALUES ($1, $2, $3, NOW())\n       ON CONFLICT (code) DO UPDATE SET outlet = EXCLUDED.outlet, "productKeys" = EXCLUDED."productKeys", "updatedAt" = NOW()',
+      norm,
+      outlet,
+      productKeys ?? []
+    );
     return NextResponse.json({ ok: true });
   } catch (e: any) {
+    console.error('assignments upsert error', e);
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }
 }

@@ -138,6 +138,7 @@ export default function AdminPage() {
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
+  const [serverAssignments, setServerAssignments] = useState<Array<{ code: string; outlet: string; productKeys: string[] }>>([]);
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -187,6 +188,14 @@ export default function AdminPage() {
         const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
         setOutlets(o); setProducts(p); setExpenses(e);
         setCodes(c); setScope(s); setPricebook(pb);
+        // Load current assignments from server for visibility
+        try {
+          const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
+          if (r2.ok) {
+            const arr = (await r2.json()) as Array<{ code: string; outlet: string; productKeys: string[] }>;
+            setServerAssignments(arr);
+          }
+        } catch {}
       } catch {
         setOutlets(seedDefaultOutlets());
         setProducts(seedDefaultProducts());
@@ -266,8 +275,25 @@ export default function AdminPage() {
     try {
       const r = await pushAssignmentsToDB(scope);
       alert(`Assignments saved to server ✅ (rows: ${r.count})`);
+      try {
+        const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
+        if (r2.ok) setServerAssignments(await r2.json());
+      } catch {}
     } catch {
       alert("Saved locally, but failed to sync assignments to server.");
+    }
+  };
+
+  const normalizeAssignmentsNow = async () => {
+    try {
+      const r = await fetch("/api/admin/assignments/normalize", { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json().catch(()=>({} as any));
+      alert(`Normalized ✅ (changed: ${j.changed ?? 0})`);
+      const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
+      if (r2.ok) setServerAssignments(await r2.json());
+    } catch {
+      alert("Failed to normalize assignments");
     }
   };
 
@@ -820,11 +846,56 @@ export default function AdminPage() {
           <div className="mt-6 pt-4 border-t">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">Assignments (Attendants)</h3>
-              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
+              <div className="flex gap-2">
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={normalizeAssignmentsNow}>Normalize Codes</button>
+                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
+              </div>
             </div>
             <p className="text-xs text-gray-600 mt-1 mb-2">
               Choose outlet and allowed products for each attendant code. Supervisors & suppliers aren’t tied to outlets.
             </p>
+            {/* Server-side assignments list */}
+            {serverAssignments.length > 0 && (
+              <div className="rounded-xl border p-3 mb-3 bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-medium">Server Assignments</div>
+                  <button className="text-xs underline" onClick={async()=>{
+                    try { const r = await fetch('/api/admin/assignments/list', { cache: 'no-store' }); if (r.ok) setServerAssignments(await r.json()); } catch {}
+                  }}>Refresh</button>
+                </div>
+                <div className="table-wrap">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left border-b">
+                        <th className="py-1">Code</th>
+                        <th>Outlet</th>
+                        <th>Products</th>
+                        <th>Sync</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {serverAssignments.map((row) => (
+                        <tr key={`sv-${row.code}`} className="border-b">
+                          <td className="py-1 font-mono">{row.code}</td>
+                          <td>{row.outlet}</td>
+                          <td className="truncate max-w-[280px]" title={(row.productKeys||[]).join(', ')}>
+                            {(row.productKeys||[]).join(', ')}
+                          </td>
+                          <td>
+                            <button className="text-xs border rounded-lg px-2 py-0.5" title="Pull this into local scope"
+                              onClick={()=>{
+                                const key = row.code.replace(/\s+/g, '').toLowerCase();
+                                setScope(prev=>({ ...prev, [key]: { outlet: row.outlet, productKeys: (row.productKeys||[]) as any } }));
+                              }}
+                            >Pull</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {attendantCodes.length === 0 && (
               <p className="text-xs text-gray-600">Add at least one code with role “attendant”.</p>

@@ -143,10 +143,9 @@ model Setting {
 
 /// Tiny table for attendant assignments (code → outlet + products)
 model AttendantAssignment {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  code        String   @id
   outlet      String
-  productKeys String[] @db.Text
+  productKeys Json
   updatedAt   DateTime @updatedAt
 }
 

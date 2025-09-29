@@ -23,15 +23,17 @@ export async function POST(req: Request) {
       { outlet?: string; productKeys?: string[] }
     ]>;
 
-    await Promise.all(
-      entries.map(([code, v]) =>
-        (prisma as any).attendantAssignment.upsert({
-          where: { code },
-          update: { outlet: v.outlet || "", productKeys: v.productKeys || [] },
-          create: { code, outlet: v.outlet || "", productKeys: v.productKeys || [] },
-        })
-      )
-    );
+    // Write each via SQL UPSERT by code to be resilient to schema drift
+    for (const [codeRaw, v] of entries) {
+      const code = (codeRaw || "").replace(/\s+/g, "").toLowerCase();
+      if (!code) continue;
+      const outlet = v.outlet || "";
+      const productKeys = Array.isArray(v.productKeys) ? v.productKeys : [];
+      await (prisma as any).$executeRawUnsafe(
+        'INSERT INTO "AttendantAssignment" (code, outlet, "productKeys", "updatedAt") VALUES ($1, $2, $3::jsonb, NOW())\n         ON CONFLICT (code) DO UPDATE SET outlet = EXCLUDED.outlet, "productKeys" = EXCLUDED."productKeys", "updatedAt" = NOW()',
+        code, outlet, JSON.stringify(productKeys)
+      );
+    }
 
     return NextResponse.json({ ok: true, count: entries.length });
   } catch (e) {
@@ -47,7 +49,7 @@ export async function DELETE(req: Request) {
     const code = (searchParams.get("code") || "").trim();
     if (!code) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
 
-    await (prisma as any).attendantAssignment.delete({ where: { code } }).catch(() => {});
+  await (prisma as any).$executeRawUnsafe('DELETE FROM "AttendantAssignment" WHERE code = $1', code).catch(()=>{});
     // Also clear normalized scope if stored in AttendantScope
     const codeNorm = code.replace(/\s+/g, "").toLowerCase();
     await (prisma as any).attendantScope.delete({ where: { codeNorm } }).catch(() => {});
