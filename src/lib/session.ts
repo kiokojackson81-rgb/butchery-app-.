@@ -54,6 +54,14 @@ export async function getSession() {
   return sess;
 }
 
+export async function requireOutletSession() {
+  const sess = await getSession();
+  if (!sess) return { ok: false as const, status: 401 as const, error: 'Unauthorized' };
+  const outlet = sess.outletCode || sess.attendant?.outletRef?.code || sess.attendant?.outletRef?.name;
+  if (!outlet) return { ok: false as const, status: 400 as const, error: 'No outlet bound to session' };
+  return { ok: true as const, session: sess, outlet };
+}
+
 export async function destroySession() {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
