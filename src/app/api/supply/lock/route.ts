@@ -3,50 +3,47 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
-
-function normDate(d?: string): string {
-  try { const dt = d ? new Date(d) : null; if (!dt) return ""; return dt.toISOString().split("T")[0]; } catch { return ""; }
-}
-function trim(s?: string): string { return (s || "").trim(); }
+import { sendSupplyReceived } from "@/lib/wa";
 
 export async function POST(req: Request) {
-  try {
-    const { date, outlet, locked } = await req.json() as { date: string; outlet: string; locked: boolean };
-    const dateStr = normDate(date);
-    const outletName = trim(outlet);
-    const isLocked = !!locked;
-    if (!dateStr || !outletName) {
-      return NextResponse.json({ ok: false, code: "bad_request", message: "date/outlet required" }, { status: 400 });
-    }
+	try {
+		const { date, outlet } = (await req.json().catch(() => ({}))) as {
+			date?: string;
+			outlet?: string;
+		};
+		if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
 
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "OpeningLock" ("date","outletName","locked") VALUES ($1,$2,$3)
-       ON CONFLICT ("date","outletName") DO UPDATE SET "locked" = EXCLUDED."locked", "updatedAt" = CURRENT_TIMESTAMP`,
-      dateStr, outletName, isLocked
-    );
+		// In a real lock, you'd persist a flag; for now, treat as finalize + notify.
+		const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } });
 
-    return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    console.error("/api/supply/lock POST error", err);
-    return NextResponse.json({ ok: false, code: "server_error", message: err?.message || "Failed to set lock" }, { status: 500 });
-  }
-}
+		// Resolve attendants for outlet from phone mappings, and try to get their names via Attendant.loginCode
+		const maps = await (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet } });
 
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const dateStr = normDate(searchParams.get("date") || undefined);
-    const outletName = trim(searchParams.get("outlet") || undefined);
-    if (!dateStr || !outletName) {
-      return NextResponse.json({ ok: false, code: "bad_request", message: "date/outlet required" }, { status: 400 });
-    }
+		// Build a quick lookup from code -> attendant name
+		const codes = maps.map((m: any) => m.code).filter(Boolean);
+		const attendants = codes.length
+			? await (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } })
+			: [];
+		const nameByCode = new Map<string, string>();
+		for (const a of attendants) {
+			if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
+		}
 
-    const rows = await prisma.$queryRawUnsafe<{ locked: boolean }[]>
-      ("SELECT locked FROM \"OpeningLock\" WHERE date=$1 AND \"outletName\"=$2 LIMIT 1", dateStr, outletName);
-    const locked = Array.isArray(rows) && rows[0]?.locked === true;
-    return NextResponse.json({ ok: true, locked });
-  } catch (err: any) {
-    console.error("/api/supply/lock GET error", err);
-    return NextResponse.json({ ok: false, code: "server_error", message: err?.message || "Failed to get lock" }, { status: 500 });
-  }
+		// Notify each attendant per item (could be summarized if needed)
+		const notifications: Promise<any>[] = [];
+		for (const m of maps) {
+			const phone = (m.phoneE164 as string) || "";
+			const attName = (m.code && nameByCode.get(m.code)) || m.code || "Attendant";
+			for (const r of rows) {
+				notifications.push(
+					sendSupplyReceived(phone, attName, String(r.itemKey), Number(r.qty))
+				);
+			}
+		}
+		await Promise.allSettled(notifications);
+
+		return NextResponse.json({ ok: true, notified: maps.length, items: rows.length });
+	} catch (e: any) {
+		return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+	}
 }

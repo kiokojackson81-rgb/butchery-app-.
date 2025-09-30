@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
+import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 /* =========================
@@ -107,9 +107,7 @@ const K_PRODUCTS_V2 = "admin_products_v2";
 function rid(): string {
   return Math.random().toString(36).slice(2);
 }
-function ymdLocal(): string {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+function ymd(d = new Date()): string {
   return d.toISOString().split("T")[0];
 }
 function loadLS<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
@@ -131,9 +129,6 @@ function fmt(n: number) {
   return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-// Helpers: strip leading zeros for numeric input strings
-const stripLeadZeros = (s: string) => s.replace(/^0+(?=\d)/, "");
-
 /* =========================
    Page
    ========================= */
@@ -144,7 +139,7 @@ export default function SupplierDashboard(): JSX.Element {
   const [pricebook, setPricebook] = useState<Record<string, Record<string, { sellPrice: number; active: boolean }>>>({});
 
   /* Selection */
-  const [dateStr, setDateStr] = useState<string>(ymdLocal());
+  const [dateStr, setDateStr] = useState<string>(ymd());
   const [outletId, setOutletId] = useState<string>("");
 
   /* Supply table state */
@@ -185,24 +180,6 @@ export default function SupplierDashboard(): JSX.Element {
     if (row) return !!row.active;
     return !!p.active; // fallback to global
   };
-
-  // Fetch canonical opening from server and mirror into local storage, then update UI
-  async function refreshFromServer(date: string, outletName: string) {
-    try {
-      const qs = new URLSearchParams({ date, outlet: outletName }).toString();
-      const r = await fetch(`/api/supply/opening?${qs}`, { cache: "no-store" });
-      if (!r.ok) return;
-      const j = await r.json();
-      if (!j?.ok) return;
-      saveLS(
-        supplierOpeningFullKey(date, outletName),
-        (j.rows || []).map((x: any) => ({ id: rid(), itemKey: x.itemKey, qty: x.qty || 0, buyPrice: x.buyPrice || 0, unit: x.unit || "kg" }))
-      );
-      saveLS(supplierOpeningKey(date, outletName), j.minimal || []);
-      saveLS(supplierCostKey(date, outletName), j.costMap || {});
-      setRows(loadLS(supplierOpeningFullKey(date, outletName), []));
-    } catch {}
-  }
 
   /* Load admin data + session (once) */
   useEffect(() => {
@@ -320,7 +297,6 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
     // Persist to server (non-blocking)
     try { await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows }); } catch {}
-    await refreshFromServer(dateStr, selectedOutletName);
     alert("Saved.");
   };
 
@@ -329,11 +305,9 @@ export default function SupplierDashboard(): JSX.Element {
     if (!selectedOutletName) return;
     // Save full + minimal + cost
     await saveDraft();
-    // Lock (server-backed)
+    // Lock
     saveLS(supplierSubmittedKey(dateStr, selectedOutletName), true);
     setSubmitted(true);
-    try { await postJSON("/api/supply/lock", { date: dateStr, outlet: selectedOutletName, locked: true }); } catch {}
-    await refreshFromServer(dateStr, selectedOutletName);
     alert("Supply submitted and locked. Supervisor can edit later.");
   };
 
@@ -435,9 +409,7 @@ export default function SupplierDashboard(): JSX.Element {
     adjOutletOpening(toName, txProductKey, +qtyNum, p.unit);
 
     // 4) Persist transfer to server (non-blocking)
-  try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
-  await refreshFromServer(dateStr, fromName);
-  await refreshFromServer(dateStr, toName);
+    try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
 
     alert("Transfer saved and applied to both outlets’ opening.");
     setTxQty("");
@@ -651,6 +623,27 @@ export default function SupplierDashboard(): JSX.Element {
               </option>
             ))}
           </select>
+          {/* Thin persistence controls */}
+          <button
+            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+            title="Reload Admin settings from DB"
+            onClick={async () => {
+              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
+              catch { alert("Failed to hydrate from DB."); }
+            }}
+          >
+            Refresh Admin
+          </button>
+          <button
+            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+            title="Push Admin settings from this browser to DB"
+            onClick={async () => {
+              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
+              catch { alert("Failed to push to DB."); }
+            }}
+          >
+            Sync to DB
+          </button>
           {/* NEW: Logout next to date/select */}
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
@@ -741,7 +734,7 @@ export default function SupplierDashboard(): JSX.Element {
                         step={unit === "kg" ? 0.01 : 1}
                         value={r.qty}
                         onChange={(e) =>
-                          updateRow(r.id, { qty: toNumStr(stripLeadZeros(e.target.value)) })
+                          updateRow(r.id, { qty: toNumStr(e.target.value) })
                         }
                         disabled={submitted}
                       />
@@ -755,7 +748,7 @@ export default function SupplierDashboard(): JSX.Element {
                         step={1}
                         value={r.buyPrice}
                         onChange={(e) =>
-                          updateRow(r.id, { buyPrice: toNumStr(stripLeadZeros(e.target.value)) })
+                          updateRow(r.id, { buyPrice: toNumStr(e.target.value) })
                         }
                         disabled={submitted}
                       />
@@ -854,7 +847,7 @@ export default function SupplierDashboard(): JSX.Element {
             step={productByKey[txProductKey]?.unit === "kg" ? 0.01 : 1}
             placeholder="Qty"
             value={txQty}
-            onChange={(e) => setTxQty(stripLeadZeros(e.target.value))}
+            onChange={(e) => setTxQty(e.target.value)}
           />
 
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addTransfer}>

@@ -1,7 +1,4 @@
 import { NextResponse } from "next/server";
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 import { prisma } from "@/lib/db";
 
 export async function GET(req: Request) {

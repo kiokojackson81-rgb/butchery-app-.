@@ -18,16 +18,15 @@ export default function AttendantLoginPage() {
 
     const norm = raw.replace(/\s+/g, "").toLowerCase();
     try {
-      const res = await fetch("/api/attendant/login", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ code: norm })
+        body: JSON.stringify({ loginCode: norm })
       });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
-  try { sessionStorage.setItem("attendant_code", norm); } catch {}
-  router.replace("/attendant/dashboard");
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
+      router.push("/attendant/dashboard");
     } catch (e) {
       alert("Login failed. Check your code or try again.");
     }

@@ -143,9 +143,10 @@ model Setting {
 
 /// Tiny table for attendant assignments (code → outlet + products)
 model AttendantAssignment {
-  code        String   @id
+  id          String   @id @default(cuid())
+  code        String   @unique
   outlet      String
-  productKeys Json
+  productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
 }
 
@@ -235,4 +236,16 @@ model ReviewItem {
   status    String   @default("pending") // pending|approved|rejected
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// WhatsApp message logs (outbound + inbound + status updates)
+model WaMessageLog {
+  id           String   @id @default(cuid())
+  attendantId  String?
+  direction    String
+  templateName String?
+  payload      Json
+  waMessageId  String?  @unique
+  status       String?
+  createdAt    DateTime @default(now())
 }

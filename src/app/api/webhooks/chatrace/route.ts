@@ -3,7 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import crypto from "crypto";
-import { sendWaText } from "@/lib/wa";
+import { FLAGS } from "@/lib/flags";
+import { sendTemplate, sendText } from "@/lib/wa";
 import {
   sendClosingStockSubmitted,
   sendLowStockAlert,
@@ -44,7 +45,10 @@ export async function POST(req: Request) {
     switch (tag) {
       case "closing_submitted": {
         const amount = Number(payload?.depositAmount || 0);
-        if (phone) await sendWaText(phone, `✅ Closing submitted. Deposit recorded: Ksh ${amount || 0}.`);
+        if (phone) {
+          if (FLAGS.CHATRACE_ENABLED) await sendText(phone, `✅ Closing submitted. Deposit recorded: Ksh ${amount || 0}.`);
+          else await sendTemplate({ to: phone, template: "generic_alert", params: [`✅ Closing submitted. Deposit recorded: Ksh ${amount || 0}.`] });
+        }
         // approved template (non-breaking addition)
         try {
           const outlet = String(payload?.outlet || payload?.data?.outlet || "");
@@ -63,10 +67,20 @@ export async function POST(req: Request) {
         const supervisors = await (prisma as any).phoneMapping.findMany({ where: { role: "supervisor" } });
         const msg = `⚠️ Low Stock @ ${outlet || "(unknown)"}: ${product}=${qty}`;
         await Promise.all([
-          ...suppliers.map((s: any) => sendWaText(s.phoneE164, msg)),
-          ...supervisors.map((s: any) => sendWaText(s.phoneE164, msg)),
+          ...(FLAGS.CHATRACE_ENABLED
+            ? [
+                ...suppliers.map((s: any) => sendText(s.phoneE164, msg)),
+                ...supervisors.map((s: any) => sendText(s.phoneE164, msg)),
+              ]
+            : [
+                ...suppliers.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [msg] })),
+                ...supervisors.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [msg] })),
+              ]),
         ]);
-        if (phone) await sendWaText(phone, "✅ Notified supplier & supervisor.");
+        if (phone) {
+          if (FLAGS.CHATRACE_ENABLED) await sendText(phone, "✅ Notified supplier & supervisor.");
+          else await sendTemplate({ to: phone, template: "generic_alert", params: ["✅ Notified supplier & supervisor."] });
+        }
         // approved template (non-breaking addition)
         try {
           const item = String(payload?.item || payload?.product || payload?.productKey || "");
@@ -81,7 +95,10 @@ export async function POST(req: Request) {
         const text = String(payload?.text || payload?.message || "");
         const m = /^request\s+([a-zA-Z0-9_-]+)\s+([0-9]+(\.[0-9]+)?)$/i.exec(text.trim());
         if (!m) {
-          if (phone) await sendWaText(phone, `Hi! Use: request <itemKey> <qty>. Example: request beef 20`);
+          if (phone) {
+            if (FLAGS.CHATRACE_ENABLED) await sendText(phone, `Hi! Use: request <itemKey> <qty>. Example: request beef 20`);
+            else await sendTemplate({ to: phone, template: "generic_alert", params: ["Hi! Use: request <itemKey> <qty>. Example: request beef 20"] });
+          }
           break;
         }
         const productKey = m[1].toLowerCase();
@@ -93,10 +110,21 @@ export async function POST(req: Request) {
         const supervisors = await (prisma as any).phoneMapping.findMany({ where: { role: "supervisor" } });
         const notice = `📦 Supply request: ${outlet} needs ${qty} ${productKey}.`;
         await Promise.all([
-          ...suppliers.map((s: any) => sendWaText(s.phoneE164, notice)),
-          ...supervisors.map((s: any) => sendWaText(s.phoneE164, notice)),
+          ...(FLAGS.CHATRACE_ENABLED
+            ? [
+                ...suppliers.map((s: any) => sendText(s.phoneE164, notice)),
+                ...supervisors.map((s: any) => sendText(s.phoneE164, notice)),
+              ]
+            : [
+                ...suppliers.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [notice] })),
+                ...supervisors.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [notice] })),
+              ]),
         ]);
-        if (phone) await sendWaText(phone, `✅ Request received for ${qty} ${productKey}.`);
+        if (phone) {
+          const msg = `✅ Request received for ${qty} ${productKey}.`;
+          if (FLAGS.CHATRACE_ENABLED) await sendText(phone, msg);
+          else await sendTemplate({ to: phone, template: "generic_alert", params: [msg] });
+        }
         // approved template (non-breaking addition)
         try {
           const listLine = String(payload?.listLine || payload?.list || payload?.note || payload?.items || `${qty} ${productKey}`);
@@ -107,7 +135,10 @@ export async function POST(req: Request) {
         break;
       }
       case "deposit_confirmed": {
-        if (phone) await sendWaText(phone, `✅ Deposit confirmed. Thank you.`);
+        if (phone) {
+          if (FLAGS.CHATRACE_ENABLED) await sendText(phone, `✅ Deposit confirmed. Thank you.`);
+          else await sendTemplate({ to: phone, template: "generic_alert", params: ["✅ Deposit confirmed. Thank you."] });
+        }
         break;
       }
       case "supply_received": {
@@ -131,7 +162,11 @@ export async function POST(req: Request) {
         break;
       }
       default: {
-        if (phone) await sendWaText(phone, `👋 Received tag: ${tag}.`);
+        if (phone) {
+          const msg = `👋 Received tag: ${tag}.`;
+          if (FLAGS.CHATRACE_ENABLED) await sendText(phone, msg);
+          else await sendTemplate({ to: phone, template: "generic_alert", params: [msg] });
+        }
       }
     }
 

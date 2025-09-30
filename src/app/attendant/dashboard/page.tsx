@@ -12,7 +12,7 @@ type ItemKey =
   | "potatoes" | "samosas" | "mutura";
 
 type Row = { key: ItemKey; name: string; unit: Unit; opening: number; closing: number | ""; waste: number | "" };
-type Outlet = string;
+type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
 type Deposit = { id: string; code: string; amount: number | ""; note?: string; status?: "VALID"|"PENDING"|"INVALID" };
 type AdminProduct = { key: ItemKey; name: string; unit: Unit; sellPrice: number; active: boolean; };
 type AdminOutlet = { name: string; code: string; active: boolean };
@@ -37,11 +37,7 @@ const PRICEBOOK_KEY = "admin_pricebook";
 /** ========= Helpers ========= */
 function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : v ? Number(v) : 0; }
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
-function todayLocal(): string {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().split("T")[0];
-}
+function today() { return new Date().toISOString().split("T")[0]; }
 function id() { return Math.random().toString(36).slice(2); }
 function readJSON<T>(k: string, fallback: T): T { return safeReadJSON<T>(k, fallback); }
 function writeJSON(k: string, v: any) { safeWriteJSON(k, v); }
@@ -69,7 +65,7 @@ async function postJSON<T>(url: string, body: any): Promise<T> {
 }
 
 export default function AttendantDashboardPage() {
-  const [dateStr] = useState(todayLocal()); // locked to today
+  const [dateStr] = useState(today()); // locked to today
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [catalog, setCatalog] = useState<Record<ItemKey, AdminProduct>>({} as any);
 
@@ -178,42 +174,22 @@ export default function AttendantDashboardPage() {
     } catch {}
   }, [outlet]);
 
-  /** ===== Load opening + saved data (server-first) ===== */
+  /** ===== Load opening + saved data ===== */
   useEffect(() => {
     if (!outlet) return;
 
-    (async () => {
-      let openingRows: Array<{ itemKey: ItemKey; qty: number }> = [];
-      // Try server first
-      try {
-        const qs = new URLSearchParams({ date: dateStr, outlet }).toString();
-        const r = await fetch(`/api/supply/opening?${qs}`, { cache: "no-store" });
-        if (r.ok) {
-          const j = await r.json();
-          if (j?.ok && Array.isArray(j.minimal)) {
-            openingRows = j.minimal as Array<{ itemKey: ItemKey; qty: number }>;
-            // Mirror to local for resilience
-            writeJSON(supplierOpeningKey(dateStr, outlet), openingRows);
-          }
-        }
-      } catch {}
+    const openingRows = readJSON<Array<{ itemKey: ItemKey; qty: number }>>(supplierOpeningKey(dateStr, outlet), []);
+    setOpeningRowsRaw(openingRows || []);
 
-      // Fallback to local mirror if server missing/unavailable
-      if (!openingRows.length) {
-        openingRows = readJSON<Array<{ itemKey: ItemKey; qty: number }>>(supplierOpeningKey(dateStr, outlet), []);
-      }
-      setOpeningRowsRaw(openingRows || []);
-
-      const byItem: Record<ItemKey, number> = {} as any;
-      (openingRows || []).forEach(r => { byItem[r.itemKey] = (byItem[r.itemKey] || 0) + Number(r.qty || 0); });
-      const built: Row[] = (Object.keys(byItem) as ItemKey[])
-        .filter(k => !!catalog[k])
-        .map(k => {
-          const key = k as ItemKey; const prod = catalog[key];
-          return { key, name: prod?.name || key.toUpperCase(), unit: prod?.unit || "kg", opening: byItem[key] || 0, closing: "", waste: "" };
-        });
-      setRows(built);
-    })();
+    const byItem: Record<ItemKey, number> = {} as any;
+    (openingRows || []).forEach(r => { byItem[r.itemKey] = (byItem[r.itemKey] || 0) + Number(r.qty || 0); });
+    const built: Row[] = (Object.keys(byItem) as ItemKey[])
+      .filter(k => !!catalog[k])
+      .map(k => {
+        const key = k as ItemKey; const prod = catalog[key];
+        return { key, name: prod?.name || key.toUpperCase(), unit: prod?.unit || "kg", opening: byItem[key] || 0, closing: "", waste: "" };
+      });
+    setRows(built);
 
     // deposits
     const depList = safeReadJSON<Deposit[]>(depositsKey(dateStr, outlet), []);
@@ -759,7 +735,7 @@ export default function AttendantDashboardPage() {
             <h3 className="font-semibold">Summary (Active Period)</h3>
             <button
               className="btn-mobile border rounded-xl px-3 py-1 text-xs"
-              onClick={() => { try { window.print(); } catch {} }}
+              onClick={() => window.print()}
             >
               Download PDF
             </button>

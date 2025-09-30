@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
