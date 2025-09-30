@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
-import { sendInteractive, logOutbound } from "@/lib/wa";
+import { sendInteractive, logOutbound, sendText } from "@/lib/wa";
 import { buildProductList } from "@/lib/wa_messages";
 import { getAssignedProducts } from "@/lib/wa_attendant_flow";
 
@@ -19,11 +19,23 @@ export async function GET() {
       });
       try {
         const products = await getAssignedProducts(String(a.code || ""));
-        const body = buildProductList(a.phoneE164, products);
+        const body = buildProductList(
+          a.phoneE164,
+          products,
+          {
+            headerText: `${a.outlet || "Outlet"} — closing stock.`,
+            bodyText: `Pick a product:\nReply NEXT / SUMMARY / SUBMIT any time.`,
+            footerText: "BarakaOps",
+            sectionTitle: "Products",
+          }
+        );
         const res = await sendInteractive(body);
         await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: res }, waMessageId: (res as any)?.waMessageId ?? null, status: (res as any)?.ok ? "SENT" : "ERROR" });
       } catch (err) {
         await logOutbound({ direction: "out", templateName: null, payload: { error: String((err as any)?.message || err) }, status: "ERROR" });
+        try {
+          await sendText(a.phoneE164, `${a.outlet || "Outlet"} — closing stock.\nReply MENU to start.`);
+        } catch {}
       }
     }
     return NextResponse.json({ ok: true, count: attendants.length });

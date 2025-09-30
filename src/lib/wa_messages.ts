@@ -1,20 +1,29 @@
 // src/lib/wa_messages.ts
 // Builders for interactive messages (lists and reply buttons)
 
-export function buildProductList(to: string, products: Array<{ id: string; title: string; desc?: string }>) {
+export function buildProductList(
+  to: string,
+  products: Array<{ id: string; title: string; desc?: string }>,
+  opts?: { headerText?: string; bodyText?: string; footerText?: string; sectionTitle?: string }
+) {
+  const headerText = opts?.headerText ?? "Products";
+  const bodyText = opts?.bodyText ?? "Select a product to enter QTY/WASTE";
+  const footerText = opts?.footerText;
+  const sectionTitle = opts?.sectionTitle ?? "Items";
   return {
     messaging_product: "whatsapp",
     to,
     type: "interactive",
     interactive: {
       type: "list",
-      header: { type: "text", text: "Products" },
-      body: { type: "text", text: "Select a product to enter QTY/WASTE" },
+      header: { type: "text", text: headerText },
+      body: { text: bodyText },
+      ...(footerText ? { footer: { text: footerText } } : {}),
       action: {
-        button: "Choose",
+        button: "Choose product",
         sections: [
           {
-            title: "Items",
+            title: sectionTitle,
             rows: products.map((p) => ({ id: p.id, title: p.title, description: p.desc || "" })),
           },
         ],
@@ -30,7 +39,7 @@ export function buildNextSummarySubmit(to: string) {
     type: "interactive",
     interactive: {
       type: "button",
-      body: { type: "text", text: "Actions" },
+      body: { text: "Actions" },
       action: {
         buttons: [
           { type: "reply", reply: { id: "NEXT", title: "NEXT" } },
@@ -49,7 +58,7 @@ export function buildDepositCTA(to: string, expectedKsh: number) {
     type: "interactive",
     interactive: {
       type: "button",
-      body: { type: "text", text: `Expected deposit: Ksh ${expectedKsh}. View TXNS or HELP?` },
+      body: { text: `Expected deposit: Ksh ${expectedKsh}. View TXNS or HELP?` },
       action: {
         buttons: [
           { type: "reply", reply: { id: "TXNS", title: "View TXNS" } },
