@@ -1,9 +1,25 @@
--- AlterTable
-ALTER TABLE "public"."AttendantAssignment" DROP CONSTRAINT "AttendantAssignment_pkey",
-ADD COLUMN     "id" TEXT NOT NULL,
-DROP COLUMN "productKeys",
-ADD COLUMN     "productKeys" TEXT[],
-ADD CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id");
+-- Alter AttendantAssignment safely: add nullable id, backfill, then enforce NOT NULL and PK
+ALTER TABLE "public"."AttendantAssignment" DROP CONSTRAINT IF EXISTS "AttendantAssignment_pkey";
+ALTER TABLE "public"."AttendantAssignment" ADD COLUMN IF NOT EXISTS "id" TEXT;
+
+-- If productKeys existed in a different shape, drop and recreate as TEXT[] (data may be lost if previously non-array)
+DO $$ BEGIN
+    PERFORM 1 FROM information_schema.columns 
+     WHERE table_schema = 'public' AND table_name = 'AttendantAssignment' AND column_name = 'productKeys';
+    IF FOUND THEN
+        ALTER TABLE "public"."AttendantAssignment" DROP COLUMN "productKeys";
+    END IF;
+END $$;
+ALTER TABLE "public"."AttendantAssignment" ADD COLUMN IF NOT EXISTS "productKeys" TEXT[];
+
+-- Backfill id for existing rows where id is NULL using a random md5-based token
+UPDATE "public"."AttendantAssignment"
+SET "id" = COALESCE("id", 'aa_' || md5(random()::text || clock_timestamp()::text))
+WHERE "id" IS NULL;
+
+-- Now enforce NOT NULL and primary key on id
+ALTER TABLE "public"."AttendantAssignment" ALTER COLUMN "id" SET NOT NULL;
+ALTER TABLE "public"."AttendantAssignment" ADD CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id");
 
 -- DropTable
 DROP TABLE "public"."OpeningLock";
