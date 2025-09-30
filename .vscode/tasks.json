@@ -80,6 +80,14 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "typecheck (on-demand)",
+			"type": "shell",
+			"command": "npm run typecheck",
+			"args": [],
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }
