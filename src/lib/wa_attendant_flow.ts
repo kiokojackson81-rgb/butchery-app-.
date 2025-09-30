@@ -18,6 +18,7 @@ import { saveClosings } from "@/server/closings";
 import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
+import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
 type Cursor = {
   date: string;
@@ -93,12 +94,92 @@ async function promptLogin(phone: string) {
   );
 }
 
+// Helper: bind phone to code/role and enter MENU (reuses existing mapping + outlet logic)
+async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: string; code: string; role?: string }) {
+  const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true } });
+  if (!pc) return false;
+  const finalRole = role || pc.role;
+
+  // Phone mapping
+  const existing = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
+  if (existing && existing.phoneE164 && existing.phoneE164 !== phoneE164) return false;
+  if (!existing) await (prisma as any).phoneMapping.create({ data: { code: pc.code, role: finalRole, phoneE164, outlet: null } });
+
+  // Resolve outlet (attendants)
+  let outlet = null as string | null;
+  if (finalRole === "attendant") {
+    const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
+    outlet = pm?.outlet || null;
+    if (!outlet) {
+      const scope = await (prisma as any).attendantScope.findUnique({ where: { codeNorm: pc.code } });
+      outlet = scope?.outletName || null;
+    }
+    if (!outlet) {
+      // Save minimal state and prompt supervisor assignment
+      await (prisma as any).waSession.upsert({
+        where: { phoneE164 },
+        update: { code: pc.code, role: finalRole, state: "LOGIN" },
+        create: { phoneE164, code: pc.code, role: finalRole, state: "LOGIN", cursor: { date: today(), rows: [] } },
+      });
+      await sendText(phoneE164.replace(/^\+/, ""), "Your outlet is not set. Ask Supervisor to assign your outlet.");
+      return true;
+    }
+  }
+
+  // Enter MENU and send menu
+  await (prisma as any).waSession.upsert({
+    where: { phoneE164 },
+    update: { code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: today(), rows: [] } },
+    create: { phoneE164, code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: today(), rows: [] } },
+  });
+
+  const to = phoneE164.replace(/^\+/, "");
+  if (finalRole === "attendant") await sendAttendantMenu(to, outlet || "your outlet");
+  else if (finalRole === "supervisor") await sendSupervisorMenu(to);
+  else await sendSupplierMenu(to);
+  return true;
+}
+
+// Accept either "LOGIN <CODE>" or "LINK <NONCE>"
+async function tryAutoLinkLogin(text: string, phoneE164: string) {
+  const T = String(text || "").trim().toUpperCase();
+  // a) LINK <NONCE>
+  const mLink = T.match(/^LINK\s+([A-Z0-9]{4,8})$/);
+  if (mLink) {
+    const nonce = mLink[1];
+    const linkPhone = `+LINK:${nonce}`;
+    const link = await (prisma as any).waSession.findUnique({ where: { phoneE164: linkPhone } });
+    if (!link?.cursor || !link?.code || !link?.role) return false;
+    const pc = await (prisma as any).personCode.findUnique({ where: { code: link.code } });
+    if (!pc || !pc.active) return false;
+    const ok = await bindPhoneAndEnterMenu({ phoneE164, code: pc.code, role: pc.role });
+    if (!ok) return false;
+    await (prisma as any).waSession.delete({ where: { phoneE164: linkPhone } }).catch(() => {});
+    await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`);
+    return true;
+  }
+  // b) LOGIN <CODE>
+  const mLogin = T.match(/^LOGIN\s+([A-Z0-9]{3,10})$/);
+  if (mLogin) {
+    const code = mLogin[1];
+    const ok = await bindPhoneAndEnterMenu({ phoneE164, code });
+    if (ok) await sendText(phoneE164.replace(/^\+/, ""), `Login successful.`);
+    return ok;
+  }
+  return false;
+}
+
 export async function handleInboundText(phone: string, text: string) {
   const s = await loadSession(phone);
   // Touch session activity
   if (s?.id) await touchSession(s.id);
   const t = text.trim();
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
+
+  // Try one-tap link login first
+  const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+  const auto = await tryAutoLinkLogin(t, phoneE164);
+  if (auto) return;
 
   // Inactivity reset
   if (inactiveExpired(s.updatedAt)) {

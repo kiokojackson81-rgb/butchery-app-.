@@ -12,13 +12,15 @@ function looksLikeCode(v: string) {
 
 export default function LoginPage() {
   const [code, setCode] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "done">("idle");
-  const [resp, setResp] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deepLink, setDeepLink] = useState<{ waMe: string; ios: string } | null>(null);
+  const [waText, setWaText] = useState<string>("");
 
   // Pull WA business phone for the "Open WhatsApp" link
   const waBusiness = useMemo(() => {
-    return resp?.waBusiness || process.env.NEXT_PUBLIC_WA_BUSINESS || "";
-  }, [resp]);
+    return process.env.NEXT_PUBLIC_WA_BUSINESS || "";
+  }, []);
 
   // Autofocus on mount (mobile-friendly)
   useEffect(() => {
@@ -26,32 +28,45 @@ export default function LoginPage() {
     el?.focus();
   }, []);
 
+  const isIOS = () => {
+    if (typeof navigator === "undefined") return false;
+    return /iP(ad|hone|od)/i.test(navigator.userAgent);
+  };
+
+  const goWhatsApp = (links?: { waMe: string; ios: string }) => {
+    const target = links ? (isIOS() ? links.ios : links.waMe) : undefined;
+    if (!target) return;
+    window.location.assign(target);
+  };
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     if (!looksLikeCode(code)) {
-      setResp({ ok: false, reason: "INVALID_CODE" });
-      setStatus("done");
+      setError("Invalid code format");
       return;
     }
-    setStatus("submitting");
-    setResp(null);
+    setBusy(true);
     try {
-      const r = await fetch("/api/wa/portal-login", {
+      const r = await fetch("/api/flow/login-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({ code }),
       });
       const j = await r.json();
-      setResp(j);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Login failed");
+      setDeepLink(j.links);
+      setWaText(j.waText);
+      goWhatsApp(j.links);
     } catch (err: any) {
-      setResp({ ok: false, reason: "SERVER" });
+      setError(err?.message || "Failed");
     } finally {
-      setStatus("done");
+      setBusy(false);
     }
   }
 
-  const showOpenWa = (resp?.ok && (resp?.bound || resp?.token)) && waBusiness;
+  // No longer used: deep link flow opens WA directly.
 
   return (
     <main className="min-h-[100svh] bg-gradient-to-b from-emerald-600 via-emerald-700 to-emerald-900 text-white">
@@ -102,69 +117,37 @@ export default function LoginPage() {
               {/* Submit */}
               <button
                 type="submit"
-                disabled={status === "submitting"}
+                disabled={busy}
                 className={cx(
                   "w-full rounded-2xl px-4 py-3 text-base font-semibold",
                   "bg-white text-emerald-700 active:scale-[.995] transition",
-                  status === "submitting" && "opacity-70"
+                  busy && "opacity-70"
                 )}
               >
-                {status === "submitting" ? "Checking…" : "Submit code"}
+                {busy ? "Opening WhatsApp…" : "Submit code"}
               </button>
             </form>
+            {/* Errors */}
+            {error && (
+              <div className="mt-4 rounded-xl bg-red-400/15 px-4 py-3 text-sm ring-1 ring-red-300/30">
+                {error}
+              </div>
+            )}
 
-            {/* Result / helper area */}
-            {status === "done" && resp && (
-              <div className="mt-4 space-y-3">
-                {/* Success: already bound */}
-                {resp.ok && resp.bound && (
-                  <>
-                    <div className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm ring-1 ring-emerald-300/30">
-                      ✅ Code verified — we sent you a menu on WhatsApp.
-                    </div>
-                    {showOpenWa && (
-                      <a
-                        href={`https://wa.me/${waBusiness}`}
-                        target="_blank"
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 py-3 font-semibold text-emerald-900 active:scale-[.995]"
-                      >
-                        <WhatsAppIcon />
-                        Open WhatsApp
-                      </a>
-                    )}
-                  </>
-                )}
-
-                {/* Success: needs binding via LINK token */}
-                {resp.ok && !resp.bound && (
-                  <>
-                    <div className="rounded-xl bg-amber-400/15 px-4 py-3 text-sm ring-1 ring-amber-300/30">
-                      ✳️ Almost done — open WhatsApp and send this <b>exactly</b>:
-                    </div>
-                    <div className="rounded-xl bg-neutral-900 px-4 py-3 font-mono text-emerald-300 ring-1 ring-white/10">
-                      {resp.token}
-                    </div>
-                    {showOpenWa && (
-                      <a
-                        href={`https://wa.me/${waBusiness}`}
-                        target="_blank"
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 py-3 font-semibold text-emerald-900 active:scale-[.995]"
-                      >
-                        <WhatsAppIcon />
-                        Open WhatsApp
-                      </a>
-                    )}
-                  </>
-                )}
-
-                {/* Errors */}
-                {!resp.ok && (
-                  <div className="rounded-xl bg-red-400/15 px-4 py-3 text-sm ring-1 ring-red-300/30">
-                    {resp.reason === "INVALID_CODE" && "That code is invalid or inactive. Contact your supervisor."}
-                    {resp.reason === "RATE_LIMIT" && "Too many attempts. Please try again in a minute."}
-                    {!["INVALID_CODE", "RATE_LIMIT"].includes(resp.reason) && "Login failed. Please try again."}
-                  </div>
-                )}
+            {/* Fallback area if redirect was blocked */}
+            {deepLink && (
+              <div className="mt-5 space-y-2">
+                <div className="text-sm text-white/80">If WhatsApp didn’t open:</div>
+                <a
+                  href={isIOS() ? deepLink.ios : deepLink.waMe}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 py-3 font-semibold text-emerald-900 active:scale-[.995]"
+                >
+                  <WhatsAppIcon />
+                  Open WhatsApp
+                </a>
+                <div className="text-xs text-white/70">
+                  We prefilled: <span className="font-mono">{waText}</span>
+                </div>
               </div>
             )}
           </div>
