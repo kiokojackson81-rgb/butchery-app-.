@@ -141,8 +141,8 @@ export default function AdminPage() {
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
-  // Chatrace settings card state
-  const [chatSettings, setChatSettings] = useState<{ apiBase: string; apiKey: string; fromPhone?: string }>({ apiBase: "", apiKey: "", fromPhone: "" });
+  // Admin WhatsApp phone
+  const [adminPhone, setAdminPhone] = useState<string>("");
   // Low-stock thresholds (productKey -> min qty)
   const [thresholds, setThresholds] = useState<Record<string, number>>({});
   const [loadingThresholds, setLoadingThresholds] = useState<boolean>(false);
@@ -213,14 +213,15 @@ export default function AdminPage() {
     })();
   }, []);
 
-  // Load Chatrace settings (once)
+  // Load admin phone mapping once (role=admin, code=ADMIN)
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/admin/chatrace-settings", { cache: "no-store" });
+        const r = await fetch("/api/admin/phones", { cache: "no-store" });
         if (r.ok) {
-          const s = (await r.json()) as { apiBase?: string; apiKey?: string; fromPhone?: string } | null;
-          if (s) setChatSettings({ apiBase: s.apiBase || "", apiKey: s.apiKey || "", fromPhone: s.fromPhone || "" });
+          const list = (await r.json()) as Array<{ code: string; phoneE164: string }>;
+          const row = list.find(x => x.code === "ADMIN");
+          if (row?.phoneE164) setAdminPhone(row.phoneE164);
         }
       } catch {}
     })();
@@ -300,16 +301,14 @@ export default function AdminPage() {
     }
   };
 
-  const saveChatraceSettings = async () => {
-    const { apiBase, apiKey, fromPhone } = chatSettings;
-    if (!apiBase || !apiKey) { alert("apiBase and apiKey are required"); return; }
+  const saveAdminPhone = async () => {
     try {
-  const r = await fetch("/api/admin/chatrace-settings", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ apiBase, apiKey, fromPhone }) });
+      const phone = adminPhone.trim();
+      if (!phone) { alert("Enter admin WhatsApp phone"); return; }
+      const r = await fetch("/api/admin/phone", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ role: "admin", code: "ADMIN", phoneE164: phone }) });
       if (!r.ok) throw new Error(await r.text());
-      alert("Chatrace settings saved ✅");
-    } catch {
-      alert("Failed to save Chatrace settings");
-    }
+      alert("Admin WhatsApp saved ✅");
+    } catch { alert("Failed to save admin WhatsApp"); }
   };
   const saveThresholds = async () => {
     try {
@@ -1442,41 +1441,19 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Chatrace Settings */}
+          {/* Admin WhatsApp */}
           <div className="rounded-xl border p-3 mt-4">
-            <h3 className="font-medium mb-2">Chatrace Settings</h3>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <label className="text-sm">
-                <div className="text-gray-600 mb-1">API Base URL</div>
-                <input
-                  className="input-mobile border rounded-xl p-2 w-full"
-                  placeholder="https://api.chatrace.com"
-                  value={chatSettings.apiBase}
-                  onChange={(e)=>setChatSettings(prev=>({ ...prev, apiBase: e.target.value }))}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="text-gray-600 mb-1">API Key</div>
-                <input
-                  className="input-mobile border rounded-xl p-2 w-full"
-                  placeholder="sk_live_…"
-                  value={chatSettings.apiKey}
-                  onChange={(e)=>setChatSettings(prev=>({ ...prev, apiKey: e.target.value }))}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="text-gray-600 mb-1">From Phone (optional)</div>
-                <input
-                  className="input-mobile border rounded-xl p-2 w-full"
-                  placeholder="+2547…"
-                  value={chatSettings.fromPhone || ""}
-                  onChange={(e)=>setChatSettings(prev=>({ ...prev, fromPhone: e.target.value }))}
-                />
-              </label>
+            <h3 className="font-medium mb-2">Admin WhatsApp</h3>
+            <div className="flex items-center gap-2">
+              <input
+                className="input-mobile border rounded-xl p-2 w-64 font-mono"
+                placeholder="+2547…"
+                value={adminPhone}
+                onChange={(e)=>setAdminPhone(e.target.value)}
+              />
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveAdminPhone}>Save</button>
             </div>
-            <div className="mt-3">
-              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveChatraceSettings}>Save Chatrace</button>
-            </div>
+            <p className="text-xs text-gray-600 mt-2">Stores a PhoneMapping with role="admin" and code="ADMIN".</p>
           </div>
 
           {/* Low Stock Thresholds */}

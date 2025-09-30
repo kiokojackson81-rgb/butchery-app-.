@@ -174,3 +174,12 @@ export async function updateStatusByWamid(waMessageId: string, status: string) {
   } catch {}
 }
 
+/** Resolve a phone for a given role/code/outlet using PhoneMapping */
+export async function getPhoneByCode(opts: { role: string; code?: string; outlet?: string }) {
+  const where: any = { role: opts.role };
+  if (opts.code) where.code = opts.code;
+  if (opts.outlet) where.outlet = opts.outlet;
+  const m = await (prisma as any).phoneMapping.findFirst({ where });
+  return m?.phoneE164 || null;
+}
+
