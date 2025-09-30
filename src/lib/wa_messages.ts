@@ -1,6 +1,99 @@
 // src/lib/wa_messages.ts
 // Centralized WhatsApp message payload builders (interactive + text)
 
+// WhatsApp payload limits (Interactive)
+export const WA_MAXS = {
+  ROW_TITLE: 24,
+  ROW_DESC: 72,
+  SECTION_TITLE: 24,
+  BUTTON_LABEL: 20,
+  BODY_TEXT: 1024, // safe cap
+  HEADER_TEXT: 60, // practical cap; WA allows up to ~60-80 depending on type
+  FOOTER_TEXT: 60,
+  ROWS_PER_SECTION: 10, // WA hard limit
+  TOTAL_ROWS: 30, // WA hard limit across sections
+} as const;
+
+function truncate(str: string | undefined, max: number): string | undefined {
+  if (!str) return str;
+  const s = String(str);
+  if (s.length <= max) return s;
+  if (max <= 1) return s.slice(0, max);
+  return s.slice(0, max - 1) + "…";
+}
+
+function sanitizeText(s: string | undefined, max: number): string | undefined {
+  if (!s) return s;
+  const clean = s
+    .replace(/\s+/g, " ")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim();
+  return truncate(clean, max);
+}
+
+// Safe interactive list builder
+export type InteractiveRow = { id: string; title: string; description?: string };
+export type InteractiveSection = { title?: string; rows: InteractiveRow[] };
+
+export function buildInteractiveListPayload(opts: {
+  to: string; // Graph can accept with or without '+'; sender will normalize
+  headerText?: string;
+  bodyText: string;
+  footerText?: string;
+  buttonLabel?: string; // default: "Choose"
+  sections: InteractiveSection[];
+}) {
+  // Enforce counts (WA limits)
+  const flattenedRows = opts.sections.flatMap((s) => s.rows);
+  if (flattenedRows.length === 0) {
+    throw new Error("Interactive list requires at least 1 row.");
+  }
+  let normalizedSections = opts.sections;
+  if (flattenedRows.length > WA_MAXS.TOTAL_ROWS) {
+    let remaining = WA_MAXS.TOTAL_ROWS;
+    const trimmedSections: InteractiveSection[] = [];
+    for (const sec of opts.sections) {
+      if (remaining <= 0) break;
+      const take = Math.min(sec.rows.length, remaining, WA_MAXS.ROWS_PER_SECTION);
+      trimmedSections.push({ ...sec, rows: sec.rows.slice(0, take) });
+      remaining -= take;
+    }
+    normalizedSections = trimmedSections;
+  } else {
+    normalizedSections = opts.sections.map((sec) => ({ ...sec, rows: sec.rows.slice(0, WA_MAXS.ROWS_PER_SECTION) }));
+  }
+
+  const button = sanitizeText(opts.buttonLabel || "Choose", WA_MAXS.BUTTON_LABEL)!;
+  const header = sanitizeText(opts.headerText, WA_MAXS.HEADER_TEXT);
+  const body = sanitizeText(opts.bodyText, WA_MAXS.BODY_TEXT)!;
+  const footer = sanitizeText(opts.footerText, WA_MAXS.FOOTER_TEXT);
+
+  const sections = normalizedSections.map((sec) => ({
+    title: sanitizeText(sec.title, WA_MAXS.SECTION_TITLE),
+    rows: sec.rows.map((r) => ({
+      id: String(r.id),
+      title: sanitizeText(r.title, WA_MAXS.ROW_TITLE)!,
+      description: sanitizeText(r.description, WA_MAXS.ROW_DESC),
+    })),
+  }));
+
+  return {
+    messaging_product: "whatsapp",
+    to: opts.to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      ...(header ? { header: { type: "text", text: header } } : {}),
+      body: { text: body }, // NOTE: no "type" inside body
+      ...(footer ? { footer: { text: footer } } : {}),
+      action: {
+        button,
+        sections,
+      },
+    },
+  } as const;
+}
+
 export function buildProductList(
   to: string,
   products: Array<{ id: string; title: string; desc?: string }>,
@@ -81,55 +174,38 @@ export function msgText(to: string, body: string) {
 }
 
 export function menuMain(to: string, outletName?: string) {
-  return {
-    messaging_product: "whatsapp",
+  return buildInteractiveListPayload({
     to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      body: { text: outletName ? `${outletName} — what would you like to do?` : "What would you like to do?" },
-      footer: { text: "BarakaOps" },
-      action: {
-        button: "Choose",
-        sections: [
-          {
-            title: "Menu",
-            rows: [
-              { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: "Enter closing & waste" },
-              { id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" },
-              { id: "MENU_TXNS", title: "View last 10 transactions", description: "Recent deposits" },
-            ],
-          },
+    bodyText: outletName ? `${outletName} — what would you like to do?` : "What would you like to do?",
+    footerText: "BarakaOps",
+    buttonLabel: "Choose",
+    sections: [
+      {
+        title: "Menu",
+        rows: [
+          { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: "Enter closing & waste" },
+          { id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" },
+          { id: "MENU_TXNS", title: "View last 10 transactions", description: "Recent deposits" },
         ],
       },
-    },
-  } as const;
+    ],
+  });
 }
 
-export function listProducts(
-  to: string,
-  products: Array<{ key: string; name: string }>,
-  outletName: string
-) {
-  return {
-    messaging_product: "whatsapp",
+export function listProducts(to: string, products: Array<{ key: string; name: string }>, outletName: string) {
+  return buildInteractiveListPayload({
     to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      body: { text: `${outletName} — choose product` },
-      footer: { text: "BarakaOps" },
-      action: {
-        button: "Choose",
-        sections: [
-          {
-            title: "Products",
-            rows: products.map((p) => ({ id: `PROD_${p.key}`, title: p.name, description: "Enter closing & waste" })),
-          },
-        ],
+    headerText: undefined,
+    bodyText: `${outletName} — choose product`,
+    footerText: "BarakaOps",
+    buttonLabel: "Choose",
+    sections: [
+      {
+        title: "Products",
+        rows: products.map((p) => ({ id: `PROD_${p.key}`, title: p.name || p.key, description: "Enter closing & waste" })),
       },
-    },
-  } as const;
+    ],
+  });
 }
 
 export function promptQty(to: string, itemTitle: string) {
@@ -143,7 +219,7 @@ export function buttonsWasteOrSkip(to: string, itemTitle: string) {
     type: "interactive",
     interactive: {
       type: "button",
-      body: { text: `Add waste for ${itemTitle}?` },
+      body: { text: sanitizeText(`Add waste for ${itemTitle}?`, WA_MAXS.BODY_TEXT)! },
       action: {
         buttons: [
           { type: "reply", reply: { id: "WASTE_YES", title: "Add Waste" } },
@@ -164,7 +240,7 @@ export function summarySubmitModify(
   outletName: string
 ) {
   const lines = rows.map((r) => `${r.name}: closing ${r.closing}, waste ${r.waste}`);
-  const body = [outletName ? `${outletName} — summary` : "Summary", ...lines].join("\n").slice(0, 1024);
+  const body = sanitizeText([outletName ? `${outletName} — summary` : "Summary", ...lines].join("\n"), WA_MAXS.BODY_TEXT)!;
   return {
     messaging_product: "whatsapp",
     to,
