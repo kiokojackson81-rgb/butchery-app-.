@@ -7,10 +7,13 @@ export const revalidate = 0;
 
 export async function POST(req: Request) {
   try {
-    const { to, template, params, langCode } = (await req.json().catch(() => ({}))) as any;
+    const { to, template, params, langCode, dryRun } = (await req.json().catch(() => ({}))) as any;
     if (!to || !template)
       return NextResponse.json({ ok: false, error: "to/template required" }, { status: 400 });
-  const res = await sendTemplate({ to, template, params, langCode });
+    const prev = process.env.WA_DRY_RUN;
+    if (dryRun === true) process.env.WA_DRY_RUN = "true";
+    const res = await sendTemplate({ to, template, params, langCode });
+    if (dryRun === true) process.env.WA_DRY_RUN = prev;
   return NextResponse.json(res);
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "send failed" }, { status: 500 });

@@ -21,6 +21,11 @@ export async function sendTemplate(opts: {
   params?: string[];
   langCode?: string;
 }) {
+  if (process.env.WA_DRY_RUN === "true") {
+    const waMessageId = `DRYRUN-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
+    return { ok: true, waMessageId, response: { dryRun: true } } as const;
+  }
   if (FLAGS.CHATRACE_ENABLED) {
     // Legacy path: use existing Chatrace integration
     const res = await chatraceSendTemplate(opts.to, opts.template, opts.params || []);
@@ -71,6 +76,11 @@ export async function sendTemplate(opts: {
  * Send plain text over WhatsApp.
  */
 export async function sendText(to: string, text: string): Promise<SendResult> {
+  if (process.env.WA_DRY_RUN === "true") {
+    const waMessageId = `DRYRUN-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", text }, waMessageId, status: "SENT" });
+    return { ok: true, waMessageId, response: { dryRun: true } } as const;
+  }
   if (FLAGS.CHATRACE_ENABLED) {
     const res = await chatraceSendText({ to, text });
     await logOutbound({ direction: "out", templateName: null, payload: { via: "chatrace", text, response: res }, waMessageId: (res as any)?.id || null, status: (res as any)?.ok ? "SENT" : "ERROR" });
@@ -118,6 +128,22 @@ export async function sendWaTemplate(
   const res = await sendTemplate({ to: phone, template: templateName, params, langCode: languageCode });
   if ((res as any)?.ok) return { ok: true, id: (res as any)?.waMessageId };
   return { ok: false, error: (res as any)?.error || "send failed" };
+}
+
+// Convenience helpers for common notifications (adjust template names to your approved ones)
+export async function sendClosingSubmitted(phoneE164: string, attendantName: string, expected: number) {
+  const to = phoneE164.replace(/^\+/, "");
+  return sendTemplate({ to, template: "closing_stock_submitted", params: [attendantName, String(expected)] });
+}
+
+export async function sendSupplyReceived(phoneE164: string, attendantName: string, product: string, qty: number | string) {
+  const to = phoneE164.replace(/^\+/, "");
+  return sendTemplate({ to, template: "supply_received", params: [attendantName, product, String(qty)] });
+}
+
+export async function sendLowStockAlert(phoneE164: string, rendered: string) {
+  const to = phoneE164.replace(/^\+/, "");
+  return sendTemplate({ to, template: "low_stock_alert", params: [rendered] });
 }
 
 export async function logOutbound(entry: {
