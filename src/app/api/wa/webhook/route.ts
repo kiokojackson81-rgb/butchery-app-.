@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
 import { handleInboundText, handleInteractiveReply } from "@/lib/wa_attendant_flow";
+import { tryBindViaLinkToken } from "@/lib/wa_binding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,7 +73,12 @@ export async function POST(req: Request) {
             const phone = from ? `+${from}` : undefined;
             if (phone) {
               if (m.type === "text" && m.text?.body) {
-                await handleInboundText(phone, String(m.text.body).trim());
+                const fromGraph = from || ""; // 2547...
+                const bodyText = String(m.text.body).trim();
+                // Try link-token binding first
+                const handled = await tryBindViaLinkToken(fromGraph, bodyText);
+                if (handled) continue;
+                await handleInboundText(phone, bodyText);
               } else if (m.type === "interactive") {
                 await handleInteractiveReply(phone, m.interactive);
               } else if ((m as any).button) {
