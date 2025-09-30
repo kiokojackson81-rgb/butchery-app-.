@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
+import { handleInboundText, handleInteractiveReply } from "@/lib/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,31 +67,18 @@ export async function POST(req: Request) {
               status: (m.type as string) || "MESSAGE",
             },
           });
-          // Optional: link attendant by phone if available (placeholder; schema may need phone on Attendant)
+          // Route to flow handlers
           try {
-            const phone = from ? `+${from}` : null;
-            if (phone && id) {
-              await (prisma as any).waMessageLog.updateMany({ where: { waMessageId: id }, data: { /* attendantId: ... */ } });
-            }
-          } catch {}
-
-          // Simple flow handling: interactive replies and text commands
-          try {
-            const { handleAttendantInteractive, handleAttendantText } = await import("@/lib/wa_attendant_flow");
-            const { sendText } = await import("@/lib/wa");
             const phone = from ? `+${from}` : undefined;
             if (phone) {
-              if (m.type === "interactive") {
-                const lr = m.interactive?.list_reply?.id as string | undefined;
-                const br = m.interactive?.button_reply?.id as string | undefined;
-                const actionId = lr || br;
-                if (actionId) {
-                  const reply = await handleAttendantInteractive(phone, actionId);
-                  if (reply) await sendText(phone, String(reply).slice(0, 4096));
-                }
-              } else if (m.type === "text" && m.text?.body) {
-                const reply = await handleAttendantText(phone, String(m.text.body));
-                if (reply) await sendText(phone, String(reply).slice(0, 4096));
+              if (m.type === "text" && m.text?.body) {
+                await handleInboundText(phone, String(m.text.body).trim());
+              } else if (m.type === "interactive") {
+                await handleInteractiveReply(phone, m.interactive);
+              } else if ((m as any).button) {
+                // Normalize older button payloads to interactive-like shape
+                const btn = (m as any).button;
+                await handleInteractiveReply(phone, { button_reply: { id: btn?.payload || btn?.text || "", title: btn?.text || "" } });
               }
             }
           } catch (err) {
