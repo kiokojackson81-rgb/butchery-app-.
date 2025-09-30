@@ -3,8 +3,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
-import { sendTemplate, sendInteractive } from "@/lib/wa";
+import { sendInteractive, logOutbound } from "@/lib/wa";
 import { buildProductList } from "@/lib/wa_messages";
+import { getAssignedProducts } from "@/lib/wa_attendant_flow";
 
 export async function GET() {
   try {
@@ -17,10 +18,13 @@ export async function GET() {
         update: { code: a.code, outlet: a.outlet || null, state: "MENU", cursor: { date, rows: [] } },
       });
       try {
-        await sendTemplate({ to: a.phoneE164, template: "closing_prompt", params: [a.code, a.outlet || "", date] });
-      } catch {}
-      // Optional: interactive list could be sent after template; needs products by assignment
-      // If you have AttendantScope, fetch and build list here.
+        const products = await getAssignedProducts(String(a.code || ""));
+        const body = buildProductList(a.phoneE164, products);
+        const res = await sendInteractive(body);
+        await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: res }, waMessageId: (res as any)?.waMessageId ?? null, status: (res as any)?.ok ? "SENT" : "ERROR" });
+      } catch (err) {
+        await logOutbound({ direction: "out", templateName: null, payload: { error: String((err as any)?.message || err) }, status: "ERROR" });
+      }
     }
     return NextResponse.json({ ok: true, count: attendants.length });
   } catch (e: any) {
