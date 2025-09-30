@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/wa/jobs/expire-sessions",
+      "schedule": "*/2 * * * *"
+    }
+  ]
+}

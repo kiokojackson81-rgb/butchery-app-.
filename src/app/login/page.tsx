@@ -94,9 +94,9 @@ export default function LoginPage() {
                   "bg-white/10 ring-1 ring-inset ring-white/20 placeholder:text-white/40",
                   "focus:outline-none focus:ring-2 focus:ring-emerald-300"
                 )}
-                placeholder="e.g. BR1234"
+                placeholder="e.g. br1234"
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={(e) => setCode(e.target.value)}
               />
 
               {/* Submit */}

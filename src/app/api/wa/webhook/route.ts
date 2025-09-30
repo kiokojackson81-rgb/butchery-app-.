@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
-import { logOutbound, updateStatusByWamid } from "@/lib/wa";
+import { logOutbound, updateStatusByWamid, sendText, sendInteractive } from "@/lib/wa";
 import { handleInboundText, handleInteractiveReply } from "@/lib/wa_attendant_flow";
 import { tryBindViaLinkToken } from "@/lib/wa_binding";
+import { handleSupervisorText } from "@/server/wa/wa_supervisor_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,6 +79,31 @@ export async function POST(req: Request) {
                 // Try link-token binding first
                 const handled = await tryBindViaLinkToken(fromGraph, bodyText);
                 if (handled) continue;
+                // Supervisor dispatch (role-based)
+                try {
+                  const map = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164: phone } });
+                  if (map?.role === "supervisor") {
+                    const supHandled = await handleSupervisorText(fromGraph, bodyText);
+                    if (supHandled) continue;
+                  }
+                } catch {}
+                // If not bound to a session or in SPLASH/LOGIN, send link + buttons proactively
+                try {
+                  const s = await (prisma as any).waSession.findUnique({ where: { phoneE164: phone } });
+                  if (!s || s.state === "SPLASH" || s.state === "LOGIN" || !s.code) {
+                    const loginUrl = "https://barakafresh.com/login?src=wa";
+                    await sendText(fromGraph, `Welcome to BarakaOps!\nTo continue, open ${loginUrl} and enter your code.\nOr reply here with your code (e.g., BR1234).`);
+                    await sendInteractive({
+                      to: fromGraph,
+                      type: "button",
+                      body: { text: "How would you like to continue?" },
+                      action: { buttons: [
+                        { type: "reply", reply: { id: "SEND_CODE", title: "Send Code" } },
+                        { type: "reply", reply: { id: "HELP", title: "Help" } },
+                      ] },
+                    } as any);
+                  }
+                } catch {}
                 await handleInboundText(phone, bodyText);
               } else if (m.type === "interactive") {
                 await handleInteractiveReply(phone, m.interactive);

@@ -1,6 +1,8 @@
 // New state machine for attendants.
 import { prisma } from "@/lib/db";
 import { sendText, sendInteractive } from "@/lib/wa";
+import { normCode, toDbPhone } from "@/server/util/normalize";
+import { touchSession } from "@/server/wa/session";
 import {
   menuMain,
   listProducts,
@@ -84,11 +86,17 @@ function looksLikeCode(t: string) {
 }
 
 async function promptLogin(phone: string) {
-  await sendText(phone, "Welcome to BarakaOps.\nPlease send your login code (e.g., BR1234) to continue.");
+  const loginUrl = "https://barakafresh.com/login?src=wa";
+  await sendText(
+    phone,
+    `Welcome to BarakaOps!\nTo continue, open ${loginUrl} and enter your code.\nOr reply here with your code (e.g., BR1234).`
+  );
 }
 
 export async function handleInboundText(phone: string, text: string) {
   const s = await loadSession(phone);
+  // Touch session activity
+  if (s?.id) await touchSession(s.id);
   const t = text.trim();
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
 
@@ -159,30 +167,30 @@ export async function handleInboundText(phone: string, text: string) {
       return;
     }
 
-    const code = t.toUpperCase();
-    // 1) verify code exists & active and role attendant
-    const pc = await (prisma as any).personCode.findUnique({ where: { code } });
+    const code = normCode(t);
+    // 1) verify code exists & active and role attendant (case-insensitive)
+    const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true, role: "attendant" } });
     if (!pc || !pc.active || pc.role !== "attendant") {
       await sendText(phone, "Code not found or inactive. Please check with Supervisor.");
       return;
     }
 
     // 2) enforce/establish phone mapping
-    const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
-    const existing = await (prisma as any).phoneMapping.findUnique({ where: { code } });
+    const phoneE164 = toDbPhone(phone);
+    const existing = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
     if (existing && existing.phoneE164 !== phoneE164) {
       await sendText(phone, "This code is linked to a different phone. Contact Supervisor to reassign.");
       return;
     }
     if (!existing) {
-      await (prisma as any).phoneMapping.create({ data: { code, role: "attendant", phoneE164, outlet: null } });
+      await (prisma as any).phoneMapping.create({ data: { code: pc.code, role: "attendant", phoneE164, outlet: null } });
     }
 
     // 3) find outlet via PhoneMapping or AttendantScope
-    const pm = await (prisma as any).phoneMapping.findUnique({ where: { code } });
+    const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
     let outlet = (pm && pm.outlet) || null;
     if (!outlet) {
-      const scope = await (prisma as any).attendantScope.findUnique({ where: { codeNorm: code } });
+      const scope = await (prisma as any).attendantScope.findUnique({ where: { codeNorm: pc.code } });
       outlet = scope?.outletName || null;
     }
     if (!outlet) {
@@ -194,7 +202,7 @@ export async function handleInboundText(phone: string, text: string) {
     // 4) success → move to MENU with cursor
     await (prisma as any).waSession.update({
       where: { id: s.id },
-      data: { code, role: "attendant", outlet, state: "MENU", cursor: { date: today(), outlet, rows: [] } as any },
+      data: { code: pc.code, role: "attendant", outlet, state: "MENU", cursor: { date: today(), outlet, rows: [] } as any },
     });
 
     // 5) send product menu
@@ -300,6 +308,7 @@ export async function handleInboundText(phone: string, text: string) {
 
 export async function handleInteractiveReply(phone: string, payload: any) {
   const s = await loadSession(phone);
+  if (s?.id) await touchSession(s.id);
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
   const lr = payload?.list_reply?.id as string | undefined;
   const br = payload?.button_reply?.id as string | undefined;

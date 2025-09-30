@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
-import { toGraphPhone } from "@/lib/wa_phone";
+import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,25 +33,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "RATE_LIMIT" }, { status: 429 });
     }
 
-    const c = String(code || "").trim().toUpperCase();
+  const c = normCode(String(code || ""));
     if (!looksLikeCode(c)) {
       return NextResponse.json({ ok: false, reason: "INVALID_CODE" }, { status: 400 });
     }
 
     // 1) PersonCode
-    const pc = await (prisma as any).personCode.findUnique({ where: { code: c } });
+    const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: c, mode: "insensitive" }, active: true } });
     if (!pc || !pc.active) {
       return NextResponse.json({ ok: false, reason: "INVALID_CODE" }, { status: 404 });
     }
     const role = pc.role as string; // 'attendant'|'supervisor'|'supplier'
 
     // 2) PhoneMapping for this code
-    const mapping = await (prisma as any).phoneMapping.findUnique({ where: { code: c } });
+  const mapping = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
 
     // 3) Determine outlet if possible
     let outlet = mapping?.outlet || null;
     if (!outlet && role === "attendant") {
-      const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: c } });
+      const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } });
       outlet = scope?.outletName || null;
     }
 
@@ -62,8 +62,8 @@ export async function POST(req: Request) {
 
       await (prisma as any).waSession.upsert({
         where: { phoneE164: phonePlus },
-        update: { role, code: c, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
-        create: { phoneE164: phonePlus, role, code: c, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
+        update: { role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
+        create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
       });
 
       if (role === "attendant") await sendAttendantMenu(phoneGraph, outlet || "your outlet");
@@ -76,9 +76,9 @@ export async function POST(req: Request) {
     // 5) Unbound => issue a LINK token stored in session cursor
     const token = "LINK " + String(Math.floor(100000 + Math.random() * 900000));
     await (prisma as any).waSession.upsert({
-      where: { phoneE164: `+PENDING:${c}` },
-      update: { role, code: c, outlet, state: "LOGIN", cursor: { linkToken: token, issuedAt: Date.now() } },
-      create: { phoneE164: `+PENDING:${c}`, role, code: c, outlet, state: "LOGIN", cursor: { linkToken: token, issuedAt: Date.now() } },
+      where: { phoneE164: `+PENDING:${pc.code}` },
+      update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { linkToken: token, issuedAt: Date.now() } },
+      create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { linkToken: token, issuedAt: Date.now() } },
     });
 
     return NextResponse.json({ ok: true, bound: false, token, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
