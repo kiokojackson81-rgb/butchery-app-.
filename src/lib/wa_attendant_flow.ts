@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/db";
 import { sendText, sendInteractive } from "@/lib/wa";
 import { normCode, toDbPhone } from "@/server/util/normalize";
+import { createLoginLink } from "@/server/wa_links";
 import { touchSession } from "@/server/wa/session";
 import {
   menuMain,
@@ -87,11 +88,22 @@ function looksLikeCode(t: string) {
 }
 
 async function promptLogin(phone: string) {
-  const loginUrl = "https://barakafresh.com/login?src=wa";
+  // Generate a per-phone login link that carries wa + nonce
+  const urlObj = await createLoginLink(toDbPhone(phone));
   await sendText(
     phone,
-    `Welcome to BarakaOps!\nTo continue, open ${loginUrl} and enter your code.\nOr reply here with your code (e.g., BR1234).`
+    `You're not logged in. Tap this link to log in via the website:\n${urlObj.url}\nAfter verifying your code, we'll greet you here.`
   );
+  // Optional: provide a helper button to re-send the link later
+  await sendInteractive({
+    to: phone.replace(/^\+/, ""),
+    type: "button",
+    body: { text: "Need the login link again?" },
+    action: { buttons: [
+      { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Send login link" } },
+      { type: "reply", reply: { id: "HELP", title: "Help" } },
+    ] },
+  } as any);
 }
 
 // Helper: bind phone to code/role and enter MENU (reuses existing mapping + outlet logic)
@@ -158,14 +170,7 @@ async function tryAutoLinkLogin(text: string, phoneE164: string) {
     await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`);
     return true;
   }
-  // b) LOGIN <CODE>
-  const mLogin = T.match(/^LOGIN\s+([A-Z0-9]{3,10})$/);
-  if (mLogin) {
-    const code = mLogin[1];
-    const ok = await bindPhoneAndEnterMenu({ phoneE164, code });
-    if (ok) await sendText(phoneE164.replace(/^\+/, ""), `Login successful.`);
-    return ok;
-  }
+  // NOTE: We no longer accept LOGIN <CODE> in chat. Use website finalize flow instead.
   return false;
 }
 
@@ -196,7 +201,7 @@ export async function handleInboundText(phone: string, text: string) {
   // Global commands
   if (/^(HELP)$/i.test(t)) {
     if (!s.code) {
-      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234). Type LOGOUT to reset.");
+      await sendText(phone, "You're not logged in. Use the login link we sent above to continue.");
     } else {
       await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.");
     }
@@ -210,7 +215,8 @@ export async function handleInboundText(phone: string, text: string) {
         data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
       });
     } catch {}
-    await sendText(phone, "You've been logged out. Send your login code to continue.");
+    await sendText(phone, "You've been logged out. We'll send you a login link now.");
+    await promptLogin(phone);
     return;
   }
   if (/^(TXNS)$/i.test(t)) {
@@ -242,53 +248,9 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   if (s.state === "LOGIN") {
-    // Accept only a code-like token; otherwise keep prompting
-    if (!looksLikeCode(t)) {
-      await promptLogin(phone);
-      return;
-    }
-
-    const code = normCode(t);
-    // 1) verify code exists & active and role attendant (case-insensitive)
-    const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true, role: "attendant" } });
-    if (!pc || !pc.active || pc.role !== "attendant") {
-      await sendText(phone, "Code not found or inactive. Please check with Supervisor.");
-      return;
-    }
-
-    // 2) enforce/establish phone mapping
-    const phoneE164 = toDbPhone(phone);
-    const existing = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
-    if (existing && existing.phoneE164 !== phoneE164) {
-      await sendText(phone, "This code is linked to a different phone. Contact Supervisor to reassign.");
-      return;
-    }
-    if (!existing) {
-      await (prisma as any).phoneMapping.create({ data: { code: pc.code, role: "attendant", phoneE164, outlet: null } });
-    }
-
-    // 3) find outlet via PhoneMapping or AttendantScope
-    const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
-    let outlet = (pm && pm.outlet) || null;
-    if (!outlet) {
-      const scope = await (prisma as any).attendantScope.findUnique({ where: { codeNorm: pc.code } });
-      outlet = scope?.outletName || null;
-    }
-    if (!outlet) {
-      await (prisma as any).waSession.update({ where: { id: s.id }, data: { code, role: "attendant", state: "LOGIN", cursor: {} as any } });
-      await sendText(phone, "Your outlet is not set. Ask Supervisor to assign your outlet.");
-      return;
-    }
-
-    // 4) success → move to MENU with cursor
-    await (prisma as any).waSession.update({
-      where: { id: s.id },
-      data: { code: pc.code, role: "attendant", outlet, state: "MENU", cursor: { date: today(), outlet, rows: [] } as any },
-    });
-
-    // 5) send product menu
-    const products = await getAssignedProducts(code);
-    await sendInteractive(listProducts(phone, products, outlet));
+    // Do not accept codes in chat. Always send a login link to finalize on the website.
+    await sendText(phone, "We no longer accept codes in chat. Use the login link to continue.");
+    await promptLogin(phone);
     return;
   }
 
@@ -383,7 +345,7 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   // Default: compact help
-  if (!s.code) await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).");
+  if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.");
   else await sendText(phone, "Try MENU or HELP.");
 }
 
@@ -394,6 +356,13 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   const lr = payload?.list_reply?.id as string | undefined;
   const br = payload?.button_reply?.id as string | undefined;
   const id = lr || br || "";
+
+  // Login link resend handler
+  if (id === "SEND_LOGIN_LINK") {
+    const link = await createLoginLink(toDbPhone(phone));
+    await sendText(phone, `Tap to log in via the website:\n${link.url}`);
+    return;
+  }
 
   // Interpret menu choices
   if (id === "MENU_SUBMIT_CLOSING") {

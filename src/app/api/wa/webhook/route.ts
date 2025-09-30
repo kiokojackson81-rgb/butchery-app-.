@@ -5,6 +5,7 @@ import { logOutbound, updateStatusByWamid, sendText, sendInteractive } from "@/l
 import { handleInboundText, handleInteractiveReply } from "@/lib/wa_attendant_flow";
 import { tryBindViaLinkToken } from "@/lib/wa_binding";
 import { handleSupervisorText } from "@/server/wa/wa_supervisor_flow";
+import { createLoginLink } from "@/server/wa_links";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,14 +92,14 @@ export async function POST(req: Request) {
                 try {
                   const s = await (prisma as any).waSession.findUnique({ where: { phoneE164: phone } });
                   if (!s || s.state === "SPLASH" || s.state === "LOGIN" || !s.code) {
-                    const loginUrl = "https://barakafresh.com/login?src=wa";
-                    await sendText(fromGraph, `Welcome to BarakaOps!\nTo continue, open ${loginUrl} and enter your code.\nOr reply here with your code (e.g., BR1234).`);
+                    const link = await createLoginLink(phone);
+                    await sendText(fromGraph, `Welcome to BarakaOps!\nTap this link to log in via the website:\n${link.url}`);
                     await sendInteractive({
                       to: fromGraph,
                       type: "button",
-                      body: { text: "How would you like to continue?" },
+                      body: { text: "Need the login link again?" },
                       action: { buttons: [
-                        { type: "reply", reply: { id: "SEND_CODE", title: "Send Code" } },
+                        { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Send login link" } },
                         { type: "reply", reply: { id: "HELP", title: "Help" } },
                       ] },
                     } as any);

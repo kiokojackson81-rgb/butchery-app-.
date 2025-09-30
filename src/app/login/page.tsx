@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [deepLink, setDeepLink] = useState<{ waMe: string; ios: string } | null>(null);
   const [waText, setWaText] = useState<string>("");
+  const [finalized, setFinalized] = useState(false);
 
   // Pull WA business phone for the "Open WhatsApp" link
   const waBusiness = useMemo(() => {
@@ -58,6 +59,29 @@ export default function LoginPage() {
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Login failed");
       setDeepLink(j.links);
       setWaText(j.waText);
+      // Attempt to finalize server-side if wa + nonce are present (deep-link roundtrip)
+      const url = new URL(window.location.href);
+      const wa = url.searchParams.get("wa");
+      const nonce = url.searchParams.get("nonce");
+      if (wa && nonce && !finalized) {
+        // Validate code to fetch role/outlet, then finalize WA auth so we can greet in chat immediately
+        const v = await fetch("/api/auth/validate-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+        const vj = await v.json();
+        if (vj?.ok) {
+          const fin = await fetch("/api/wa/auth/finalize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phoneE164: wa, nonce, role: vj.role, code: vj.code, outlet: vj.outlet ?? null }),
+          });
+          const fj = await fin.json();
+          if (!fin.ok || !fj?.ok) {
+            console.warn("Finalize failed", fj?.error);
+          } else {
+            setFinalized(true);
+          }
+        }
+      }
+      // Open WhatsApp with prefilled LINK <nonce>
       goWhatsApp(j.links);
     } catch (err: any) {
       setError(err?.message || "Failed");
