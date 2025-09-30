@@ -79,6 +79,14 @@ function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number
   Object.assign(r, patch);
 }
 
+function looksLikeCode(t: string) {
+  return /^[A-Za-z0-9]{3,10}$/.test(String(t || "").trim());
+}
+
+async function promptLogin(phone: string) {
+  await sendText(phone, "Welcome to BarakaOps.\nPlease send your login code (e.g., BR1234) to continue.");
+}
+
 export async function handleInboundText(phone: string, text: string) {
   const s = await loadSession(phone);
   const t = text.trim();
@@ -86,22 +94,34 @@ export async function handleInboundText(phone: string, text: string) {
 
   // Inactivity reset
   if (inactiveExpired(s.updatedAt)) {
-    await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-    await sendInteractive(menuMain(phone, s.outlet || undefined));
+    if (s.code && s.outlet) {
+      await saveSession(phone, { state: "MENU", date: today(), rows: [] });
+      await sendInteractive(menuMain(phone, s.outlet || undefined));
+    } else {
+      await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
+      await promptLogin(phone);
+    }
     return;
   }
 
   // Global commands
   if (/^(HELP)$/i.test(t)) {
-    await sendText(phone, "HELP: MENU, TXNS, SWITCH, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.");
+    if (!s.code) {
+      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234). Type LOGOUT to reset.");
+    } else {
+      await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.");
+    }
     return;
   }
-  if (/^(SWITCH|LOGOUT)$/i.test(t)) {
-    await saveSession(phone, { state: "SPLASH", role: undefined, code: undefined, outlet: undefined, date: today(), rows: [] });
-    await sendText(
-      phone,
-      "Welcome to BarakaOps.\n1) Attendant  2) Supervisor  3) Supplier\nReply 1/2/3 or open barakafresh.com/wa/login"
-    );
+  if (/^(SWITCH|LOGOUT|RESET)$/i.test(t)) {
+    // Clear code/outlet and move to LOGIN
+    try {
+      await (prisma as any).waSession.update({
+        where: { id: s.id },
+        data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
+      });
+    } catch {}
+    await sendText(phone, "You've been logged out. Send your login code to continue.");
     return;
   }
   if (/^(TXNS)$/i.test(t)) {
@@ -127,35 +147,68 @@ export async function handleInboundText(phone: string, text: string) {
 
   // SPLASH → LOGIN
   if (s.state === "SPLASH") {
-    await sendText(
-      phone,
-      "Welcome to BarakaOps.\n1) Attendant  2) Supervisor  3) Supplier\nReply 1/2/3 or open barakafresh.com/wa/login"
-    );
+    await promptLogin(phone);
     await saveSession(phone, { state: "LOGIN" });
     return;
   }
 
   if (s.state === "LOGIN") {
-    // role choice
-    if (/^[123]$/.test(t)) {
-      const role = t === "1" ? "attendant" : t === "2" ? "supervisor" : "supplier";
-      await saveSession(phone, { role, state: "LOGIN" });
-      await sendText(phone, "Send your code to continue.");
+    // Accept only a code-like token; otherwise keep prompting
+    if (!looksLikeCode(t)) {
+      await promptLogin(phone);
       return;
     }
-    // code entry
-    const mapping = await (prisma as any).phoneMapping.findFirst({ where: { code: t } });
-    if (mapping) {
-      await saveSession(phone, { role: mapping.role, code: mapping.code, outlet: mapping.outlet || undefined, state: "MENU", date: today(), rows: [] });
-      await sendInteractive(menuMain(phone, mapping.outlet || undefined));
-    } else {
-      await sendText(phone, "Code not found. Try again or contact your supervisor.");
+
+    const code = t.toUpperCase();
+    // 1) verify code exists & active and role attendant
+    const pc = await (prisma as any).personCode.findUnique({ where: { code } });
+    if (!pc || !pc.active || pc.role !== "attendant") {
+      await sendText(phone, "Code not found or inactive. Please check with Supervisor.");
+      return;
     }
+
+    // 2) enforce/establish phone mapping
+    const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+    const existing = await (prisma as any).phoneMapping.findUnique({ where: { code } });
+    if (existing && existing.phoneE164 !== phoneE164) {
+      await sendText(phone, "This code is linked to a different phone. Contact Supervisor to reassign.");
+      return;
+    }
+    if (!existing) {
+      await (prisma as any).phoneMapping.create({ data: { code, role: "attendant", phoneE164, outlet: null } });
+    }
+
+    // 3) find outlet via PhoneMapping or AttendantScope
+    const pm = await (prisma as any).phoneMapping.findUnique({ where: { code } });
+    let outlet = (pm && pm.outlet) || null;
+    if (!outlet) {
+      const scope = await (prisma as any).attendantScope.findUnique({ where: { codeNorm: code } });
+      outlet = scope?.outletName || null;
+    }
+    if (!outlet) {
+      await (prisma as any).waSession.update({ where: { id: s.id }, data: { code, role: "attendant", state: "LOGIN", cursor: {} as any } });
+      await sendText(phone, "Your outlet is not set. Ask Supervisor to assign your outlet.");
+      return;
+    }
+
+    // 4) success → move to MENU with cursor
+    await (prisma as any).waSession.update({
+      where: { id: s.id },
+      data: { code, role: "attendant", outlet, state: "MENU", cursor: { date: today(), outlet, rows: [] } as any },
+    });
+
+    // 5) send product menu
+    const products = await getAssignedProducts(code);
+    await sendInteractive(listProducts(phone, products, outlet));
     return;
   }
 
   // MENU context
   if (/^MENU$/i.test(t) || s.state === "MENU") {
+    if (!s.code || !s.outlet) {
+      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).");
+      return;
+    }
     if (/^MENU$/i.test(t)) {
       await sendInteractive(menuMain(phone, s.outlet || undefined));
       return;
@@ -241,7 +294,8 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   // Default: compact help
-  await sendText(phone, "Try MENU or HELP.");
+  if (!s.code) await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).");
+  else await sendText(phone, "Try MENU or HELP.");
 }
 
 export async function handleInteractiveReply(phone: string, payload: any) {
