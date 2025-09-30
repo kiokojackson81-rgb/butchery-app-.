@@ -13,6 +13,11 @@ function requiredEnv(name: string): string {
   return v;
 }
 
+function normalizeGraphPhone(to: string): string {
+  // Graph API expects E.164 without leading '+'
+  return String(to || "").replace(/[^0-9+]/g, "").replace(/^\+/, "");
+}
+
 export type SendResult = { ok: true; waMessageId?: string; response?: any } | { ok: false; error: string };
 
 export async function sendTemplate(opts: {
@@ -37,10 +42,11 @@ export async function sendTemplate(opts: {
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
   const lang = opts.langCode || "en";
+  const to = normalizeGraphPhone(opts.to);
 
   const body: any = {
     messaging_product: "whatsapp",
-    to: opts.to,
+    to,
     type: "template",
     template: {
       name: opts.template,
@@ -90,9 +96,10 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
+  const toNorm = normalizeGraphPhone(to);
   const body = {
     messaging_product: "whatsapp",
-    to,
+    to: toNorm,
     type: "text",
     text: { body: text },
   } as const;
@@ -110,6 +117,40 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
   await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: json }, waMessageId, status: "SENT" });
+  return { ok: true, waMessageId, response: json } as const;
+}
+
+/** Send a generic interactive message body (list/buttons) */
+export async function sendInteractive(body: any): Promise<SendResult> {
+  if (process.env.WA_DRY_RUN === "true") {
+    const waMessageId = `DRYRUN-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", body }, waMessageId, status: "SENT" });
+    return { ok: true, waMessageId, response: { dryRun: true } } as const;
+  }
+  if (FLAGS.CHATRACE_ENABLED) {
+    // No interactive support on legacy path; fall back to text if present
+    const to = body?.to ? String(body.to) : "";
+    const text = body?.text?.body || "";
+    if (to && text) return sendText(to, text);
+    return { ok: false, error: "Interactive not supported in legacy mode" } as const;
+  }
+
+  const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
+  const token = requiredEnv("WHATSAPP_TOKEN");
+  const normalized = { ...body, to: normalizeGraphPhone(body?.to || "") };
+  const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(normalized),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    await logOutbound({ direction: "out", templateName: null, payload: { request: normalized, response: json, status: res.status }, status: "ERROR" });
+    return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
+  }
+  const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
+  await logOutbound({ direction: "out", templateName: null, payload: { request: normalized, response: json }, waMessageId, status: "SENT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 

@@ -21,8 +21,15 @@ WHERE "id" IS NULL;
 ALTER TABLE "public"."AttendantAssignment" ALTER COLUMN "id" SET NOT NULL;
 ALTER TABLE "public"."AttendantAssignment" ADD CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id");
 
--- DropTable
-DROP TABLE "public"."OpeningLock";
+-- DropTable (guarded)
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'OpeningLock'
+    ) THEN
+        EXECUTE 'DROP TABLE "public"."OpeningLock"';
+    END IF;
+END $$;
 
 -- CreateTable
 CREATE TABLE "public"."PhoneMapping" (

@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       const changes = Array.isArray(entry.changes) ? entry.changes : [];
       for (const change of changes) {
         const v = change.value || {};
-        const msgs = Array.isArray(v.messages) ? v.messages : [];
+  const msgs = Array.isArray(v.messages) ? v.messages : [];
         const statuses = Array.isArray(v.statuses) ? v.statuses : [];
 
         // inbound
@@ -73,6 +73,29 @@ export async function POST(req: Request) {
               await (prisma as any).waMessageLog.updateMany({ where: { waMessageId: id }, data: { /* attendantId: ... */ } });
             }
           } catch {}
+
+          // Simple flow handling: interactive replies and text commands
+          try {
+            const { handleAttendantInteractive, handleAttendantText } = await import("@/lib/wa_attendant_flow");
+            const { sendText } = await import("@/lib/wa");
+            const phone = from ? `+${from}` : undefined;
+            if (phone) {
+              if (m.type === "interactive") {
+                const lr = m.interactive?.list_reply?.id as string | undefined;
+                const br = m.interactive?.button_reply?.id as string | undefined;
+                const actionId = lr || br;
+                if (actionId) {
+                  const reply = await handleAttendantInteractive(phone, actionId);
+                  if (reply) await sendText(phone, String(reply).slice(0, 4096));
+                }
+              } else if (m.type === "text" && m.text?.body) {
+                const reply = await handleAttendantText(phone, String(m.text.body));
+                if (reply) await sendText(phone, String(reply).slice(0, 4096));
+              }
+            }
+          } catch (err) {
+            await logOutbound({ direction: "in", payload: { error: `flow error: ${String((err as any)?.message || err)}` }, status: "ERROR" });
+          }
         }
 
         // delivery statuses

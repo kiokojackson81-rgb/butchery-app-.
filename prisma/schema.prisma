@@ -251,3 +251,16 @@ model WaMessageLog {
   status       String?
   createdAt    DateTime @default(now())
 }
+
+/// WhatsApp chat session state (per phone)
+model WaSession {
+  id        String   @id @default(cuid())
+  phoneE164 String   @unique
+  role      String
+  code      String?
+  outlet    String?
+  state     String   @default("IDLE") // IDLE|MENU|ENTER_QTY|ENTER_WASTE|CONFIRM|WAIT_DEPOSIT|DISPUTE|SHOW_TXNS
+  cursor    Json?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
