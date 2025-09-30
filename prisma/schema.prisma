@@ -143,11 +143,13 @@ model Setting {
 
 /// Tiny table for attendant assignments (code → outlet + products)
 model AttendantAssignment {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid()) @db.Uuid
   code        String   @unique
   outlet      String
   productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
+
+  @@map("AttendantAssignment")
 }
 
 /// Mapping between person login codes and WhatsApp phone numbers (E.164)
