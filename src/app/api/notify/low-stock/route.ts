@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
 import { chatraceSendText } from "@/lib/chatrace";
+import { FLAGS } from "@/lib/flags";
+import { sendTemplate } from "@/lib/wa";
 
 const DEFAULT_THRESHOLDS: Record<string, number> = {
   beef: 10,
@@ -47,8 +49,16 @@ export async function POST(req: Request) {
     const msg = `\u26A0\uFE0F Low Stock @ ${outlet}: ${list}`;
 
     await Promise.all([
-      ...suppliers.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
-      ...supervisors.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
+      ...(FLAGS.CHATRACE_ENABLED
+        ? [
+            ...suppliers.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
+            ...supervisors.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
+          ]
+        : [
+            // Use a generic template name if you have one; else fall back to no-op
+            ...suppliers.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [msg] })),
+            ...supervisors.map((s: any) => sendTemplate({ to: s.phoneE164, template: "generic_alert", params: [msg] })),
+          ]),
     ]);
 
     return NextResponse.json({ ok: true, low });

@@ -14,7 +14,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "db:check": "node scripts/checkDb.mjs",
     "db:seed:assignments": "node scripts/seedAssignments.mjs",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "postbuild": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",

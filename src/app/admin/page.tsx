@@ -138,34 +138,6 @@ export default function AdminPage() {
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
-  const [serverAssignments, setServerAssignments] = useState<Array<{ code: string; outlet: string; productKeys: string[] }>>([]);
-  const [svFilter, setSvFilter] = useState("");
-  const [svEdit, setSvEdit] = useState<Record<string, { outlet: string; productKeys: string[] }>>({});
-  const [svNew, setSvNew] = useState<{ code: string; outlet: string; products: string }>({ code: "", outlet: "", products: "" });
-
-  // Canonical product key map and helpers
-  const productKeyMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    products.forEach(p => { if (p?.key) m[p.key.toLowerCase()] = p.key; });
-    return m;
-  }, [products]);
-  const canonicalizeProductKeys = (tokens: string[]) => {
-    const seen = new Set<string>();
-    const canonical: string[] = [];
-    const invalid: string[] = [];
-    tokens.forEach(t => {
-      const k = (t || "").trim();
-      if (!k) return;
-      const found = productKeyMap[k.toLowerCase()];
-      if (found) {
-        if (!seen.has(found)) { seen.add(found); canonical.push(found); }
-      } else {
-        invalid.push(k);
-      }
-    });
-    return { canonical, invalid };
-  };
-  // Note: we validate on submit to avoid UI/UX changes.
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -215,14 +187,6 @@ export default function AdminPage() {
         const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
         setOutlets(o); setProducts(p); setExpenses(e);
         setCodes(c); setScope(s); setPricebook(pb);
-        // Load current assignments from server for visibility
-        try {
-          const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
-          if (r2.ok) {
-            const arr = (await r2.json()) as Array<{ code: string; outlet: string; productKeys: string[] }>;
-            setServerAssignments(arr);
-          }
-        } catch {}
       } catch {
         setOutlets(seedDefaultOutlets());
         setProducts(seedDefaultProducts());
@@ -277,49 +241,10 @@ export default function AdminPage() {
   useEffect(() => { refreshThresholds(); }, []);
 
   /** ----- Explicit save buttons (unchanged) ----- */
-  const saveOutletsNow  = async () => {
-    saveLS(K_OUTLETS, outlets);
-    try { await pushLocalStorageKeyToDB(K_OUTLETS as any); } catch {}
-    try {
-      const r = await fetch("/api/admin/outlets/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          outlets: outlets.map(o => ({ name: o.name, code: o.code || null, active: !!o.active })),
-        }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      alert("Outlets & Codes saved ✅");
-    } catch {
-      alert("Saved settings, but failed to mirror outlets to DB.");
-    }
-  };
+  const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
-  const saveCodesNow    = async () => {
-    saveLS(K_CODES, codes);
-    try { await pushLocalStorageKeyToDB(K_CODES as any); } catch {}
-    try {
-      const r = await fetch("/api/admin/codes/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          codes: codes.map(c => ({
-            name: (c.name || "").trim(),
-            code: (c.code || "").trim(),
-            role: c.role,
-            active: !!c.active,
-          })),
-        }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      alert("People & Codes saved ✅");
-    } catch {
-      alert("Saved settings, but failed to mirror people codes to DB.");
-    }
-  };
+  const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
   // Push assignments to relational store
   const pushAssignmentsToDB = async (map: ScopeMap) => {
     const res = await fetch("/api/admin/scope", {
@@ -341,25 +266,8 @@ export default function AdminPage() {
     try {
       const r = await pushAssignmentsToDB(scope);
       alert(`Assignments saved to server ✅ (rows: ${r.count})`);
-      try {
-        const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
-        if (r2.ok) setServerAssignments(await r2.json());
-      } catch {}
     } catch {
       alert("Saved locally, but failed to sync assignments to server.");
-    }
-  };
-
-  const normalizeAssignmentsNow = async () => {
-    try {
-      const r = await fetch("/api/admin/assignments/normalize", { method: "POST", cache: "no-store" });
-      if (!r.ok) throw new Error(await r.text());
-      const j = await r.json().catch(()=>({} as any));
-      alert(`Normalized ✅ (changed: ${j.changed ?? 0})`);
-      const r2 = await fetch("/api/admin/assignments/list", { cache: "no-store" });
-      if (r2.ok) setServerAssignments(await r2.json());
-    } catch {
-      alert("Failed to normalize assignments");
     }
   };
 
@@ -912,162 +820,11 @@ export default function AdminPage() {
           <div className="mt-6 pt-4 border-t">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">Assignments (Attendants)</h3>
-              <div className="flex gap-2">
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={normalizeAssignmentsNow}>Normalize Codes</button>
-                <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
-              </div>
+              <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
             </div>
             <p className="text-xs text-gray-600 mt-1 mb-2">
               Choose outlet and allowed products for each attendant code. Supervisors & suppliers aren’t tied to outlets.
             </p>
-            {/* Server-side assignments list */}
-            {serverAssignments.length > 0 && (
-              <div className="rounded-xl border p-3 mb-3 bg-gray-50">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium">Server Assignments</div>
-                  <div className="flex items-center gap-2">
-                    <input className="border rounded-lg px-2 py-1 text-xs" placeholder="Filter code/outlet…" value={svFilter} onChange={e=>setSvFilter(e.target.value)} />
-                    <button className="text-xs underline" onClick={async()=>{
-                    try { const r = await fetch('/api/admin/assignments/list', { cache: 'no-store' }); if (r.ok) setServerAssignments(await r.json()); } catch {}
-                  }}>Refresh</button>
-                  </div>
-                </div>
-                {/* Quick-add */}
-                <div className="flex items-end gap-2 mb-3 flex-wrap">
-                  <label className="text-xs">
-                    <div className="text-gray-600 mb-1">Code</div>
-                    <input className="border rounded-lg px-2 py-1 text-xs font-mono w-44" placeholder="e.g. a123"
-                      value={svNew.code}
-                      onChange={e=>setSvNew(prev=>({ ...prev, code: e.target.value }))}
-                    />
-                  </label>
-                  <label className="text-xs">
-                    <div className="text-gray-600 mb-1">Outlet</div>
-                    <input className="border rounded-lg px-2 py-1 text-xs w-44" placeholder="Outlet name"
-                      value={svNew.outlet}
-                      onChange={e=>setSvNew(prev=>({ ...prev, outlet: e.target.value }))}
-                    />
-                  </label>
-                  <label className="text-xs flex-1 min-w-56">
-                    <div className="text-gray-600 mb-1">Products (comma separated)</div>
-                    <input className="border rounded-lg px-2 py-1 text-xs w-full" placeholder="beef, goat, liver"
-                      value={svNew.products}
-                      onChange={e=>setSvNew(prev=>({ ...prev, products: e.target.value }))}
-                    />
-                  </label>
-                  <button
-                    className="text-xs border rounded-lg px-3 py-1"
-                    onClick={async()=>{
-                      const code = (svNew.code || "").trim();
-                      const outlet = (svNew.outlet || "").trim();
-                      const toks = (svNew.products || "").split(',').map(s=>s.trim()).filter(Boolean);
-                      const { canonical: productKeys, invalid } = canonicalizeProductKeys(toks);
-                      if (!code || !outlet) { alert('Code and Outlet are required'); return; }
-                      if (invalid.length > 0) { alert('Invalid product keys: ' + invalid.join(', ')); return; }
-                      try {
-                        const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, outlet, productKeys }) });
-                        if (!r.ok) throw new Error(await r.text());
-                        setSvNew({ code: '', outlet: '', products: '' });
-                        const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
-                        if (r2.ok) setServerAssignments(await r2.json());
-                      } catch { alert('Failed to add assignment'); }
-                    }}
-                  >Add</button>
-                </div>
-
-                <div className="table-wrap">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-left border-b">
-                        <th className="py-1">Code</th>
-                        <th>Outlet</th>
-                        <th>Products</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {serverAssignments
-                        .filter(row => {
-                          const q = svFilter.trim().toLowerCase();
-                          if (!q) return true;
-                          return row.code.toLowerCase().includes(q) || (row.outlet || "").toLowerCase().includes(q);
-                        })
-                        .map((row) => (
-                        <tr key={`sv-${row.code}`} className="border-b">
-                          <td className="py-1 font-mono">{row.code}</td>
-                          <td>
-                            {svEdit[row.code] ? (
-                              <input className="border rounded-lg px-2 py-0.5 text-xs" value={svEdit[row.code].outlet}
-                                onChange={e=>setSvEdit(prev=>({ ...prev, [row.code]: { ...prev[row.code], outlet: e.target.value } }))}
-                              />
-                            ) : (
-                              row.outlet
-                            )}
-                          </td>
-                          <td className="truncate max-w-[280px]">
-                            {svEdit[row.code] ? (
-                              <input className="border rounded-lg px-2 py-0.5 text-xs w-full" placeholder="comma,separated,keys"
-                                value={(svEdit[row.code].productKeys || []).join(', ')}
-                                onChange={e=>{
-                                  const arr = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
-                                  setSvEdit(prev=>({ ...prev, [row.code]: { ...prev[row.code], productKeys: arr } }));
-                                }}
-                              />
-                            ) : (
-                              <span title={(row.productKeys||[]).join(', ')}>{(row.productKeys||[]).join(', ')}</span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap">
-                            {!svEdit[row.code] ? (
-                              <div className="flex gap-2">
-                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={()=>{
-                                  setSvEdit(prev=>({ ...prev, [row.code]: { outlet: row.outlet || '', productKeys: (row.productKeys||[]) } }));
-                                }}>Edit</button>
-                                <button className="text-xs border rounded-lg px-2 py-0.5" title="Pull this into local scope"
-                                  onClick={()=>{
-                                    const key = row.code.replace(/\s+/g, '').toLowerCase();
-                                    setScope(prev=>({ ...prev, [key]: { outlet: row.outlet, productKeys: (row.productKeys||[]) as any } }));
-                                  }}
-                                >Pull</button>
-                                <button className="text-xs border rounded-lg px-2 py-0.5 text-red-700" onClick={async()=>{
-                                  if (!confirm(`Delete assignment ${row.code}?`)) return;
-                                  try {
-                                    const u = new URL('/api/admin/scope', location.origin);
-                                    u.searchParams.set('code', row.code);
-                                    const r = await fetch(u.toString(), { method: 'DELETE', cache: 'no-store' });
-                                    if (!r.ok) throw new Error(await r.text());
-                                    setServerAssignments(prev=>prev.filter(x=>x.code!==row.code));
-                                  } catch { alert('Failed to delete'); }
-                                }}>Delete</button>
-                              </div>
-                            ) : (
-                              <div className="flex gap-2">
-                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={async()=>{
-                                  const patch = svEdit[row.code];
-                                  const { canonical: canon, invalid } = canonicalizeProductKeys(patch.productKeys || []);
-                                  if (!(patch.outlet || '').trim()) { alert('Outlet is required'); return; }
-                                  if (invalid.length > 0) { alert('Invalid product keys: ' + invalid.join(', ')); return; }
-                                  try {
-                                    const r = await fetch('/api/admin/assignments/upsert', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: row.code, outlet: patch.outlet, productKeys: canon }) });
-                                    if (!r.ok) throw new Error(await r.text());
-                                    setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
-                                    const r2 = await fetch('/api/admin/assignments/list', { cache: 'no-store' });
-                                    if (r2.ok) setServerAssignments(await r2.json());
-                                  } catch { alert('Failed to save'); }
-                                }}>Save</button>
-                                <button className="text-xs border rounded-lg px-2 py-0.5" onClick={()=>{
-                                  setSvEdit(prev=>{ const n = { ...prev }; delete n[row.code]; return n; });
-                                }}>Cancel</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
 
             {attendantCodes.length === 0 && (
               <p className="text-xs text-gray-600">Add at least one code with role “attendant”.</p>

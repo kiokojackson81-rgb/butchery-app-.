@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   try {
     const scope = await req.json();
     if (!scope || typeof scope !== "object") {
-      return NextResponse.json({ ok: false, code: "ERR_BAD_REQUEST", message: "Invalid payload" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
     const entries = Object.entries(scope) as Array<[
@@ -23,22 +23,20 @@ export async function POST(req: Request) {
       { outlet?: string; productKeys?: string[] }
     ]>;
 
-    // Write each via SQL UPSERT by code to be resilient to schema drift
-    for (const [codeRaw, v] of entries) {
-      const code = (codeRaw || "").replace(/\s+/g, "").toLowerCase();
-      if (!code) continue;
-      const outlet = v.outlet || "";
-      const productKeys = Array.isArray(v.productKeys) ? v.productKeys : [];
-      await (prisma as any).$executeRawUnsafe(
-        'INSERT INTO "AttendantAssignment" (code, outlet, "productKeys", "updatedAt") VALUES ($1, $2, $3::jsonb, NOW())\n         ON CONFLICT (code) DO UPDATE SET outlet = EXCLUDED.outlet, "productKeys" = EXCLUDED."productKeys", "updatedAt" = NOW()',
-        code, outlet, JSON.stringify(productKeys)
-      );
-    }
+    await Promise.all(
+      entries.map(([code, v]) =>
+        (prisma as any).attendantAssignment.upsert({
+          where: { code },
+          update: { outlet: v.outlet || "", productKeys: v.productKeys || [] },
+          create: { code, outlet: v.outlet || "", productKeys: v.productKeys || [] },
+        })
+      )
+    );
 
     return NextResponse.json({ ok: true, count: entries.length });
   } catch (e) {
-    console.error("/api/admin/scope POST error", e);
-    return NextResponse.json({ ok: false, code: "ERR_SERVER", message: "Server error" }, { status: 500 });
+    console.error("save scope error", e);
+    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
   }
 }
 
@@ -47,15 +45,14 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const code = (searchParams.get("code") || "").trim();
-  if (!code) return NextResponse.json({ ok: false, code: "ERR_BAD_REQUEST", message: "code required" }, { status: 400 });
+    if (!code) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
 
-  await (prisma as any).$executeRawUnsafe('DELETE FROM "AttendantAssignment" WHERE code = $1', code).catch(()=>{});
+    await (prisma as any).attendantAssignment.delete({ where: { code } }).catch(() => {});
     // Also clear normalized scope if stored in AttendantScope
     const codeNorm = code.replace(/\s+/g, "").toLowerCase();
     await (prisma as any).attendantScope.delete({ where: { codeNorm } }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("/api/admin/scope DELETE error", e);
-    return NextResponse.json({ ok: false, code: "ERR_SERVER", message: "Server error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
   }
 }
