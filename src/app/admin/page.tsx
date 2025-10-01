@@ -338,7 +338,35 @@ export default function AdminPage() {
   };
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
-  const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
+  const saveCodesNow    = async () => {
+    saveLS(K_CODES, codes);
+    try { await pushLocalStorageKeyToDB(K_CODES as any); } catch {}
+    try {
+      const payload = codes
+        .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
+        .map((c) => ({
+          role: c.role,
+          code: c.code.trim(),
+          name: c.name,
+          active: c.active,
+        }));
+      if (!payload.length) {
+        alert('Add at least one code before saving.');
+        return;
+      }
+      const res = await fetch('/api/admin/attendants/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ people: payload }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      alert('People & Codes saved ✅');
+    } catch (err) {
+      console.error('save codes error', err);
+      alert('Failed to sync People & Codes to server');
+    }
+  };
   // Push assignments to relational store
   const pushAssignmentsToDB = async (map: ScopeMap) => {
     const res = await fetch("/api/admin/scope", {

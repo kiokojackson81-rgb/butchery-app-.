@@ -7,13 +7,14 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    const [outlets, attendants, assignments] = await Promise.all([
+    const [outlets, attendants, assignments, personCodes] = await Promise.all([
       (prisma as any).outlet.findMany({ orderBy: { code: "asc" } }),
       (prisma as any).attendant.findMany({ orderBy: { name: "asc" } }),
       (prisma as any).attendantAssignment.findMany({ orderBy: { code: "asc" } }),
+      (prisma as any).personCode.findMany({ orderBy: { code: "asc" } }),
     ]);
 
-    return NextResponse.json({ ok: true, outlets, attendants, assignments });
+    return NextResponse.json({ ok: true, outlets, attendants, assignments, codes: personCodes });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }
