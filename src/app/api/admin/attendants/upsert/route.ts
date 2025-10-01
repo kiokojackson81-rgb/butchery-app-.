@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type PersonRole = "attendant" | "supervisor" | "supplier";
+
 function asPersonRole(value: unknown): PersonRole {
   const lower = String(value || "").toLowerCase();
   if (lower === "supervisor" || lower === "supplier") return lower;
@@ -25,8 +26,6 @@ async function ensureNoDigitCollision(code: string) {
       WHERE canon_num = ${num}
     `;
   } catch (err) {
-    // If we cannot query the view (e.g., during dev or transient issues),
-    // do not block the upsert but log in non-prod.
     if (process.env.NODE_ENV !== "production") {
       console.warn("ensureNoDigitCollision: query failed; skipping check", err);
     }
@@ -111,48 +110,107 @@ async function removeCodeCascade(rawCode: string, role: PersonRole): Promise<boo
   }
 }
 
+type CleanPerson = {
+  canonical: string;
+  rawCode: string;
+  role: PersonRole;
+  name: string;
+  active: boolean;
+  outlet?: string;
+};
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const people: any[] = Array.isArray(body?.people)
+    const incoming: any[] = Array.isArray(body?.people)
       ? body.people
       : body && body.loginCode
         ? [body]
         : [];
-    if (!Array.isArray(people) || people.length === 0) {
+    if (!Array.isArray(incoming) || incoming.length === 0) {
       return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
+    const orderedCanonicals: string[] = [];
+    const cleanByCode = new Map<string, CleanPerson>();
+
+    for (const p of incoming) {
+      const codeSource = typeof p?.code === "string" ? p.code : typeof p?.loginCode === "string" ? p.loginCode : "";
+      const rawCode = String(codeSource || "").trim();
+      const canonical = normalizeCode(rawCode);
+      if (!canonical) continue;
+
+      const record: CleanPerson = {
+        canonical,
+        rawCode,
+        role: asPersonRole(p?.role),
+        name: typeof p?.name === "string" ? p.name.trim() : "",
+        active: p?.active !== false,
+        outlet: typeof p?.outlet === "string" ? p.outlet.trim() || undefined : undefined,
+      };
+
+      cleanByCode.set(canonical, record);
+      orderedCanonicals.push(canonical);
+    }
+
+    if (cleanByCode.size === 0) {
+      return NextResponse.json({ ok: false, error: "No valid codes to save" }, { status: 400 });
+    }
+
+    const seen = new Set<string>();
+    const canonicalOrder: string[] = [];
+    for (const code of orderedCanonicals) {
+      if (seen.has(code)) continue;
+      if (!cleanByCode.has(code)) continue;
+      seen.add(code);
+      canonicalOrder.push(code);
+    }
+
+    const sanitizedPayload = canonicalOrder.map((code) => {
+      const entry = cleanByCode.get(code)!;
+      const base: Record<string, unknown> = {
+        role: entry.role,
+        code: entry.rawCode,
+        name: entry.name,
+        active: entry.active,
+      };
+      if (entry.outlet) base.outlet = entry.outlet;
+      return base;
+    });
+
+    const previousSetting = await (prisma as any).setting.findUnique({
+      where: { key: "admin_codes" },
+      select: { value: true },
+    });
+
+    const previousEntries = Array.isArray(previousSetting?.value) ? previousSetting.value : [];
+    const previousByCode = new Map<string, PersonRole>();
+    for (const row of previousEntries) {
+      const canonical = normalizeCode(row?.code ?? row?.loginCode ?? "");
+      if (!canonical) continue;
+      previousByCode.set(canonical, asPersonRole(row?.role));
+    }
+
     let count = 0;
-    const keepCodes = new Map<string, PersonRole>();
-
-    for (const p of people) {
-      if (!p?.code && !p?.loginCode) continue;
-      const codeRaw = String(p.code ?? p.loginCode);
-      const codeFull = normalizeCode(codeRaw);
-      if (!codeFull) continue;
-      const role = asPersonRole(p?.role);
-      const active = !!p?.active;
-
-      keepCodes.set(codeFull, role);
-
-      await ensureNoDigitCollision(codeRaw).catch((e: any) => { throw e; });
+    for (const code of canonicalOrder) {
+      const entry = cleanByCode.get(code)!;
+      await ensureNoDigitCollision(entry.rawCode);
 
       try {
         await (prisma as any).personCode.upsert({
-          where: { code: codeFull },
-          update: { name: p?.name || "", role, active },
-          create: { code: codeFull, name: p?.name || "", role, active },
+          where: { code },
+          update: { name: entry.name, role: entry.role, active: entry.active },
+          create: { code, name: entry.name, role: entry.role, active: entry.active },
         });
       } catch {}
 
-      if (role === "attendant") {
+      if (entry.role === "attendant") {
         let outletId: string | undefined;
-        if (p?.outlet) {
+        if (entry.outlet) {
           const out = await (prisma as any).outlet.upsert({
-            where: { name: p.outlet },
+            where: { name: entry.outlet },
             update: {},
-            create: { name: p.outlet, code: canonFull(p.outlet), active: true },
+            create: { name: entry.outlet, code: canonFull(entry.outlet), active: true },
           }).catch(() => null);
           outletId = out?.id;
         }
@@ -160,18 +218,18 @@ export async function POST(req: Request) {
         let attId: string | undefined;
         try {
           const existing = await (prisma as any).attendant.findFirst({
-            where: { loginCode: { equals: codeFull, mode: "insensitive" } },
+            where: { loginCode: { equals: code, mode: "insensitive" } },
           });
           attId = existing?.id;
           if (existing) {
             const updated = await (prisma as any).attendant.update({
               where: { id: existing.id },
-              data: { name: p?.name || existing.name, outletId },
+              data: { name: entry.name || existing.name, outletId },
             });
             attId = updated?.id;
           } else {
             const created = await (prisma as any).attendant.create({
-              data: { name: p?.name || "Attendant", loginCode: codeFull, outletId },
+              data: { name: entry.name || "Attendant", loginCode: code, outletId },
             }).catch(() => null);
             attId = created?.id;
           }
@@ -180,64 +238,57 @@ export async function POST(req: Request) {
         if (attId) {
           try {
             await (prisma as any).loginCode.upsert({
-              where: { code: codeFull },
+              where: { code },
               update: { attendantId: attId, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
-              create: { code: codeFull, attendantId: attId, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+              create: { code, attendantId: attId, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
             });
           } catch {}
         }
       }
 
-      if (role === "supervisor") {
+      if (entry.role === "supervisor") {
         try {
           await (prisma as any).supervisor.upsert({
-            where: { code: codeFull },
-            update: { active },
-            create: { code: codeFull, active },
-          });
-        } catch {}
-      }
-      if (role === "supplier") {
-        try {
-          await (prisma as any).supplier.upsert({
-            where: { code: codeFull },
-            update: { active },
-            create: { code: codeFull, active },
+            where: { code },
+            update: { active: entry.active },
+            create: { code, active: entry.active },
           });
         } catch {}
       }
 
-      count++;
+      if (entry.role === "supplier") {
+        try {
+          await (prisma as any).supplier.upsert({
+            where: { code },
+            update: { active: entry.active },
+            create: { code, active: entry.active },
+          });
+        } catch {}
+      }
+
+      count += 1;
+    }
+
+    const toDelete: Array<{ canonical: string; role: PersonRole }> = [];
+    for (const [code, role] of previousByCode.entries()) {
+      if (!cleanByCode.has(code)) {
+        toDelete.push({ canonical: code, role });
+      }
     }
 
     let deleted = 0;
-    try {
-      const existing = await (prisma as any).personCode.findMany({
-        select: { code: true, role: true },
+    for (const entry of toDelete) {
+      const removed = await removeCodeCascade(entry.canonical, entry.role).catch((err) => {
+        console.error("remove code cascade failed", entry.canonical, err);
+        return false;
       });
-      const toRemove: Array<{ canonical: string; role: PersonRole }> = [];
-      if (Array.isArray(existing)) {
-        for (const row of existing) {
-          const canonical = normalizeCode(row?.code || "");
-          if (!canonical || keepCodes.has(canonical)) continue;
-          toRemove.push({ canonical, role: asPersonRole(row?.role) });
-        }
-      }
-      for (const entry of toRemove) {
-        const removed = await removeCodeCascade(entry.canonical, entry.role).catch((err) => {
-          console.error("remove code cascade failed", entry.canonical, err);
-          return false;
-        });
-        if (removed) deleted += 1;
-      }
-    } catch (err) {
-      console.error("failed to evaluate code deletions", err);
+      if (removed) deleted += 1;
     }
 
     await (prisma as any).setting.upsert({
       where: { key: "admin_codes" },
-      update: { value: people },
-      create: { key: "admin_codes", value: people },
+      update: { value: sanitizedPayload },
+      create: { key: "admin_codes", value: sanitizedPayload },
     });
 
     return NextResponse.json({ ok: true, count, deleted });
