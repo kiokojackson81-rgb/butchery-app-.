@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canonFull, canonNum } from "@/lib/codeNormalize";
+import { canonFull, canonNum, normalizeCode } from "@/lib/codeNormalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,8 +37,8 @@ export async function POST(req: Request) {
     let count = 0;
     for (const p of people) {
       if (!p?.code && !p?.loginCode) continue;
-      const codeRaw = String(p.code ?? p.loginCode);
-      const codeFull = canonFull(codeRaw);
+  const codeRaw = String(p.code ?? p.loginCode);
+  const codeFull = normalizeCode(codeRaw);
       const role = String(p?.role || 'attendant');
       const active = !!p?.active;
 
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
           outletId = out?.id;
         }
         // Update Attendant.loginCode, name, and outletId
-        const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: codeRaw, mode: 'insensitive' } } });
+  const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: codeFull, mode: 'insensitive' } } });
         let attId: string | undefined = existing?.id;
         if (existing) {
           const updated = await (prisma as any).attendant.update({ where: { id: existing.id }, data: { name: p?.name || existing.name, outletId } });

@@ -9,3 +9,8 @@ export function canonFull(raw: string): string {
 export function canonNum(raw: string): string {
   return (String(raw || "").match(/\d+/g) || []).join("");
 }
+
+// Spec-compliant helper alias
+export function normalizeCode(input: string): string {
+  return String(input || "").replace(/\s+/g, "").toLowerCase();
+}
