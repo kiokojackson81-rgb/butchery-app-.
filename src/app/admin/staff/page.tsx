@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 import { canonFull } from "@/lib/codeNormalize";
@@ -24,6 +24,8 @@ type Staff = {
 // ===== Storage keys stay the same =====
 const ADMIN_STAFF_KEY = "admin_staff";
 const SCOPE_KEY = "attendant_scope"; // NEW: mapping attendant_code -> { outlet, productKeys }
+const STAFF_REMOTE_KEY = "admin_staff";
+const SCOPE_REMOTE_KEY = "attendant_scope";
 
 const ITEMS: { key: ItemKey; name: string; unit: Unit }[] = [
   { key: "beef", name: "Beef", unit: "kg" },
@@ -73,35 +75,99 @@ export default function AdminStaffPage() {
   const [filterOutlet, setFilterOutlet] = useState<Outlet | "ALL">("ALL");
   const [scope, setScope] = useState<ScopeMap>({}); // NEW
 
+  const fetchSetting = useCallback(async (key: string) => {
+    try {
+      const res = await fetch(`/api/settings/${key}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => null);
+      return json?.value ?? null;
+    } catch (err) {
+      console.error("failed to fetch setting", key, err);
+      return null;
+    }
+  }, []);
+
+  const persistStaffToServer = useCallback(async (next: Staff[]) => {
+    try {
+      await fetch(`/api/settings/${STAFF_REMOTE_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ value: next }),
+      });
+    } catch (err) {
+      console.error("persist staff failed", err);
+    }
+  }, []);
+
+  const persistScopeSetting = useCallback(async (next: ScopeMap) => {
+    try {
+      await fetch(`/api/settings/${SCOPE_REMOTE_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ value: next }),
+      });
+    } catch (err) {
+      console.error("persist scope failed", err);
+    }
+  }, []);
+
   // Load both stores on mount
   useEffect(() => {
-    setList(readStaff());
-    const initialScope = readScope();
-    setScope(initialScope);
-    writeScope(initialScope);
-  }, []);
+    (async () => {
+      const remoteStaff = await fetchSetting(STAFF_REMOTE_KEY);
+      if (Array.isArray(remoteStaff)) {
+        const hydrated = remoteStaff as Staff[];
+        setList(hydrated);
+        writeStaff(hydrated);
+      } else {
+        const local = readStaff();
+        setList(local);
+        if (local.length) {
+          await persistStaffToServer(local);
+        }
+      }
+
+      const remoteScope = await fetchSetting(SCOPE_REMOTE_KEY);
+      if (remoteScope && typeof remoteScope === 'object') {
+        const normalized = normalizeScope(remoteScope as Record<string, { outlet?: string; productKeys?: ItemKey[] }>);
+        setScope(normalized);
+        writeScope(normalized);
+      } else {
+        const localScope = readScope();
+        setScope(localScope);
+        if (Object.keys(localScope).length) {
+          await persistScopeSetting(localScope);
+        }
+      }
+    })();
+  }, [fetchSetting, persistScopeSetting, persistStaffToServer]);
 
   // CRUD staff (unchanged)
   const addStaff = () => {
     const s: Staff = { id: uid(), name: "", code: "", outlet: "Bright", products: [], active: true };
     const next = [s, ...list];
     setList(next); writeStaff(next);
+    persistStaffToServer(next);
   };
   const removeStaff = (id: string) => {
     const next = list.filter(s => s.id !== id);
     setList(next); writeStaff(next);
+    persistStaffToServer(next);
     // also try to clean scope entry if code exists
     const removed = list.find(s => s.id === id);
     if (removed?.code) {
       const canonical = canonFull(removed.code);
       if (canonical) {
-        const m = { ...scope }; delete m[canonical]; setScope(m); writeScope(m);
+        const m = { ...scope }; delete m[canonical]; setScope(m); writeScope(m); persistScopeSetting(m);
       }
     }
   };
   const update = (id: string, patch: Partial<Staff>) => {
     const next = list.map(s => s.id === id ? { ...s, ...patch } : s);
     setList(next); writeStaff(next);
+    persistStaffToServer(next);
   };
   const toggleProduct = (s: Staff, key: ItemKey) => {
     const has = s.products.includes(key);
@@ -118,7 +184,7 @@ export default function AdminStaffPage() {
     if (!canonical) return alert("Set a login code first.");
     const scopeValue: ScopeValue = { outlet: s.outlet, productKeys: s.products };
     const next = { ...scope, [canonical]: scopeValue };
-    setScope(next); writeScope(next);
+    setScope(next); writeScope(next); persistScopeSetting(next);
     // Write-through to server (best-effort)
     (async () => {
       try {
@@ -200,6 +266,7 @@ export default function AdminStaffPage() {
 
     setScope(payload);
     writeScope(payload);
+    persistScopeSetting(payload);
     // Push entire map to server (best-effort)
     (async () => {
       try {
