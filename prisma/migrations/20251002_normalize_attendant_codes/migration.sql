@@ -50,10 +50,25 @@ JOIN merged ON merged.code = r.code
 WHERE aa.id = r.id
   AND r.rn = 1;
 
-DELETE FROM "AttendantAssignment"
-WHERE id IN (
-  SELECT id FROM ranked WHERE rn > 1
-);
+-- Remove duplicate rows (rn > 1) by computing ranking inline in this statement
+DELETE FROM "AttendantAssignment" aa
+USING (
+  SELECT id, rn
+  FROM (
+    SELECT
+      id,
+      ROW_NUMBER() OVER (
+        PARTITION BY code
+        ORDER BY
+          CASE WHEN outlet IS NOT NULL AND outlet <> '' THEN 0 ELSE 1 END,
+          "updatedAt" DESC NULLS LAST,
+          id DESC
+      ) AS rn
+    FROM "AttendantAssignment"
+  ) ranked_inline
+  WHERE rn > 1
+) dupes
+WHERE aa.id = dupes.id;
 
 -- Convert productKeys to jsonb for richer structure
 ALTER TABLE "AttendantAssignment"
