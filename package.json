@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
   "build": "npm run vercel-build",
-  "vercel-build": "prisma generate && prisma migrate deploy && next build",
+  "vercel-build": "prisma generate && prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id || true && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
