@@ -1,5 +1,5 @@
 // src/server/supervisor/queue.service.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { ZQueueQuery } from "./supervisor.validation";
 
 export async function listQueue(query: unknown) {

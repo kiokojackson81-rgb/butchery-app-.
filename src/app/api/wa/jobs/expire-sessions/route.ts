@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { sendText, sendInteractive } from "@/lib/wa";
 import { toGraphPhone } from "@/server/util/normalize";
 

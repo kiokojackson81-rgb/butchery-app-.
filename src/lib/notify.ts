@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { getPhoneByCode, sendTemplate } from "@/lib/wa";
 
 /** Notify supervisor about low stock */

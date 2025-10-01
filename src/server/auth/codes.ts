@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/server/canon";
 
 type Role = "attendant" | "supervisor" | "supplier";

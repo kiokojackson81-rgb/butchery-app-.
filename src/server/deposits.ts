@@ -1,5 +1,5 @@
 // src/server/deposits.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export function parseMpesaText(s: string): { amount: number; ref: string; at: Date } | null {
   const m = /Ksh\s*([0-9,]+)\b.*?([A-Z0-9]{10,})/i.exec(s);

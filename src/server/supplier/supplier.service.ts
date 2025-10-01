@@ -1,5 +1,5 @@
 // src/server/supplier/supplier.service.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { ZOpeningRowInput, ZLockDayInput, ZTransferInput, ZDisputeInput, ZRequestEditInput } from "./supplier.validation";
 
 export async function listProductsForOutlet(outlet: string) {

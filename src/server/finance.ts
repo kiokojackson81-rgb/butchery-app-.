@@ -1,5 +1,5 @@
 // src/server/finance.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export async function computeDayTotals(args: { date: string; outletName: string }) {
   const { date, outletName } = args;

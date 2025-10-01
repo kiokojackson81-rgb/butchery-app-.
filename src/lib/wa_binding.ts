@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { normalizeToPlusE164 } from "@/lib/wa_phone";
 import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
 import { sendText } from "@/lib/wa";

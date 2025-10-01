@@ -1,5 +1,5 @@
 // src/server/closings.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export async function saveClosings(args: {
   date: string;

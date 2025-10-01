@@ -1,5 +1,5 @@
 // src/server/supervisor/supervisor.notifications.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
 
 function toGraph(plus?: string | null) {

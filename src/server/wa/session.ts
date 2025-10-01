@@ -1,5 +1,5 @@
 // src/server/wa/session.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export const SESSION_IDLE_MIN = 10;
 

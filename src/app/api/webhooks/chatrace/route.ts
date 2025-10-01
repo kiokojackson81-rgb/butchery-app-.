@@ -12,7 +12,7 @@ import {
   sendSupplyRequest,
   sendWasteRejected,
 } from "@/lib/wa-send-presets";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 // Optional: simple guard for minimal abuse protection (token via env)
 const SECRET = process.env.CHATRACE_WEBHOOK_SECRET;

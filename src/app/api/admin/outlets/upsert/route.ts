@@ -1,12 +1,9 @@
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/codeNormalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-function normalizeCode(input: string): string {
-  return (input || "").trim().toLowerCase().replace(/\s+/g, "");
-}
 
 export async function POST(req: Request) {
   try {

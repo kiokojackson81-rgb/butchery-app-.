@@ -1,5 +1,5 @@
 // New state machine for attendants.
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { sendText, sendInteractive } from "@/lib/wa";
 import { normCode, toDbPhone } from "@/server/util/normalize";
 import { createLoginLink } from "@/server/wa_links";

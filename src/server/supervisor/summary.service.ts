@@ -1,5 +1,5 @@
 // src/server/supervisor/summary.service.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { ZSummaryQuery } from "./supervisor.validation";
 import { computeDayTotals } from "@/server/finance";
 import { listProductsForOutlet } from "@/server/supplier/supplier.service";

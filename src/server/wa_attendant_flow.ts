@@ -1,5 +1,5 @@
 // Thin wrappers that adapt the existing lib flow to the new webhook surface.
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { handleInboundText as libHandleInboundText, handleInteractiveReply as libHandleInteractiveReply } from "@/lib/wa_attendant_flow";
 
 const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);

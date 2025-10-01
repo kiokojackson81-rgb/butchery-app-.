@@ -3,19 +3,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-
-function normalizeCode(input: string): string {
-  return (input || "").trim().toLowerCase().replace(/\s+/g, "");
-}
-function digitsOnly(input: string): string {
-  return (input || "").replace(/\D/g, "");
-}
+import { normalizeCode, canonNum } from "@/lib/codeNormalize";
 
 export async function POST(req: Request) {
   try {
     const { loginCode } = (await req.json().catch(() => ({}))) as { loginCode?: string };
-    const full = normalizeCode(loginCode || "");
-    const num = digitsOnly(loginCode || "");
+  const full = normalizeCode(loginCode || "");
+  const num = canonNum(loginCode || "");
 
     if (!full && !num) {
       return Response.json({ ok: false, error: "Empty code" }, { status: 400 });

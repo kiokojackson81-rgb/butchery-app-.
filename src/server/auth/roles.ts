@@ -1,5 +1,5 @@
 // src/server/auth/roles.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 function norm(s: string) {
   return (s || "").toString().replace(/\s+/g, "").trim().toLowerCase();

@@ -1,5 +1,5 @@
 // src/server/supervisor/review.service.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { ZReviewAction } from "./supervisor.validation";
 import { notifyOriginator, notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor.notifications";
 import { computeDayTotals } from "@/server/finance";

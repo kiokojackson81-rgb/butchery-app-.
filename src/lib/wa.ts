@@ -1,7 +1,7 @@
 // src/lib/wa.ts
 // WhatsApp Cloud service with feature-flag fallback to legacy Chatrace helpers.
 
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { FLAGS } from "@/lib/flags";
 import { chatraceSendText, chatraceSendTemplate } from "@/lib/chatrace";
 

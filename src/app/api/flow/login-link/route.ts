@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 
 // Expose the public, dialable WA number we send users to.

@@ -1,5 +1,5 @@
 // src/server/supplier/supplier.notifications.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
 
 function toGraph(noPlus: string | null | undefined) {

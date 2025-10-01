@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeCode, canonNum } from "@/lib/codeNormalize";
 import { sendText } from "@/lib/wa";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
@@ -12,12 +13,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function normalizeCode(input: string): string {
-  return (input || "").trim().toLowerCase().replace(/\s+/g, "");
-}
-function digitsOnly(input: string): string {
-  return (input || "").replace(/\D/g, "");
-}
 
 function toE164DB(phone: string): string {
   // Assume incoming is already +E.164; store as-is
@@ -35,7 +30,7 @@ export async function POST(req: Request) {
 
   const phoneDB = toE164DB(phoneE164);
   const full = normalizeCode(code);
-  const num = digitsOnly(code);
+  const num = canonNum(code);
 
   const sess = await (prisma as any).waSession.findFirst({ where: { phoneE164: phoneDB } });
     if (!sess) return NextResponse.json({ ok: false, error: "no-session" }, { status: 404 });

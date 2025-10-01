@@ -1,5 +1,5 @@
 // src/server/supervisor/rules.service.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { ZRules, ZRulesUpdate } from "./supervisor.validation";
 
 const KEY = "supervisor:rules";

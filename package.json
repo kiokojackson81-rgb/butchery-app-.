@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "show:codes": "tsx scripts/show-codes.ts",
     "show:attendant:codes": "tsx scripts/show-attendant-codes.ts",
+    "seed:login": "tsx scripts/seed-login-codes.ts",
+    "test:auth": "tsx scripts/test-auth.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:migrate:dev": "prisma migrate dev",

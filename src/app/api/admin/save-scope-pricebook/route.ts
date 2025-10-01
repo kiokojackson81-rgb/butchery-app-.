@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 type ScopeMap = Record<string, { outlet: string; productKeys: string[] }>;
 type PBMap = Record<string, Record<string, { sellPrice: number; active: boolean }>>;

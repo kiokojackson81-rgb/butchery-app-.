@@ -1,6 +1,6 @@
 // src/server/wa/wa_supervisor_flow.ts
 import { sendText } from "@/lib/wa";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { listQueue } from "@/server/supervisor/queue.service";
 import { reviewItem } from "@/server/supervisor/review.service";
 import { getOutletSummary } from "@/server/supervisor/summary.service";

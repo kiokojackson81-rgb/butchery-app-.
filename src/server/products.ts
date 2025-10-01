@@ -1,5 +1,5 @@
 // src/server/products.ts
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export async function getAssignedProducts(code: string): Promise<Array<{ key: string; name: string }>> {
   const codeNorm = String(code || "");

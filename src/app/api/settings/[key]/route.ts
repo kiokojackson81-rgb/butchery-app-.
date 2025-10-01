@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 // Avoid caching in production and force dynamic execution
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(
   _req: Request,
