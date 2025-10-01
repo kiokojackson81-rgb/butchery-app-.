@@ -4,7 +4,7 @@ DROP VIEW IF EXISTS "vw_codes_norm";
 CREATE VIEW "vw_codes_norm" AS
 SELECT
   'login_code'::text               AS source,
-  lc.id                            AS record_id,
+  lc.id::text                      AS record_id,
   lc.code                          AS raw_code,
   lower(replace(lc.code, ' ', '')) AS canon_code,
   regexp_replace(lc.code, '\D', '', 'g') AS canon_num,
@@ -13,7 +13,7 @@ FROM "LoginCode" lc
 UNION ALL
 SELECT
   'person_code'::text              AS source,
-  pc.id                            AS record_id,
+  pc.id::text                      AS record_id,
   pc.code                          AS raw_code,
   lower(replace(pc.code, ' ', '')) AS canon_code,
   regexp_replace(pc.code, '\D', '', 'g') AS canon_num,
@@ -22,7 +22,7 @@ FROM "PersonCode" pc
 UNION ALL
 SELECT
   'attendant_assignment'::text     AS source,
-  aa.id                            AS record_id,
+  aa.id::text                      AS record_id,
   aa.code                          AS raw_code,
   lower(replace(aa.code, ' ', '')) AS canon_code,
   regexp_replace(aa.code, '\D', '', 'g') AS canon_num,
