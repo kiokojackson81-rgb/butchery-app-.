@@ -128,7 +128,7 @@ export async function POST(req: Request) {
   if (!full && !num) return Response.json({ ok:false, error:'Invalid code' }, { status:400 });
 
   // 1) By FULL (case/space-insensitive)
-  let row = await prisma.$queryRawUnsafe<any[]>(`
+  let row = await prisma.$queryRawUnsafe(
     SELECT * FROM "LoginCode"
     WHERE LOWER(REPLACE(code,' ',''))
           = ${full}
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
 
   // 2) By NUMERIC core (only if not found)
   if (!row && num) {
-    const matches = await prisma.$queryRawUnsafe<any[]>(`
+  const matches = await prisma.$queryRawUnsafe(
       SELECT * FROM "LoginCode"
       WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
       LIMIT 3

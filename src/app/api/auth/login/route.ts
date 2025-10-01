@@ -24,13 +24,13 @@ export async function POST(req: Request) {
     let att = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: loginCode, mode: "insensitive" } } });
     if (!att) {
       // Try full canonical via raw SQL (strip spaces + lower)
-      const byFull = await (prisma as any).$queryRawUnsafe(
+      const byFull: any = await (prisma as any).$queryRawUnsafe(
         `SELECT * FROM "Attendant" WHERE lower(regexp_replace("loginCode", '\\s+', '', 'g')) = ${full} LIMIT 1`
       ).then((r: any[]) => r?.[0]);
       att = byFull || att;
 
       if (!att && num) {
-        const list = await (prisma as any).$queryRawUnsafe(
+        const list: any[] = await (prisma as any).$queryRawUnsafe(
           `SELECT * FROM "Attendant" WHERE regexp_replace("loginCode", '\\D', '', 'g') = ${num} LIMIT 3`
         );
         if (list.length === 1) att = list[0];

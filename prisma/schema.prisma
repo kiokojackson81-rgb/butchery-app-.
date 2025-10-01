@@ -1,31 +1,18 @@
-// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
-generator client {
-  provider = "prisma-client-js"
-}
-
-enum PersonRole {
-  attendant
-  supervisor
-  supplier
-}
-
-enum DepositStatus {
-  VALID
-  PENDING
-  INVALID
-}
-
 model Outlet {
-  id      String  @id @default(cuid())
-  name    String  @unique
-  code    String?
-  active  Boolean @default(true)
+  id         String      @id @default(cuid())
+  name       String      @unique
+  code       String?
+  active     Boolean     @default(true)
   attendants Attendant[]
 }
 
@@ -33,11 +20,12 @@ model Product {
   id        String  @id @default(cuid())
   key       String  @unique
   name      String
-  unit      String  // "kg" | "pcs"
+  unit      String
   sellPrice Int
   active    Boolean @default(true)
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model PersonCode {
   id     String     @id @default(cuid())
   name   String?
@@ -54,10 +42,10 @@ model AttendantScope {
 }
 
 model ScopeProduct {
-  id         String          @id @default(cuid())
+  id         String         @id @default(cuid())
   scopeId    String
   productKey String
-  scope      AttendantScope  @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+  scope      AttendantScope @relation(fields: [scopeId], references: [id], onDelete: Cascade)
 
   @@unique([scopeId, productKey])
 }
@@ -73,20 +61,20 @@ model PricebookRow {
 }
 
 model SupplyOpeningRow {
-  id         String  @id @default(cuid())
-  date       String  // YYYY-MM-DD
+  id         String @id @default(cuid())
+  date       String
   outletName String
   itemKey    String
   qty        Float
-  buyPrice   Float   @default(0)
-  unit       String  // "kg" | "pcs"
+  buyPrice   Float  @default(0)
+  unit       String
 
   @@unique([date, outletName, itemKey])
 }
 
 model SupplyTransfer {
   id             String   @id @default(cuid())
-  date           String   // YYYY-MM-DD
+  date           String
   fromOutletName String
   toOutletName   String
   itemKey        String
@@ -96,19 +84,19 @@ model SupplyTransfer {
 }
 
 model AttendantClosing {
-  id         String  @id @default(cuid())
-  date       String  // YYYY-MM-DD
+  id         String @id @default(cuid())
+  date       String
   outletName String
   itemKey    String
   closingQty Float
-  wasteQty   Float   @default(0)
+  wasteQty   Float  @default(0)
 
   @@unique([date, outletName, itemKey])
 }
 
 model AttendantDeposit {
   id         String        @id @default(cuid())
-  date       String        // YYYY-MM-DD
+  date       String
   outletName String
   code       String?
   note       String?
@@ -119,11 +107,11 @@ model AttendantDeposit {
 
 model AttendantExpense {
   id         String   @id @default(cuid())
-  date       String   // YYYY-MM-DD
+  date       String
   outletName String
   name       String
   amount     Int
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 }
 
 model ActivePeriod {
@@ -143,11 +131,11 @@ model Setting {
 
 /// Tiny table for attendant assignments (code → outlet + products)
 model AttendantAssignment {
-  id          String   @id @default(uuid()) @db.Uuid
   code        String   @unique
   outlet      String
-  productKeys String[] @db.Text
   updatedAt   DateTime @updatedAt
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  productKeys String[]
 
   @@map("AttendantAssignment")
 }
@@ -161,6 +149,8 @@ model PhoneMapping {
   outlet    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([code], map: "phonemapping_code_idx")
 }
 
 /// Chatrace API settings (singleton row id=1)
@@ -189,35 +179,37 @@ model SupplyRequest {
 }
 
 /// Minimal auth/session models for persistent attendant login and outlet binding
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model Attendant {
-  id         String     @id @default(cuid())
+  id         String      @id @default(cuid())
   name       String
   outletId   String?
-  outletRef  Outlet?    @relation(fields: [outletId], references: [id])
-  loginCode  String?    @unique
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  sessions   Session[]
+  loginCode  String?     @unique
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  outletRef  Outlet?     @relation(fields: [outletId], references: [id])
   loginCodes LoginCode[]
+  sessions   Session[]
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model LoginCode {
   id          String    @id @default(cuid())
   code        String    @unique
   attendantId String
-  attendant   Attendant @relation(fields: [attendantId], references: [id])
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
+  attendant   Attendant @relation(fields: [attendantId], references: [id])
 }
 
 model Session {
   id          String    @id @default(cuid())
   attendantId String
-  attendant   Attendant @relation(fields: [attendantId], references: [id])
   outletCode  String?
   token       String    @unique
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
+  attendant   Attendant @relation(fields: [attendantId], references: [id])
 }
 
 /// Tiny KV table to back selected localStorage keys in the DB
@@ -231,11 +223,11 @@ model AppState {
 /// Supervisor review queue items (DB-backed, replaces local-only queues)
 model ReviewItem {
   id        String   @id @default(cuid())
-  type      String   // "waste" | "expense" | "excess" | "deficit" | "deposit"
+  type      String
   outlet    String
   date      DateTime
   payload   Json
-  status    String   @default("pending") // pending|approved|rejected
+  status    String   @default("pending")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -259,8 +251,20 @@ model WaSession {
   role      String
   code      String?
   outlet    String?
-  state     String   @default("IDLE") // IDLE|MENU|ENTER_QTY|ENTER_WASTE|CONFIRM|WAIT_DEPOSIT|DISPUTE|SHOW_TXNS
+  state     String   @default("IDLE")
   cursor    Json?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+enum PersonRole {
+  attendant
+  supervisor
+  supplier
+}
+
+enum DepositStatus {
+  VALID
+  PENDING
+  INVALID
 }

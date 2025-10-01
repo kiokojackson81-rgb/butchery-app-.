@@ -10,7 +10,7 @@ async function ensureNoDigitCollision(code: string) {
   const num = canonNum(code);
   if (!num) return;
   try {
-    const collisions = await (prisma as any).$queryRawUnsafe(
+    const collisions: any[] = await (prisma as any).$queryRawUnsafe(
       `SELECT code FROM "LoginCode" WHERE regexp_replace(code, '\\D', '', 'g') = ${num}`
     );
     if (collisions.length > 0) {
