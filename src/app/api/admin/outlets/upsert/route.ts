@@ -1,41 +1,40 @@
-import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canonFull } from "@/lib/codeNormalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function normalizeCode(input: string): string {
+  return (input || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any));
-    const outlets = Array.isArray(body?.outlets) ? body.outlets : (body && body.code && body.name ? [body] : []);
-    if (!Array.isArray(outlets) || outlets.length === 0) return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
-
-    let count = 0;
-    for (const o of outlets) {
-      if (!o?.name) continue;
-      const code = (o?.code ? canonFull(String(o.code)) : null) as string | null;
-      const active = !!o?.active;
-      const name = String(o.name);
-      const existing = await (prisma as any).outlet.findFirst({ where: { name } });
-      if (existing) {
-        await (prisma as any).outlet.update({ where: { id: existing.id }, data: { code, active, name } });
-      } else {
-        await (prisma as any).outlet.create({ data: { name, code, active } });
-      }
-      count++;
+    const { outlets } = (await req.json().catch(() => ({}))) as { outlets?: Array<{ name?: string; code?: string; active?: boolean }> };
+    if (!Array.isArray(outlets)) {
+      return Response.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
-    // Mirror full list as provided
+    for (const o of outlets) {
+      if (!o?.name) continue;
+      const normCode = normalizeCode(o.code || o.name);
+      // Upsert by unique name (schema constraint); set/update code to normalized form
+      await (prisma as any).outlet.upsert({
+        where: { name: o.name },
+        update: { code: normCode, name: o.name, active: !!o.active },
+        create: { name: o.name, code: normCode, active: !!o.active },
+      });
+    }
+
     await (prisma as any).setting.upsert({
       where: { key: "admin_outlets" },
       update: { value: outlets },
       create: { key: "admin_outlets", value: outlets },
     });
 
-    return NextResponse.json({ ok: true, count });
+    return Response.json({ ok: true, count: outlets.length });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Failed" }, { status: 500 });
+    console.error(e);
+    return Response.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
 }

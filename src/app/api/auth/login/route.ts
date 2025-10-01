@@ -3,49 +3,51 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { createSession, serializeSessionCookie } from "@/lib/session";
-import { normalizeCode } from "@/lib/codeNormalize";
+
+function normalizeCode(input: string): string {
+  return (input || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+function digitsOnly(input: string): string {
+  return (input || "").replace(/\D/g, "");
+}
 
 export async function POST(req: Request) {
   try {
-    const { loginCode, outletCode } = (await req.json().catch(() => ({}))) as {
-      loginCode?: string;
-      outletCode?: string;
-    };
+    const { loginCode } = (await req.json().catch(() => ({}))) as { loginCode?: string };
+    const full = normalizeCode(loginCode || "");
+    const num = digitsOnly(loginCode || "");
 
-    if (!loginCode || typeof loginCode !== "string") {
-      return NextResponse.json({ ok: false, error: "loginCode required" }, { status: 400 });
+    if (!full && !num) {
+      return Response.json({ ok: false, error: "Empty code" }, { status: 400 });
     }
 
-    const norm = normalizeCode(loginCode);
-    // Preferred: single Prisma lookup using equals + insensitive (UI-normalized already)
-    const att = await (prisma as any).attendant.findFirst({
-      where: { loginCode: { equals: norm, mode: "insensitive" } },
-    });
+    // 1) Try full canonical match in LoginCode
+    let row: any = await (prisma as any).loginCode.findFirst({ where: { code: full } });
 
-    if (!att) {
-      return NextResponse.json({ ok: false, error: "Invalid code" }, { status: 401 });
-    }
-
-    let outletCodeFound: string | undefined;
-    if (outletCode) {
-      // Our schema does not enforce unique on code, so use findFirst safely
-      const fullOutlet = normalizeCode(outletCode);
-      const outlet = await (prisma as any).outlet.findFirst({ where: { OR: [
-        { code: outletCode },
-        { code: fullOutlet }
-      ] } });
-      if (!outlet) {
-        return NextResponse.json({ ok: false, error: "Outlet not found" }, { status: 400 });
+    // 2) Fallback to digits-only if unique
+    if (!row && num) {
+      const list: any[] = await (prisma as any).$queryRawUnsafe(
+        `SELECT * FROM "LoginCode" WHERE regexp_replace(code, '\\D', '', 'g') = ${num} LIMIT 3`
+      );
+      if (list.length === 1) row = list[0];
+      else if (list.length > 1) {
+        return Response.json({ ok: false, error: "Ambiguous code (multiple matches)" }, { status: 409 });
       }
-      outletCodeFound = outlet.code ?? undefined;
     }
 
-    const { token } = await createSession(att.id, outletCodeFound);
-    const res = NextResponse.json({ ok: true });
-    res.headers.append("Set-Cookie", serializeSessionCookie(token));
-    return res;
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: "Login failed" }, { status: 500 });
+    if (!row) return Response.json({ ok: false, error: "Invalid code" }, { status: 401 });
+
+    // Lookup attendant → outlet by row.code
+    const att: any = await (prisma as any).attendant.findFirst({
+      where: { loginCode: { equals: row.code, mode: "insensitive" } },
+    });
+    if (!att?.outletId) {
+      return Response.json({ ok: false, error: "Code not assigned to outlet" }, { status: 422 });
+    }
+
+    return Response.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
+  } catch (e) {
+    console.error(e);
+    return Response.json({ ok: false, error: "Server error" }, { status: 500 });
   }
 }
