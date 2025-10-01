@@ -14,6 +14,9 @@ function run(cmd, allowFail = true) {
   }
 }
 
+// Ensure Prisma client is generated before build
+run('npx prisma generate', false);
+
 // Reconcile migration state if needed (ignore if IDs don't exist)
 run('npx prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id');
 run('npx prisma migrate resolve --applied 20251001_change_attendantassignment_id_v2');
