@@ -15,8 +15,13 @@ async function ensureNoDigitCollision(code: string) {
     );
     if (collisions.length > 0) {
       const full = canonFull(code);
-  const same = (collisions as any[]).some((c: any) => canonFull((c as any).code) === full);
-  if (!same) throw new Error(`Digit-core collision with existing code(s): ${(collisions as any[]).map((c: any) => (c as any).code).join(', ')}`);
+      const same = (collisions as any[]).some((c: any) => canonFull((c as any).code) === full);
+      if (!same)
+        throw new Error(
+          `Digit-core collision with existing code(s): ${(collisions as any[])
+            .map((c: any) => (c as any).code)
+            .join(', ')}`
+        );
     }
   } catch {
     // If table not present or raw fails, do not block

@@ -118,6 +118,13 @@
 			"args": [],
 			"isBackground": false,
 			"group": "build"
+		},
+		{
+			"label": "dev (dry-run, pwsh)",
+			"type": "shell",
+			"command": "$env:WA_DRY_RUN=\"true\"; $env:CHATRACE_ENABLED=\"false\"; npm run dev",
+			"isBackground": true,
+			"group": "build"
 		}
 	]
 }
