@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/codeNormalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,9 +14,12 @@ export async function POST(req: Request) {
       productKeys: string[];
     };
 
-    if (!code || !outlet) return NextResponse.json({ ok: false, error: "code & outlet required" }, { status: 400 });
+    const normalized = normalizeCode(code || "");
+    if (!normalized || !outlet) {
+      return NextResponse.json({ ok: false, error: "code & outlet required" }, { status: 400 });
+    }
 
-    const existing = await (prisma as any).attendantAssignment.findFirst({ where: { code } });
+    const existing = await (prisma as any).attendantAssignment.findUnique({ where: { code: normalized } });
     if (existing) {
       await (prisma as any).attendantAssignment.update({
         where: { id: existing.id },
@@ -23,7 +27,7 @@ export async function POST(req: Request) {
       });
     } else {
       await (prisma as any).attendantAssignment.create({
-        data: { id: `aa_${Date.now()}`, code, outlet, productKeys },
+        data: { code: normalized, outlet, productKeys },
       });
     }
     return NextResponse.json({ ok: true });

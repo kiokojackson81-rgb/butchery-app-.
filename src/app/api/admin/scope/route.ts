@@ -25,13 +25,15 @@ export async function POST(req: Request) {
     ]>;
 
     await Promise.all(
-      entries.map(([code, v]) =>
-        (prisma as any).attendantAssignment.upsert({
-          where: { code },
+      entries.map(([code, v]) => {
+        const canonical = normalizeCode(code);
+        if (!canonical) return Promise.resolve();
+        return (prisma as any).attendantAssignment.upsert({
+          where: { code: canonical },
           update: { outlet: v.outlet || "", productKeys: v.productKeys || [] },
-          create: { code, outlet: v.outlet || "", productKeys: v.productKeys || [] },
-        })
-      )
+          create: { code: canonical, outlet: v.outlet || "", productKeys: v.productKeys || [] },
+        });
+      })
     );
 
     return NextResponse.json({ ok: true, count: entries.length });
@@ -45,13 +47,12 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const code = (searchParams.get("code") || "").trim();
-    if (!code) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
+    const canonical = normalizeCode(searchParams.get("code") || "");
+    if (!canonical) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
 
-    await (prisma as any).attendantAssignment.delete({ where: { code } }).catch(() => {});
+    await (prisma as any).attendantAssignment.delete({ where: { code: canonical } }).catch(() => {});
     // Also clear normalized scope if stored in AttendantScope
-    const codeNorm = code.replace(/\s+/g, "").toLowerCase();
-  await (prisma as any).attendantScope.delete({ where: { codeNorm: normalizeCode(code) } }).catch(() => {});
+    await (prisma as any).attendantScope.delete({ where: { codeNorm: canonical } }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });

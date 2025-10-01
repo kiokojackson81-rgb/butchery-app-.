@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { canonFull, canonNum } from "@/server/canon";
+import { canonFull, canonNum } from "@/lib/codeNormalize";
 
 type Role = "attendant" | "supervisor" | "supplier";
 

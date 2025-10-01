@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { canonFull } from "@/lib/codeNormalize";
 
 type AdminPerson = { role: "attendant" | "supervisor" | "supplier"; code: string; name?: string; active?: boolean };
 
@@ -11,19 +12,15 @@ async function upsertSettingArray(key: string, nextItems: any[], keyField: strin
   await (prisma as any).setting.upsert({ where: { key }, update: { value: merged }, create: { key, value: merged } });
 }
 
-function normCode(s: string) {
-  return String(s || "").replace(/\s+/g, "").trim().toLowerCase();
-}
-
 async function main() {
-  const code = normCode("001a");
+  const code = canonFull("001a");
   const outletName = "Baraka A";
 
   // 1) Outlet
   const outlet = await (prisma as any).outlet.upsert({
     where: { name: outletName },
     update: {},
-    create: { name: outletName, code: normCode(outletName) },
+    create: { name: outletName, code: canonFull(outletName) },
   });
 
   // 2) Attendant + LoginCode for view/demo
@@ -52,14 +49,14 @@ async function main() {
   ];
   const curCodes = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
   const list: AdminPerson[] = Array.isArray(curCodes?.value) ? (curCodes as any).value : [];
-  const filtered = list.filter((p) => !(p.role === "supervisor" && normCode(p.code) === code) && !(p.role === "supplier" && normCode(p.code) === code));
+  const filtered = list.filter((p) => !(p.role === "supervisor" && canonFull(p.code) === code) && !(p.role === "supplier" && canonFull(p.code) === code));
   const merged = [...filtered, ...people];
   await (prisma as any).setting.upsert({ where: { key: "admin_codes" }, update: { value: merged }, create: { key: "admin_codes", value: merged } });
 
   // 5) admin_outlets mirror
   await upsertSettingArray(
     "admin_outlets",
-    [{ name: outletName, code: normCode(outletName), active: true }],
+    [{ name: outletName, code: canonFull(outletName), active: true }],
     "name"
   );
 

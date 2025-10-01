@@ -9,22 +9,24 @@ export const revalidate = 0;
 async function ensureNoDigitCollision(code: string) {
   const num = canonNum(code);
   if (!num) return;
+  const full = canonFull(code);
   try {
-    const collisions: any[] = await (prisma as any).$queryRawUnsafe(
-      `SELECT code FROM "LoginCode" WHERE regexp_replace(code, '\\D', '', 'g') = ${num}`
-    );
-    if (collisions.length > 0) {
-      const full = canonFull(code);
-      const same = (collisions as any[]).some((c: any) => canonFull((c as any).code) === full);
-      if (!same)
-        throw new Error(
-          `Digit-core collision with existing code(s): ${(collisions as any[])
-            .map((c: any) => (c as any).code)
-            .join(', ')}`
-        );
+    const rows: any[] = await (prisma as any).$queryRaw`
+      SELECT raw_code, canon_code
+      FROM "vw_codes_norm"
+      WHERE canon_num = ${num}
+    `;
+    const conflicts = Array.isArray(rows)
+      ? rows.filter((r: any) => (r?.canon_code || '') !== full)
+      : [];
+    if (conflicts.length > 0) {
+      const list = conflicts.map((c: any) => c?.raw_code || c?.canon_code || '?');
+      throw new Error(`Digit-core collision with existing code(s): ${list.join(', ')}`);
     }
-  } catch {
-    // If table not present or raw fails, do not block
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('ensureNoDigitCollision skipped', err);
+    }
   }
 }
 
@@ -102,6 +104,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, count });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || 'Failed' }, { status: 500 });
+    const msg = String(e?.message || 'Failed');
+    const isCollision = /Digit-core collision/i.test(msg);
+    return NextResponse.json({ ok: false, error: msg }, { status: isCollision ? 409 : 500 });
   }
 }

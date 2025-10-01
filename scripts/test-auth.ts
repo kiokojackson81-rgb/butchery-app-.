@@ -20,17 +20,32 @@ async function main() {
     "/api/auth/supervisor",
     "/api/auth/supplier",
   ];
+  const failures: string[] = [];
+
   for (const p of payloads) {
     console.log(`\nPayload:`, p);
     for (const ep of endpoints) {
       try {
         const out = await call(ep, p);
         console.log(ep, out);
+        if (out.status !== 200 || !out.json?.ok) {
+          failures.push(`${ep} returned ${out.status} -> ${JSON.stringify(out.json)}`);
+        }
       } catch (e: any) {
-        console.log(ep, "ERR", e?.message || String(e));
+        const msg = e?.message || String(e);
+        console.log(ep, "ERR", msg);
+        failures.push(`${ep} threw ${msg}`);
       }
     }
   }
+
+  if (failures.length > 0) {
+    console.error("\nAuth test failures:", failures.join("; "));
+    process.exit(1);
+  }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

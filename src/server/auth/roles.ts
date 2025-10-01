@@ -1,8 +1,10 @@
 // src/server/auth/roles.ts
 import { prisma } from "@/lib/prisma";
 
+import { canonFull } from "@/lib/codeNormalize";
+
 function norm(s: string) {
-  return (s || "").toString().replace(/\s+/g, "").trim().toLowerCase();
+  return canonFull(s);
 }
 
 export async function validateActorCode(role: "supplier" | "supervisor", code?: string | null) {
@@ -22,3 +24,4 @@ export async function validateActorCode(role: "supplier" | "supervisor", code?: 
     return null;
   }
 }
+

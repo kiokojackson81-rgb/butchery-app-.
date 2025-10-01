@@ -1,9 +1,11 @@
 // src/server/util/normalize.ts
 // Shared normalization helpers for codes and phone numbers.
 
-// Normalize a login code: trim and uppercase
+import { canonFull } from "@/lib/codeNormalize";
+
+// Normalize a login code: trim, lower, remove whitespace (delegates to canonFull)
 export function normCode(raw: string) {
-  return (raw || "").trim().toUpperCase();
+  return canonFull(raw);
 }
 
 // Store E.164 with leading + in DB

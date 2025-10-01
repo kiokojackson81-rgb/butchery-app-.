@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { prisma } from "@/lib/prisma";
-import { canonFull } from "@/server/canon";
+import { canonFull } from "@/lib/codeNormalize";
 
 async function main() {
   const name   = process.env.SEED_NAME   || "Bright Attendant";
@@ -25,7 +25,7 @@ async function main() {
     });
   } catch {}
 
-  // Attendant (maps loginCode → outlet via outletId in current schema)
+  // Attendant (maps loginCode -> outlet via outletId in current schema)
   try {
     const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: code, mode: 'insensitive' } } });
     if (existing) {
@@ -59,7 +59,7 @@ async function main() {
     await (prisma as any).setting.upsert({ where: { key }, update: { value: list }, create: { key, value: list } });
   } catch {}
 
-  console.log(`✅ Seeded attendant:\n  - Name:   ${name}\n  - Code:   ${codeIn}  (stored as: ${code})\n  - Outlet: ${outlet}\n  You can log in using: "${codeIn}", "BR12345", "br 12345", or just "12345" (if unique).`);
+  console.log(`[seed] Seeded attendant:\n  - Name:   ${name}\n  - Code:   ${codeIn}  (stored as: ${code})\n  - Outlet: ${outlet}\n  You can log in using: "${codeIn}", "BR12345", "br 12345", or just "12345" (if unique).`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
+import { canonFull } from "@/lib/codeNormalize";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON, removeItem as lsRemoveItem } from "@/utils/safeStorage";
 
 /** =============== Types =============== */
@@ -285,7 +286,7 @@ export default function AdminPage() {
       const codeToOutlet: Record<string, string | undefined> = {};
       // Resolve outlet for attendants via scope
       Object.keys(phones).forEach((code) => {
-        const norm = normCode(code);
+        const norm = canonFull(code);
         codeToOutlet[code] = scope[norm]?.outlet;
       });
       for (const c of codes) {
@@ -398,7 +399,7 @@ export default function AdminPage() {
   const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
   const attendantCodes = useMemo(() => codes.filter(c => c.role === "attendant"), [codes]);
 
-  const normCode = (c: string) => c.replace(/\s+/g, "").toLowerCase();
+  const normCode = (c: string) => canonFull(c);
 
   const setScopeOutlet = (code: string, outletName: string) => {
     const key = normCode(code || "");

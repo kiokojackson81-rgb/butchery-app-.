@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { readJSON as safeReadJSON } from "@/utils/safeStorage";
+import { canonFull } from "@/lib/codeNormalize";
 
 const ADMIN_CODES_KEY = "admin_codes";
 const LEGACY_STAFF_KEYS = ["admin_staff", "admin_staff_v2", "ADMIN_STAFF"];
@@ -11,7 +12,7 @@ const LEGACY_STAFF_KEYS = ["admin_staff", "admin_staff_v2", "ADMIN_STAFF"];
 type Person = { id: string; name: string; code: string; role: "attendant"|"supervisor"|"supplier"; active: boolean; };
 type Legacy = { id: string; name: string; code: string; role?: "attendant"|"supervisor"|"supplier"; active: boolean; };
 
-function norm(s: string){ return s.replace(/\s+/g,"").trim().toLowerCase(); }
+function norm(s: string){ return canonFull(s); }
 function loadPeople(): Person[] { return safeReadJSON<Person[]>(ADMIN_CODES_KEY, []); }
 function loadLegacy(): Legacy[] {
   try{

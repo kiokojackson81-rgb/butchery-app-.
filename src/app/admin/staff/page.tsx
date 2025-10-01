@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
+import { canonFull } from "@/lib/codeNormalize";
+
 // ===== Types kept exactly as your original =====
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
 type Unit = "kg" | "pcs";
@@ -41,8 +43,29 @@ function readStaff(): Staff[] { return safeReadJSON<Staff[]>(ADMIN_STAFF_KEY, []
 function writeStaff(list: Staff[]) { try { safeWriteJSON(ADMIN_STAFF_KEY, list); } catch {} }
 
 // Scope store: code -> { outlet, productKeys }
-type ScopeMap = Record<string, { outlet: Outlet; productKeys: ItemKey[] }>
-function readScope(): ScopeMap { return safeReadJSON<ScopeMap>(SCOPE_KEY, {} as any); }
+type ScopeValue = { outlet: Outlet; productKeys: ItemKey[] };
+type ScopeMap = Record<string, ScopeValue>;
+
+function normalizeScope(map: Record<string, { outlet?: string; productKeys?: ItemKey[] }> | null | undefined): ScopeMap {
+  const clean: ScopeMap = {};
+  if (!map) return clean;
+  for (const [key, value] of Object.entries(map)) {
+    const canonical = canonFull(key);
+    if (!canonical) continue;
+    const rawOutlet = (value?.outlet || "") as string;
+    const outlet = (OUTLETS as readonly string[]).includes(rawOutlet as Outlet) ? (rawOutlet as Outlet) : OUTLETS[0];
+    const productKeys = Array.isArray(value?.productKeys)
+      ? (value.productKeys.filter((k: any) => ITEMS.some(item => item.key === k)) as ItemKey[])
+      : [];
+    clean[canonical] = { outlet, productKeys };
+  }
+  return clean;
+}
+
+function readScope(): ScopeMap {
+  const raw = safeReadJSON<Record<string, { outlet?: string; productKeys?: ItemKey[] }>>(SCOPE_KEY, {} as any);
+  return normalizeScope(raw);
+}
 function writeScope(map: ScopeMap) { try { safeWriteJSON(SCOPE_KEY, map); } catch {} }
 
 export default function AdminStaffPage() {
@@ -51,7 +74,12 @@ export default function AdminStaffPage() {
   const [scope, setScope] = useState<ScopeMap>({}); // NEW
 
   // Load both stores on mount
-  useEffect(() => { setList(readStaff()); setScope(readScope()); }, []);
+  useEffect(() => {
+    setList(readStaff());
+    const initialScope = readScope();
+    setScope(initialScope);
+    writeScope(initialScope);
+  }, []);
 
   // CRUD staff (unchanged)
   const addStaff = () => {
@@ -65,7 +93,10 @@ export default function AdminStaffPage() {
     // also try to clean scope entry if code exists
     const removed = list.find(s => s.id === id);
     if (removed?.code) {
-      const m = { ...scope }; delete m[removed.code]; setScope(m); writeScope(m);
+      const canonical = canonFull(removed.code);
+      if (canonical) {
+        const m = { ...scope }; delete m[canonical]; setScope(m); writeScope(m);
+      }
     }
   };
   const update = (id: string, patch: Partial<Staff>) => {
@@ -83,33 +114,56 @@ export default function AdminStaffPage() {
 
   // ===== Scope helpers (do not touch login flow) =====
   const applyScope = (s: Staff) => {
-    if (!s.code) return alert("Set a login code first.");
-    const m = { ...scope, [s.code]: { outlet: s.outlet, productKeys: s.products } };
-    setScope(m); writeScope(m);
+    const canonical = canonFull(s.code);
+    if (!canonical) return alert("Set a login code first.");
+    const scopeValue: ScopeValue = { outlet: s.outlet, productKeys: s.products };
+    const next = { ...scope, [canonical]: scopeValue };
+    setScope(next); writeScope(next);
     // Write-through to server (best-effort)
     (async () => {
       try {
-        const res = await fetch("/api/admin/scope", {
+        const scopeRes = await fetch("/api/admin/scope", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify({ [s.code]: { outlet: s.outlet, productKeys: s.products } }),
+          body: JSON.stringify({ [canonical]: scopeValue }),
         });
-        if (!res.ok) throw new Error(await res.text());
+        if (!scopeRes.ok) throw new Error(await scopeRes.text());
+
+        const payload = {
+          people: [{
+            role: "attendant",
+            code: canonical,
+            name: s.name || s.code || canonical,
+            outlet: s.outlet,
+            productKeys: s.products,
+            active: s.active,
+          }],
+        };
+        const attendantRes = await fetch("/api/admin/attendants/upsert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(payload),
+        });
+        if (!attendantRes.ok) throw new Error(await attendantRes.text());
+
         alert(`Scope saved for ${s.name || s.code} \u2705`);
-      } catch {
-        alert(`Saved locally, but failed to sync scope for ${s.name || s.code} to server.`);
+      } catch (err) {
+        console.error(err);
+        alert(`Saved locally, but failed to sync scope/login for ${s.name || s.code}.`);
       }
     })();
   };
   const clearScope = (s: Staff) => {
-    if (!s.code) return;
-    const m = { ...scope }; delete m[s.code]; setScope(m); writeScope(m);
+    const canonical = canonFull(s.code);
+    if (!canonical) return;
+    const m = { ...scope }; delete m[canonical]; setScope(m); writeScope(m);
     // Mirror clear to server
     (async () => {
       try {
         const url = new URL("/api/admin/scope", window.location.origin);
-        url.searchParams.set("code", s.code);
+        url.searchParams.set("code", canonical);
         const res = await fetch(url.toString(), { method: "DELETE", cache: "no-store" });
         if (!res.ok) throw new Error(await res.text());
       } catch {
@@ -117,27 +171,66 @@ export default function AdminStaffPage() {
       }
     })();
   };
-  const isScoped = (code: string) => !!scope[code];
+  const isScoped = (code: string) => {
+    const canonical = canonFull(code);
+    return !!(canonical && scope[canonical]);
+  };
 
   // Bulk sync (optional convenience)
   const syncAllScopes = () => {
-    const m: ScopeMap = { ...scope };
-    list.forEach(s => {
-      if (s.active && s.code) m[s.code] = { outlet: s.outlet, productKeys: s.products };
+    const payload: ScopeMap = {};
+    const people: Array<{ role: "attendant"; code: string; name: string; outlet: Outlet; productKeys: ItemKey[]; active: boolean }> = [];
+
+    list.forEach((s) => {
+      const canonical = canonFull(s.code);
+      if (!canonical) return;
+      const scopeValue: ScopeValue = { outlet: s.outlet, productKeys: s.products };
+      if (s.active) {
+        payload[canonical] = scopeValue;
+      }
+      people.push({
+        role: "attendant",
+        code: canonical,
+        name: s.name || s.code || canonical,
+        outlet: s.outlet,
+        productKeys: s.products,
+        active: s.active,
+      });
     });
-    setScope(m); writeScope(m);
+
+    setScope(payload);
+    writeScope(payload);
     // Push entire map to server (best-effort)
     (async () => {
       try {
-        const res = await fetch("/api/admin/scope", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify(m),
-        });
-        if (!res.ok) throw new Error(await res.text());
+        const requests: Promise<Response>[] = [
+          fetch("/api/admin/scope", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify(payload),
+          }),
+        ];
+        if (people.length) {
+          requests.push(
+            fetch("/api/admin/attendants/upsert", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({ people }),
+            })
+          );
+        }
+        const responses = await Promise.all(requests);
+        const scopeRes = responses[0];
+        if (!scopeRes.ok) throw new Error(await scopeRes.text());
+        if (people.length) {
+          const attendantRes = responses[1];
+          if (!attendantRes.ok) throw new Error(await attendantRes.text());
+        }
         alert("All active staff scopes synced to server \u2705");
-      } catch {
+      } catch (err) {
+        console.error(err);
         alert("Scopes saved locally, but failed to sync all to server.");
       }
     })();

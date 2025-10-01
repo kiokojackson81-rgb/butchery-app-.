@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { readJSON as safeReadJSON } from "@/utils/safeStorage";
+import { canonFull } from "@/lib/codeNormalize";
 
 /** Primary storage keys (match your Admin page) */
 const ADMIN_CODES_KEY = "admin_codes";   // People & Codes from Admin

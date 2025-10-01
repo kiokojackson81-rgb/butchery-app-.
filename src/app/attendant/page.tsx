@@ -4,6 +4,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
+import { canonFull } from "@/lib/codeNormalize";
 
 export default function AttendantLoginPage() {
   const [code, setCode] = useState("");
@@ -16,7 +17,7 @@ export default function AttendantLoginPage() {
     const raw = code.trim();
     if (!raw) { alert("Please enter your attendant code."); return; }
 
-    const norm = raw.replace(/\s+/g, "").toLowerCase();
+    const norm = canonFull(raw);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
