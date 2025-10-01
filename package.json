@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build",
+  "build": "npm run vercel-build",
+  "vercel-build": "prisma generate && prisma db push && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -18,8 +19,7 @@
     "db:seed:assignments": "node scripts/seedAssignments.mjs",
     "seed:attendant:sample": "tsx scripts/seed-attendant-code.ts",
     "codes:normalize": "tsx scripts/normalize-codes.ts",
-    "postinstall": "prisma generate",
-    "postbuild": "prisma migrate deploy"
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",

@@ -1,4 +1,6 @@
 {
+  "buildCommand": "npm run vercel-build",
+  "installCommand": "npm ci",
   "crons": [
     {
       "path": "/api/wa/jobs/expire-sessions",
