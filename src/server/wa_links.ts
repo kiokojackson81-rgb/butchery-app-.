@@ -46,3 +46,9 @@ export async function createLoginLink(phoneE164: string) {
   const url = `${APP_ORIGIN}/login?${q}`;
   return { url, nonce } as const;
 }
+
+export async function getLoginLinkFor(phoneE164: string) {
+  const { url } = await createLoginLink(phoneE164);
+  return url;
+}
+

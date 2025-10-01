@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { normalizeCode } from "@/lib/codeNormalize";
+import { notifyAttendantAssignmentChange, upsertAssignmentForCode } from "@/server/assignments";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,40 +11,37 @@ type UpsertBody = {
   productKeys?: unknown;
 };
 
+function sanitizeKeys(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const set = new Set<string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    set.add(trimmed);
+  }
+  return Array.from(set).sort();
+}
+
 export async function POST(req: Request) {
   try {
     const { code, outlet, productKeys }: UpsertBody = await req.json();
 
-    const normalized = normalizeCode(code || "");
-    const outletNameRaw = typeof outlet === "string" ? outlet.trim() : "";
+    const rawCode = typeof code === "string" ? code.trim() : "";
+    const outletName = typeof outlet === "string" ? outlet.trim() : "";
 
-    if (!normalized || !outletNameRaw) {
+    if (!rawCode || !outletName) {
       return NextResponse.json({ ok: false, error: "code & outlet required" }, { status: 400 });
     }
 
-    const cleanKeys = Array.isArray(productKeys)
-      ? Array.from(new Set(productKeys
-          .filter((k): k is string => typeof k === "string")
-          .map((k) => k.trim())
-          .filter((k) => k.length > 0)))
-      : [];
+    const keys = sanitizeKeys(productKeys);
+    const { canonicalCode, before, after, changed } = await upsertAssignmentForCode(rawCode, outletName, keys);
 
-    let outletName = outletNameRaw;
-    const outletRow = await (prisma as any).outlet.findFirst({
-      where: { name: { equals: outletNameRaw, mode: "insensitive" } },
-      select: { name: true },
-    });
-    if (outletRow?.name) {
-      outletName = outletRow.name;
+    if (changed) {
+      await notifyAttendantAssignmentChange(canonicalCode, { before, after });
     }
 
-    await (prisma as any).attendantAssignment.upsert({
-      where: { code: normalized },
-      update: { outlet: outletName, productKeys: cleanKeys },
-      create: { code: normalized, outlet: outletName, productKeys: cleanKeys },
-    });
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, changed });
   } catch (e: any) {
     console.error("assignments.upsert error", e);
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { normalizeCode } from "@/lib/codeNormalize";
+import { notifyAttendantAssignmentChange, upsertAssignmentForCode } from "@/server/assignments";
 
 type ScopePayload = Record<string, { outlet?: string; productKeys?: unknown }>;
 
@@ -18,34 +19,15 @@ function sanitizeEntry(value: { outlet?: string; productKeys?: unknown }): Scope
           .filter((k): k is string => typeof k === "string")
           .map((k) => k.trim())
           .filter((k) => k.length > 0)
-      ))
+      )).sort()
     : [];
   return { outlet, productKeys: keys };
-}
-
-async function resolveOutletName(outlet: string): Promise<string> {
-  const row = await (prisma as any).outlet.findFirst({
-    where: { name: { equals: outlet, mode: "insensitive" } },
-    select: { name: true },
-  });
-  return row?.name || outlet;
-}
-
-async function upsertAssignment(code: string, entry: ScopeEntry) {
-  const normalized = normalizeCode(code);
-  if (!normalized) return;
-  const outletName = await resolveOutletName(entry.outlet);
-  await (prisma as any).attendantAssignment.upsert({
-    where: { code: normalized },
-    update: { outlet: outletName, productKeys: entry.productKeys },
-    create: { code: normalized, outlet: outletName, productKeys: entry.productKeys },
-  });
 }
 
 /**
  * Body shape:
  * {
- *   "<normalizedCode>": { outlet: "Baraka A", productKeys: ["beef","goat"] },
+ *   "<loginCode>": { outlet: "Baraka A", productKeys: ["beef","goat"] },
  *   ...
  * }
  */
@@ -56,16 +38,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
-    const entries = Object.entries(scope);
-    await Promise.all(
-      entries.map(async ([code, raw]) => {
-        const entry = sanitizeEntry(raw || {});
-        if (!entry) return;
-        await upsertAssignment(code, entry);
-      })
-    );
+    let processed = 0;
 
-    return NextResponse.json({ ok: true, count: entries.length });
+    for (const [code, raw] of Object.entries(scope)) {
+      const entry = sanitizeEntry(raw || {});
+      if (!entry) continue;
+      try {
+        const { canonicalCode, before, after, changed } = await upsertAssignmentForCode(code, entry.outlet, entry.productKeys);
+        processed += 1;
+        if (changed) {
+          await notifyAttendantAssignmentChange(canonicalCode, { before, after });
+        }
+      } catch (err) {
+        console.error("save scope entry failed", code, err);
+      }
+    }
+
+    return NextResponse.json({ ok: true, count: processed });
   } catch (e) {
     console.error("save scope error", e);
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
@@ -79,11 +68,11 @@ export async function DELETE(req: Request) {
     const canonical = normalizeCode(searchParams.get("code") || "");
     if (!canonical) return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
 
-    await (prisma as any).attendantAssignment.delete({ where: { code: canonical } }).catch(() => {});
-    // Also clear normalized scope if stored in AttendantScope
-    await (prisma as any).attendantScope.delete({ where: { codeNorm: canonical } }).catch(() => {});
+    await prisma.attendantAssignment.delete({ where: { code: canonical } }).catch(() => {});
+    await prisma.attendantScope.delete({ where: { codeNorm: canonical } }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e) {
+    console.error("delete scope error", e);
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
   }
 }
