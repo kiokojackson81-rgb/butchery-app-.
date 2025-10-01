@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
 import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
+import { handleSupervisorText } from "@/server/wa/wa_supervisor_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,18 +88,29 @@ export async function POST(req: Request) {
             continue;
           }
 
+          const sessRole = String(auth.sess?.role || "attendant");
           if (type === "interactive") {
             const interactiveType = m.interactive?.type as string | undefined;
             const listId = m.interactive?.list_reply?.id as string | undefined;
             const buttonId = m.interactive?.button_reply?.id as string | undefined;
             const id = listId || buttonId || "";
-            if (id) await handleAuthenticatedInteractive(auth.sess, id);
-            continue;
+            if (!id) continue;
+            if (sessRole === "supervisor") {
+              // For now, supervisors don't use interactive menus here; ignore or extend later.
+              continue;
+            } else {
+              await handleAuthenticatedInteractive(auth.sess, id);
+              continue;
+            }
           }
 
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
-            await handleAuthenticatedText(auth.sess, text);
+            if (sessRole === "supervisor") {
+              await handleSupervisorText(fromGraph!, text);
+            } else {
+              await handleAuthenticatedText(auth.sess, text);
+            }
             continue;
           }
         }

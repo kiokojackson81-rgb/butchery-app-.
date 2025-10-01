@@ -14,8 +14,14 @@ function run(cmd, allowFail = true) {
   }
 }
 
-// Ensure Prisma client is generated before build
-run('npx prisma generate', false);
+// Ensure Prisma client is generated before build.
+// On Windows, antivirus or a running dev server can lock the DLL during rename.
+// If on win32, skip generate entirely and rely on postinstall/dev having created the client already.
+if (process.platform !== 'win32') {
+  run('npx prisma generate', true);
+} else {
+  console.log('Skipping prisma generate on Windows to avoid DLL lock.');
+}
 
 // Reconcile migration state if needed (ignore if IDs don't exist)
 run('npx prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id');
