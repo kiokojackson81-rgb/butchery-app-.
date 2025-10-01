@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   const num = canonNum(loginCode || "");
 
     if (!full && !num) {
-      return Response.json({ ok: false, error: "Empty code" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
     }
 
     // 1) Try full canonical match in LoginCode
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
       if (list.length === 1) {
         row = list[0];
       } else if (list.length > 1) {
-        return Response.json({ ok: false, error: "Ambiguous code (multiple matches)" }, { status: 409 });
+        return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
       } else {
         const assignments: any[] = await (prisma as any).$queryRawUnsafe(
           `SELECT code FROM "AttendantAssignment" WHERE regexp_replace(code, '\\D', '', 'g') = ${num} LIMIT 3`
@@ -101,24 +101,31 @@ export async function POST(req: Request) {
         if (assignments.length === 1) {
           row = await ensureLoginProvision(assignments[0]?.code || '');
         } else if (assignments.length > 1) {
-          return Response.json({ ok: false, error: "Ambiguous code (multiple matches)" }, { status: 409 });
+          return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
         }
       }
     }
 
-    if (!row) return Response.json({ ok: false, error: "Invalid code" }, { status: 401 });
+    if (!row) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
 
     // Lookup attendant → outlet by row.code
     const att: any = await (prisma as any).attendant.findFirst({
       where: { loginCode: { equals: row.code, mode: "insensitive" } },
     });
     if (!att?.outletId) {
-      return Response.json({ ok: false, error: "Code not assigned to outlet" }, { status: 422 });
+      return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
     }
 
-    return Response.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
+    const response = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
+    response.cookies.set("attendant_auth", "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    return response;
   } catch (e) {
     console.error(e);
-    return Response.json({ ok: false, error: "Server error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "SERVER_ERROR" }, { status: 500 });
   }
 }
