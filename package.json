@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "npm run vercel-build",
-    "vercel-build": "prisma generate && prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id || true && prisma migrate resolve --applied 20251001_change_attendantassignment_id_v2 || true && prisma migrate resolve --rolled-back 20251001_refresh_code_view || true && prisma migrate deploy && next build",
+    "build": "node scripts/prebuild.mjs && next build",
+    "vercel-build": "node scripts/prebuild.mjs && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -27,6 +27,7 @@
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
     "@prisma/client": "^6.16.2",
+    "date-fns": "^3.6.0",
     "zod": "^3.23.8",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",

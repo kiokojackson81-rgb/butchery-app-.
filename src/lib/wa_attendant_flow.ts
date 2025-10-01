@@ -20,6 +20,7 @@ import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
+import { handleSupplyDispute } from "@/server/supply_notify";
 
 type Cursor = {
   date: string;
@@ -217,6 +218,31 @@ export async function handleInboundText(phone: string, text: string) {
     } catch {}
     await sendText(phone, "You've been logged out. We'll send you a login link now.");
     await promptLogin(phone);
+    return;
+  }
+  const disputeMatch = t.match(/^DISPUTE\b(?:\s+(.*))?$/i);
+  if (disputeMatch) {
+    if (!s.code || !s.outlet) {
+      await sendText(phone, "You need to be linked to an outlet before raising a dispute. Ask your supervisor.");
+      return;
+    }
+    const reason = (disputeMatch[1] || '').trim();
+    if (!reason) {
+      await sendText(phone, "Please include a reason after DISPUTE. Example: DISPUTE wrong weight on beef.");
+      return;
+    }
+    try {
+      await handleSupplyDispute({
+        outletName: s.outlet,
+        date: cur.date || today(),
+        reason,
+        attendantPhone: phone.startsWith('+') ? phone : `+${phone}`,
+        attendantCode: s.code || null,
+      });
+    } catch (err) {
+      console.error('supply dispute failed', err);
+      await sendText(phone, "We couldn't record the dispute. Please contact your supervisor directly.");
+    }
     return;
   }
   if (/^(TXNS)$/i.test(t)) {
