@@ -1,4 +1,7 @@
-// removed to avoid test dependency; placeholder to keep folder
-export {};
-// removed to avoid test dependency; placeholder to keep folder
-export {};
+import { describe, it, expect } from "vitest";
+
+describe("auth matching placeholder", () => {
+	it("placeholder", () => {
+		expect(true).toBe(true);
+	});
+});

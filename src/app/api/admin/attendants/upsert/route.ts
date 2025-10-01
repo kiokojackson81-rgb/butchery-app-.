@@ -10,23 +10,27 @@ async function ensureNoDigitCollision(code: string) {
   const num = canonNum(code);
   if (!num) return;
   const full = canonFull(code);
+  let rows: any[] = [];
   try {
-    const rows: any[] = await (prisma as any).$queryRaw`
+    rows = await (prisma as any).$queryRaw`
       SELECT raw_code, canon_code
       FROM "vw_codes_norm"
       WHERE canon_num = ${num}
     `;
-    const conflicts = Array.isArray(rows)
-      ? rows.filter((r: any) => (r?.canon_code || '') !== full)
-      : [];
-    if (conflicts.length > 0) {
-      const list = conflicts.map((c: any) => c?.raw_code || c?.canon_code || '?');
-      throw new Error(`Digit-core collision with existing code(s): ${list.join(', ')}`);
-    }
   } catch (err) {
+    // If we cannot query the view (e.g., during dev or transient issues),
+    // do not block the upsert but log in non-prod.
     if (process.env.NODE_ENV !== 'production') {
-      console.warn('ensureNoDigitCollision skipped', err);
+      console.warn('ensureNoDigitCollision: query failed; skipping check', err);
     }
+    return;
+  }
+  const conflicts = Array.isArray(rows)
+    ? rows.filter((r: any) => (r?.canon_code || "") !== full)
+    : [];
+  if (conflicts.length > 0) {
+    const list = conflicts.map((c: any) => c?.raw_code || c?.canon_code || "?");
+    throw new Error(`Digit-core collision with existing code(s): ${list.join(', ')}`);
   }
 }
 
@@ -39,8 +43,8 @@ export async function POST(req: Request) {
     let count = 0;
     for (const p of people) {
       if (!p?.code && !p?.loginCode) continue;
-  const codeRaw = String(p.code ?? p.loginCode);
-  const codeFull = normalizeCode(codeRaw);
+      const codeRaw = String(p.code ?? p.loginCode);
+      const codeFull = normalizeCode(codeRaw);
       const role = String(p?.role || 'attendant');
       const active = !!p?.active;
 
@@ -67,8 +71,8 @@ export async function POST(req: Request) {
           }).catch(() => null);
           outletId = out?.id;
         }
-        // Update Attendant.loginCode, name, and outletId
-  const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: codeFull, mode: 'insensitive' } } });
+    // Update Attendant.loginCode, name, and outletId
+    const existing = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: codeFull, mode: 'insensitive' } } });
         let attId: string | undefined = existing?.id;
         if (existing) {
           const updated = await (prisma as any).attendant.update({ where: { id: existing.id }, data: { name: p?.name || existing.name, outletId } });
