@@ -12,5 +12,6 @@ export function canonNum(raw: string): string {
 
 // Spec-compliant helper alias
 export function normalizeCode(input: string): string {
-  return String(input || "").replace(/\s+/g, "").toLowerCase();
+  const trimmed = String(input || "").trim();
+  return trimmed.toLowerCase().replace(/\s+/g, "");
 }

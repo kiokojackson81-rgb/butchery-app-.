@@ -1,22 +1,58 @@
 // scripts/checkDb.mjs
 // Purpose: Quick sanity checks to ensure Prisma can connect and see expected tables/rows.
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient({
-  log: ['error']
+  log: ['error'],
 });
 
+const DEFAULT_CODES = 'br1234,kyaloa,kithitoa';
+const DEFAULT_OUTLETS = 'Bright,Baraka A';
+
+function parseList(value, fallback) {
+  const source = typeof value === 'string' && value.trim() ? value : fallback;
+  return source
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const codesToCheck = parseList(process.env.CHECK_CODES, DEFAULT_CODES).map((code) => code.toLowerCase());
+const outletsToCheck = parseList(process.env.CHECK_OUTLETS, DEFAULT_OUTLETS);
+
 async function main() {
-  const results = { currentUser: null, counts: [] };
+  const results = { currentUser: null, currentDatabase: null, counts: [], attendantAssignmentCodes: [], outletsSnapshot: [], serverVersion: null };
   try {
     const [{ current_user }] = await prisma.$queryRawUnsafe(`SELECT current_user`);
     results.currentUser = current_user;
+    const [{ current_database }] = await prisma.$queryRawUnsafe(`SELECT current_database()`);
+    results.currentDatabase = current_database;
+    const [{ server_version }] = await prisma.$queryRawUnsafe(`SHOW server_version`);
+    results.serverVersion = server_version;
   } catch (err) {
-    console.error('Failed to query current_user:', err?.message || err);
+    console.error('Failed to query connection metadata:', err?.message || err);
   }
 
   const tables = ['PersonCode', 'AttendantAssignment'];
+  if (codesToCheck.length) {
+    try {
+      const rows = await prisma.$queryRaw`SELECT code FROM "AttendantAssignment" WHERE code IN (${Prisma.join(codesToCheck)}) ORDER BY code`;
+      results.attendantAssignmentCodes = rows.map((row) => row.code);
+    } catch (err) {
+      console.error('Failed to verify AttendantAssignment codes:', err?.message || err);
+    }
+  }
+
+  if (outletsToCheck.length) {
+    try {
+      const rows = await prisma.$queryRaw`SELECT id, name FROM "Outlet" WHERE name IN (${Prisma.join(outletsToCheck)}) ORDER BY name`;
+      results.outletsSnapshot = rows.map((row) => ({ id: row.id, name: row.name }));
+    } catch (err) {
+      console.error('Failed to verify Outlet names:', err?.message || err);
+    }
+  }
+
   for (const t of tables) {
     try {
       const rows = await prisma.$queryRawUnsafe(

@@ -5,6 +5,43 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { normalizeCode } from "@/lib/codeNormalize";
 
+type ScopePayload = Record<string, { outlet?: string; productKeys?: unknown }>;
+
+type ScopeEntry = { outlet: string; productKeys: string[] };
+
+function sanitizeEntry(value: { outlet?: string; productKeys?: unknown }): ScopeEntry | null {
+  const outlet = typeof value?.outlet === "string" ? value.outlet.trim() : "";
+  if (!outlet) return null;
+  const keys = Array.isArray(value?.productKeys)
+    ? Array.from(new Set(
+        value.productKeys
+          .filter((k): k is string => typeof k === "string")
+          .map((k) => k.trim())
+          .filter((k) => k.length > 0)
+      ))
+    : [];
+  return { outlet, productKeys: keys };
+}
+
+async function resolveOutletName(outlet: string): Promise<string> {
+  const row = await (prisma as any).outlet.findFirst({
+    where: { name: { equals: outlet, mode: "insensitive" } },
+    select: { name: true },
+  });
+  return row?.name || outlet;
+}
+
+async function upsertAssignment(code: string, entry: ScopeEntry) {
+  const normalized = normalizeCode(code);
+  if (!normalized) return;
+  const outletName = await resolveOutletName(entry.outlet);
+  await (prisma as any).attendantAssignment.upsert({
+    where: { code: normalized },
+    update: { outlet: outletName, productKeys: entry.productKeys },
+    create: { code: normalized, outlet: outletName, productKeys: entry.productKeys },
+  });
+}
+
 /**
  * Body shape:
  * {
@@ -14,25 +51,17 @@ import { normalizeCode } from "@/lib/codeNormalize";
  */
 export async function POST(req: Request) {
   try {
-    const scope = await req.json();
+    const scope = (await req.json()) as ScopePayload;
     if (!scope || typeof scope !== "object") {
       return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
-    const entries = Object.entries(scope) as Array<[
-      string,
-      { outlet?: string; productKeys?: string[] }
-    ]>;
-
+    const entries = Object.entries(scope);
     await Promise.all(
-      entries.map(([code, v]) => {
-        const canonical = normalizeCode(code);
-        if (!canonical) return Promise.resolve();
-        return (prisma as any).attendantAssignment.upsert({
-          where: { code: canonical },
-          update: { outlet: v.outlet || "", productKeys: v.productKeys || [] },
-          create: { code: canonical, outlet: v.outlet || "", productKeys: v.productKeys || [] },
-        });
+      entries.map(async ([code, raw]) => {
+        const entry = sanitizeEntry(raw || {});
+        if (!entry) return;
+        await upsertAssignment(code, entry);
       })
     );
 

@@ -1,7 +1,7 @@
 // src/app/admin/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 import { canonFull } from "@/lib/codeNormalize";
@@ -139,6 +139,7 @@ export default function AdminPage() {
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
+  const [savingOutlets, setSavingOutlets] = useState(false);
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -147,6 +148,37 @@ export default function AdminPage() {
   // Low-stock thresholds (productKey -> min qty)
   const [thresholds, setThresholds] = useState<Record<string, number>>({});
   const [loadingThresholds, setLoadingThresholds] = useState<boolean>(false);
+
+  const normalizeOutletList = useCallback((list: any[]): Outlet[] => {
+    const rows = Array.isArray(list) ? list : [];
+    return rows
+      .filter((row) => row && typeof row.name === "string")
+      .map((row: any) => ({
+        id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : rid(),
+        name: String(row.name || "").trim(),
+        code: typeof row.code === "string" ? row.code.trim().toUpperCase() : "",
+        active: row?.active === false ? false : true,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
+
+  const refreshOutletsFromServer = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/outlets/list", { cache: "no-store" });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "Failed to fetch outlets");
+        throw new Error(text || "Failed to fetch outlets");
+      }
+      const data = await response.json().catch(() => ({}));
+      const next = normalizeOutletList((data as any)?.outlets);
+      setOutlets(next);
+      saveLS(K_OUTLETS, next);
+      return next;
+    } catch (err) {
+      console.error("Failed to refresh outlets from server", err);
+      throw err;
+    }
+  }, [normalizeOutletList]);
 
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
@@ -195,6 +227,9 @@ export default function AdminPage() {
         setCodes([]); setScope({}); setPricebook({});
       } finally {
         setHydrated(true); // mark as loaded
+        try {
+          await refreshOutletsFromServer();
+        } catch {}
       }
     })();
   }, []);
@@ -243,7 +278,64 @@ export default function AdminPage() {
   useEffect(() => { refreshThresholds(); }, []);
 
   /** ----- Explicit save buttons (unchanged) ----- */
-  const saveOutletsNow  = async () => { saveLS(K_OUTLETS, outlets);  await pushLocalStorageKeyToDB(K_OUTLETS as any);  alert("Outlets & Codes saved ✅"); };
+  const saveOutletsNow = async () => {
+    if (!hydrated) {
+      alert("Still loading outlet data. Please try again in a moment.");
+      return;
+    }
+    if (savingOutlets) return;
+
+    const payload = outlets.map((o) => {
+      const name = (o.name || "").trim();
+      const code = typeof o.code === "string" ? o.code.trim() : "";
+      return {
+        id: typeof o.id === "string" && /^c[a-z0-9]{24}$/i.test(o.id) ? o.id : undefined,
+        name,
+        code,
+        active: o.active !== false,
+      };
+    });
+
+    if (payload.length === 0) {
+      alert("Add at least one outlet before saving.");
+      return;
+    }
+    if (payload.some((row) => !row.name)) {
+      alert("Every outlet needs a name before saving.");
+      return;
+    }
+
+    setSavingOutlets(true);
+    try {
+      const response = await fetch("/api/admin/outlets/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ outlets: payload }),
+      });
+      const textBody = await response.text();
+      let json: any = null;
+      try { json = JSON.parse(textBody); } catch {}
+      if (!response.ok || !json?.ok) {
+        const message = json?.error || textBody || "Failed to save outlets";
+        throw new Error(message);
+      }
+      if (Array.isArray(json?.outlets)) {
+        const next = normalizeOutletList(json.outlets);
+        setOutlets(next);
+        saveLS(K_OUTLETS, next);
+      } else {
+        await refreshOutletsFromServer().catch(() => {});
+      }
+      alert("Outlets & Codes saved ✅");
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      alert(`Failed to save outlets: ${message}`);
+    } finally {
+      setSavingOutlets(false);
+    }
+  };
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
   const saveCodesNow    = async () => { saveLS(K_CODES, codes);       await pushLocalStorageKeyToDB(K_CODES as any);    alert("People & Codes saved ✅"); };
@@ -675,7 +767,7 @@ export default function AdminPage() {
             <h2 className="font-semibold">Outlets & Attendant Codes</h2>
             <div className="flex gap-2">
               <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addOutlet}>+ Add outlet</button>
-              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveOutletsNow}>Submit / Save</button>
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveOutletsNow} disabled={savingOutlets}>{savingOutlets ? "Saving..." : "Submit / Save"}</button>
               <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setOutlets(seedDefaultOutlets())}>
                 Reset defaults
               </button>

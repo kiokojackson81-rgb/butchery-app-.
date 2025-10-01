@@ -11,7 +11,7 @@ datasource db {
 model Outlet {
   id         String      @id @default(cuid())
   name       String      @unique
-  code       String?
+  code       String? @unique
   active     Boolean     @default(true)
   attendants Attendant[]
 }
@@ -135,7 +135,7 @@ model AttendantAssignment {
   outlet      String
   updatedAt   DateTime @updatedAt
   id          String   @id @default(dbgenerated("gen_random_uuid()"))
-  productKeys String[]
+  productKeys Json
 
   @@map("AttendantAssignment")
 }

@@ -61,6 +61,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid code' }, { status: 401 });
     }
 
+    const productKeys = Array.isArray((row as any)?.productKeys)
+      ? (row as any).productKeys.filter((k: unknown): k is string => typeof k === 'string')
+      : [] as string[];
+
     // Non-breaking: also create a short-lived server session so values persist across reloads/devices
     // We bind the session to this attendant code and outlet.
     // Find or create a minimal Attendant record using this code as a unique loginCode.
@@ -79,7 +83,7 @@ export async function POST(req: Request) {
         ok: true,
         code: row.code,
         outlet: row.outlet,
-        productKeys: row.productKeys,
+        productKeys,
         updatedAt: row.updatedAt,
       });
     }
@@ -89,7 +93,7 @@ export async function POST(req: Request) {
       ok: true,
       code: row.code,
       outlet: row.outlet,
-      productKeys: row.productKeys,
+      productKeys,
       updatedAt: row.updatedAt,
     });
   } catch (err: any) {
@@ -101,3 +105,4 @@ export async function POST(req: Request) {
 export function GET() {
   return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
 }
+
