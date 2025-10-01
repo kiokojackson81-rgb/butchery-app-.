@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/codeNormalize";
 
 type ScopeMap = Record<string, { outlet: string; productKeys: string[] }>;
 type PBMap = Record<string, Record<string, { sellPrice: number; active: boolean }>>;
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
     await prisma.$transaction(async (tx) => {
       // Save attendant scope
       for (const [codeNormRaw, entry] of Object.entries(scope)) {
-        const codeNorm = (codeNormRaw || "").replace(/\s+/g, "").toLowerCase();
+        const codeNorm = normalizeCode(codeNormRaw || "");
         if (!codeNorm) continue;
 
         const sc = await tx.attendantScope.upsert({

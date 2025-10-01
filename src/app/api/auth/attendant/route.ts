@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/codeNormalize";
 
 export async function POST(req: Request) {
   try {
@@ -11,7 +12,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
     }
 
-    const norm = code.replace(/\s+/g, "").toLowerCase();
+  const norm = normalizeCode(code);
 
     // 1) Primary: AttendantAssignment table (normalized code)
     const row = await (prisma as any).attendantAssignment.findUnique({ where: { code: norm } });
@@ -37,10 +38,7 @@ export async function POST(req: Request) {
     const products = Array.isArray((productsRow as any)?.value) ? (productsRow as any).value : [];
     const pbMap = (pricebookRow && typeof (pricebookRow as any).value === "object") ? (pricebookRow as any).value : {};
 
-    const outletHit = outlets.find((o: any) => {
-      const c = (o?.code || "").toString();
-      return (o?.active === true) && c.replace(/\s+/g, "").toLowerCase() === norm;
-    });
+    const outletHit = outlets.find((o: any) => (o?.active === true) && normalizeCode(String(o?.code || "")) === norm);
 
     if (outletHit && outletHit.name) {
       const outletName = outletHit.name as string;

@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { normalizeCode } from "@/lib/codeNormalize";
 
 /**
  * Body shape:
@@ -50,7 +51,7 @@ export async function DELETE(req: Request) {
     await (prisma as any).attendantAssignment.delete({ where: { code } }).catch(() => {});
     // Also clear normalized scope if stored in AttendantScope
     const codeNorm = code.replace(/\s+/g, "").toLowerCase();
-    await (prisma as any).attendantScope.delete({ where: { codeNorm } }).catch(() => {});
+  await (prisma as any).attendantScope.delete({ where: { codeNorm: normalizeCode(code) } }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
