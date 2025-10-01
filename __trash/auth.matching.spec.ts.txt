@@ -1,0 +1,2 @@
+// moved from tests/auth.matching.spec.ts to avoid requiring vitest during typecheck
+export {};

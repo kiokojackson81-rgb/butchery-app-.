@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/db";
+import { canonFull, canonNum } from "@/lib/codeNormalize";
 
 export async function POST(req: Request) {
   try {
@@ -11,18 +12,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
     }
 
-    const norm = code.replace(/\s+/g, "").toLowerCase();
+    const full = canonFull(code);
+    const num = canonNum(code);
 
     // Fetch people/codes from Setting store
     const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
     const list = Array.isArray((row as any)?.value) ? (row as any).value : [];
 
-    const found = list.find((p: any) => {
-      const role = (p?.role || "").toString().toLowerCase();
-      const active = !!p?.active;
-      const c = (p?.code || "").toString();
-      return active && role === "supervisor" && c.replace(/\s+/g, "").toLowerCase() === norm;
-    });
+    const activeSup = list.filter((p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "supervisor");
+
+    let found = activeSup.find((p: any) => canonFull(p?.code || "") === full);
+    if (!found && num) {
+      const matches = activeSup.filter((p: any) => canonNum(p?.code || "") === num);
+      if (matches.length === 1) found = matches[0];
+      else if (matches.length > 1) return NextResponse.json({ ok: false, error: "Ambiguous code (multiple matches by number)" }, { status: 409 });
+    }
 
     if (!found) {
       return NextResponse.json({ ok: false, error: "Code not found" }, { status: 404 });

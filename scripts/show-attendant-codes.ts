@@ -1,54 +1,30 @@
-// scripts/show-attendant-codes.ts
-import { prisma } from "@/lib/db";
+#!/usr/bin/env tsx
+import { prisma } from "@/lib/prisma";
+import { canonNum, canonFull } from "@/lib/codeNormalize";
 
 async function main() {
-  console.log("=== Active ATTENDANT codes ===");
+  const rows: any[] = await (prisma as any).$queryRawUnsafe(
+    `SELECT a."loginCode" as code, a.name, a."outletId", o.name as outlet
+     FROM "Attendant" a
+     JOIN "LoginCode" l
+       ON lower(regexp_replace(l.code, '\\s+', '', 'g')) = lower(regexp_replace(a."loginCode", '\\s+', '', 'g'))
+      AND l."expiresAt" > now()
+     LEFT JOIN "Outlet" o ON a."outletId" = o.id
+     ORDER BY o.name NULLS LAST, a.name`
+  );
 
-  // Active PersonCodes for attendants
-  const codes = await (prisma as any).personCode.findMany({
-    where: { role: "attendant", active: true },
-    orderBy: { code: "asc" },
-    select: { id: true, code: true, name: true, active: true },
-    take: 50,
-  });
-
-  if (codes.length === 0) {
-    console.log("No active attendant codes found.");
-    console.log("Hint: run `npx tsx scripts/seed-attendant-code.ts` to add a sample.");
+  if (!rows.length) {
+    console.log("No attendants found.");
     return;
   }
 
-  for (const c of codes) {
-    // Find any phone mapping
-    const pm = await (prisma as any).phoneMapping.findFirst({
-      where: { code: c.code, role: "attendant" },
-      select: { phoneE164: true, outlet: true, updatedAt: true },
-      orderBy: { updatedAt: "desc" },
-    });
-
-    // Try to resolve scope (outlet + products) if present
-    const scope = await (prisma as any).attendantScope.findFirst({
-      where: { codeNorm: c.code },
-      select: {
-        outletName: true,
-        products: { select: { productKey: true } },
-      },
-    });
-
-    const outlet = pm?.outlet ?? scope?.outletName ?? "-";
-    const products = ((scope?.products as any[]) || []).map((p: any) => p.productKey).join(", ") || "-";
-
-    console.log([
-      `CODE: ${c.code}`,
-      `Name: ${c.name ?? "-"}`,
-      `Active: ${c.active ? "yes" : "no"}`,
-      `Phone: ${pm?.phoneE164 ?? "-"}`,
-      `Outlet: ${outlet}`,
-      `Products: ${products}`,
-    ].join(" | "));
+  console.log("Attendant Codes (active-ish listing):");
+  for (const r of rows) {
+    const raw = r.code || "";
+    const full = canonFull(raw);
+    const num = canonNum(raw);
+    console.log(`- ${raw}  | outlet: ${r.outlet ?? "-"} | full:${full} | #:${num}`);
   }
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1); })
-  .finally(async () => { await (prisma as any).$disconnect(); });
+main().catch((e) => { console.error(e); process.exit(1); });

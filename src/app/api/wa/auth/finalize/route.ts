@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendText } from "@/lib/wa";
+import { canonFull, toE164DB } from "@/server/canon";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
 function msSince(iso?: string) {
@@ -21,7 +22,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "missing params" }, { status: 400 });
     }
 
-    const sess = await (prisma as any).waSession.findFirst({ where: { phoneE164 } });
+    const phoneDB = toE164DB(phoneE164);
+    const codeFull = canonFull(code);
+
+    const sess = await (prisma as any).waSession.findFirst({ where: { phoneE164: phoneDB } });
     if (!sess) return NextResponse.json({ ok: false, error: "no-session" }, { status: 404 });
 
     const cur = (sess.cursor as any) || {};
@@ -30,18 +34,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "invalid-or-expired-nonce" }, { status: 400 });
     }
 
+    // Guard: ensure code exists/active and role matches
+    const pc = await (prisma as any).personCode.findUnique({ where: { code: codeFull } });
+    if (!pc || !pc.active || String(pc.role) !== String(role)) {
+      return NextResponse.json({ ok: false, error: "invalid_code" }, { status: 400 });
+    }
+
+    // Upsert phone mapping (strict: one phone per code)
+    await (prisma as any).phoneMapping.upsert({
+      where: { code: codeFull },
+      update: { role, phoneE164: phoneDB, outlet: outlet ?? null },
+      create: { code: codeFull, role, phoneE164: phoneDB, outlet: outlet ?? null },
+    });
+
     await (prisma as any).waSession.update({
       where: { id: sess.id },
       data: {
         role,
-        code,
+        code: codeFull,
         outlet: outlet ?? null,
         state: "MENU",
         cursor: { ...cur, loginNonce: null, loginNonceAt: null, lastActiveAt: new Date().toISOString() } as any,
       },
     });
 
-    const to = String(phoneE164 || '').replace(/^\+/, "");
+    const to = String(phoneDB || '').replace(/^\+/, "");
     await sendText(to, "Login successful. What would you like to do?");
     if (role === "attendant") await sendAttendantMenu(to, outlet || "your outlet");
     else if (role === "supervisor") await sendSupervisorMenu(to);

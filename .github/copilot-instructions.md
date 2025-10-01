@@ -52,3 +52,11 @@ This project is a Next.js (App Router) app with a Prisma/Postgres backend and Wh
 - Stale Prisma types? Cast `prisma as any` in API routes; re-run `npm run prisma:generate` locally.
 - Session not recognized? Check `bk_sess` cookie and `Session` table TTL (24h in `lib/session.ts`).
 - Storage not hydrating? Verify `/api/state/bulk-get` returns values and keys are whitelisted in `StorageBridge`.
+
+## Quick reminders (pin me)
+- Do not modify any UI files or visual components.
+- When writing/reading login codes: always normalize with `canonFull` and optionally `canonNum`.
+- Match by full canonical first; if not found, match by numeric core only when unique; otherwise respond 409 for ambiguity.
+- On Admin save: upsert relational tables (Outlet, PersonCode, LoginCode, role tables) and update Setting mirrors: `admin_outlets`, `admin_codes`, `attendant_scope`, `admin_pricebook`.
+- Keep all API responses `{ ok: boolean, ... }`. Never throw to the client.
+- Use functional indexes; do not change schema concepts.

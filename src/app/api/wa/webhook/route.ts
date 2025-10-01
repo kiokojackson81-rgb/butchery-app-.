@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
-import { logOutbound, updateStatusByWamid, sendText, sendInteractive } from "@/lib/wa";
-import { handleInboundText, handleInteractiveReply } from "@/lib/wa_attendant_flow";
-import { tryBindViaLinkToken } from "@/lib/wa_binding";
-import { handleSupervisorText } from "@/server/wa/wa_supervisor_flow";
-import { createLoginLink } from "@/server/wa_links";
+import { logOutbound, updateStatusByWamid } from "@/lib/wa";
+import { promptWebLogin } from "@/server/wa_gate";
+import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +39,6 @@ export async function POST(req: Request) {
   const sig = req.headers.get("x-hub-signature-256");
 
   if (!verifySignature(raw, sig)) {
-    // Return 200 (Meta expects) but log error
     await logOutbound({ direction: "in", payload: { error: "bad signature" }, status: "ERROR" });
     return NextResponse.json({ ok: true });
   }
@@ -54,70 +51,8 @@ export async function POST(req: Request) {
       const changes = Array.isArray(entry.changes) ? entry.changes : [];
       for (const change of changes) {
         const v = change.value || {};
-  const msgs = Array.isArray(v.messages) ? v.messages : [];
+        const msgs = Array.isArray(v.messages) ? v.messages : [];
         const statuses = Array.isArray(v.statuses) ? v.statuses : [];
-
-        // inbound
-        for (const m of msgs) {
-          const from = m.from as string | undefined; // 2547...
-          const id = m.id as string | undefined;
-          await (prisma as any).waMessageLog.create({
-            data: {
-              direction: "in",
-              templateName: null,
-              payload: m as any,
-              waMessageId: id || null,
-              status: (m.type as string) || "MESSAGE",
-            },
-          });
-          // Route to flow handlers
-          try {
-            const phone = from ? `+${from}` : undefined;
-            if (phone) {
-              if (m.type === "text" && m.text?.body) {
-                const fromGraph = from || ""; // 2547...
-                const bodyText = String(m.text.body).trim();
-                // Try link-token binding first
-                const handled = await tryBindViaLinkToken(fromGraph, bodyText);
-                if (handled) continue;
-                // Supervisor dispatch (role-based)
-                try {
-                  const map = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164: phone } });
-                  if (map?.role === "supervisor") {
-                    const supHandled = await handleSupervisorText(fromGraph, bodyText);
-                    if (supHandled) continue;
-                  }
-                } catch {}
-                // If not bound to a session or in SPLASH/LOGIN, send link + buttons proactively
-                try {
-                  const s = await (prisma as any).waSession.findUnique({ where: { phoneE164: phone } });
-                  if (!s || s.state === "SPLASH" || s.state === "LOGIN" || !s.code) {
-                    const link = await createLoginLink(phone);
-                    await sendText(fromGraph, `Welcome to BarakaOps!\nTap this link to log in via the website:\n${link.url}`);
-                    await sendInteractive({
-                      to: fromGraph,
-                      type: "button",
-                      body: { text: "Need the login link again?" },
-                      action: { buttons: [
-                        { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Send login link" } },
-                        { type: "reply", reply: { id: "HELP", title: "Help" } },
-                      ] },
-                    } as any);
-                  }
-                } catch {}
-                await handleInboundText(phone, bodyText);
-              } else if (m.type === "interactive") {
-                await handleInteractiveReply(phone, m.interactive);
-              } else if ((m as any).button) {
-                // Normalize older button payloads to interactive-like shape
-                const btn = (m as any).button;
-                await handleInteractiveReply(phone, { button_reply: { id: btn?.payload || btn?.text || "", title: btn?.text || "" } });
-              }
-            }
-          } catch (err) {
-            await logOutbound({ direction: "in", payload: { error: `flow error: ${String((err as any)?.message || err)}` }, status: "ERROR" });
-          }
-        }
 
         // delivery statuses
         for (const s of statuses) {
@@ -125,12 +60,53 @@ export async function POST(req: Request) {
           const status = s.status as string | undefined;
           if (id && status) await updateStatusByWamid(id, status.toUpperCase());
         }
+
+        // inbound messages
+        for (const m of msgs) {
+          const fromGraph = m.from as string | undefined; // 2547...
+          const phoneE164 = fromGraph ? `+${fromGraph}` : undefined;
+          const type = (m.type as string) || "MESSAGE";
+          const wamid = m.id as string | undefined;
+
+          await (prisma as any).waMessageLog.create({
+            data: { direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type },
+          }).catch(() => {});
+
+          if (!phoneE164) continue;
+
+          // Helper button: resend login link
+          const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;
+          if (maybeButtonId === "open_login") {
+            await promptWebLogin(phoneE164);
+            continue;
+          }
+
+          const auth = await ensureAuthenticated(phoneE164);
+          if (!auth.ok) {
+            await promptWebLogin(phoneE164, auth.reason);
+            continue;
+          }
+
+          if (type === "interactive") {
+            const interactiveType = m.interactive?.type as string | undefined;
+            const listId = m.interactive?.list_reply?.id as string | undefined;
+            const buttonId = m.interactive?.button_reply?.id as string | undefined;
+            const id = listId || buttonId || "";
+            if (id) await handleAuthenticatedInteractive(auth.sess, id);
+            continue;
+          }
+
+          if (type === "text") {
+            const text = (m.text?.body ?? "").trim();
+            await handleAuthenticatedText(auth.sess, text);
+            continue;
+          }
+        }
       }
     }
   } catch (e: any) {
     await logOutbound({ direction: "in", payload: { error: e?.message || String(e) }, status: "ERROR" });
   }
 
-  // Always 200 to prevent retries storm
   return NextResponse.json({ ok: true });
 }
