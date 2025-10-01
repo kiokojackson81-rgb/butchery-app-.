@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
@@ -65,6 +66,19 @@ async function postJSON<T>(url: string, body: any): Promise<T> {
 }
 
 export default function AttendantDashboardPage() {
+  const router = useRouter();
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = sessionStorage.getItem("attendant_code");
+    if (!stored) {
+      router.replace("/attendant");
+      return;
+    }
+    setAuthorized(true);
+  }, [router]);
+
   const [dateStr] = useState(today()); // locked to today
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [catalog, setCatalog] = useState<Record<ItemKey, AdminProduct>>({} as any);
@@ -402,6 +416,11 @@ export default function AttendantDashboardPage() {
       </main>
     );
   }
+
+  if (!authorized) {
+    return null;
+  }
+
 
   return (
     <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">

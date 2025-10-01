@@ -2,34 +2,55 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 import { canonFull } from "@/lib/codeNormalize";
 
 export default function AttendantLoginPage() {
   const [code, setCode] = useState("");
   const [showHelp, setShowHelp] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const isDisabled = useMemo(() => code.trim().length === 0, [code]);
+  const isDisabled = useMemo(() => loading || code.trim().length === 0, [code, loading]);
 
-  const handleLogin = async () => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
     const raw = code.trim();
-    if (!raw) { alert("Please enter your attendant code."); return; }
+    if (!raw) {
+      setError("Enter your attendant code.");
+      return;
+    }
 
     const norm = canonFull(raw);
+    setLoading(true);
+    setError(null);
+
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ loginCode: norm })
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body: JSON.stringify({ loginCode: norm }),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) throw new Error(j?.error || "Login failed");
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Login failed. Please check your code.");
+      }
+
+      try {
+        sessionStorage.setItem("attendant_code", norm);
+      } catch (err) {
+        console.warn("Failed to persist attendant_code", err);
+      }
+
       router.push("/attendant/dashboard");
-    } catch (e) {
-      alert("Login failed. Check your code or try again.");
+    } catch (err: any) {
+      setError(err?.message || "Login failed. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -63,47 +84,52 @@ export default function AttendantLoginPage() {
               <p className="text-sm text-neutral-300 mt-1">
                 Enter the code provided by Admin (your code maps you to a specific outlet).
               </p>
+              <form className="mt-4 space-y-3" onSubmit={handleLogin}>
+                <div>
+                  <label className="text-sm text-neutral-400">Attendant Code</label>
+                  <input
+                    type="text"
+                    autoFocus
+                    className="input-mobile mt-1 border border-neutral-700 bg-neutral-800/70 rounded-xl w-full p-3 outline-none focus:border-neutral-500"
+                    placeholder="e.g. BRIGHT-01"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                </div>
 
-              <div className="mt-4">
-                <label className="text-sm text-neutral-400">Attendant Code</label>
-                <input
-                  type="text"
-                  autoFocus
-                  className="input-mobile mt-1 border border-neutral-700 bg-neutral-800/70 rounded-xl w-full p-3 outline-none focus:border-neutral-500"
-                  placeholder="e.g. BRIGHT-01"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !isDisabled && handleLogin()}
-                />
-              </div>
+                <button
+                  type="submit"
+                  disabled={isDisabled}
+                  className={`btn-mobile w-full px-4 py-3 rounded-xl font-medium transition ${
+                    isDisabled
+                      ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+                      : "bg-white text-black hover:bg-neutral-200"
+                  }`}
+                >
+                  {loading ? "Signing in..." : "Continue to Dashboard"}
+                </button>
 
-              <button
-                onClick={handleLogin}
-                disabled={isDisabled}
-                className={`btn-mobile mt-4 w-full px-4 py-3 rounded-xl font-medium transition ${
-                  isDisabled
-                    ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
-                    : "bg-white text-black hover:bg-neutral-200"
-                }`}
-              >
-                Continue to Dashboard
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowHelp((s) => !s)}
+                  className="btn-mobile w-full text-xs text-neutral-400 underline underline-offset-4 hover:text-neutral-200"
+                >
+                  {showHelp ? "Hide help" : "I don't know my code"}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setShowHelp((s) => !s)}
-                className="btn-mobile mt-3 w-full text-xs text-neutral-400 underline underline-offset-4 hover:text-neutral-200"
-              >
-                {showHelp ? "Hide help" : "I don’t know my code"}
-              </button>
+                {error && (
+                  <p className="text-xs text-red-400">{error}</p>
+                )}
+              </form>
 
               {showHelp && (
                 <div className="mt-3 text-xs text-neutral-300 space-y-1">
-                  <p>• Ask your supervisor/admin for your unique login code.</p>
-                  <p>• The code identifies your outlet and which items/tills you manage.</p>
-                  <p>• If the code fails, it may be inactive—contact admin.</p>
+                  <p> Ask your supervisor/admin for your unique login code.</p>
+                  <p> The code identifies your outlet and which items/tills you manage.</p>
+                  <p> If the code fails, it may be inactive-contact admin.</p>
                 </div>
               )}
+
             </div>
           </div>
 
