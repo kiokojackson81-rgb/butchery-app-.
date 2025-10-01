@@ -7,6 +7,11 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type PersonRole = "attendant" | "supervisor" | "supplier";
+function asPersonRole(value: unknown): PersonRole {
+  const lower = String(value || "").toLowerCase();
+  if (lower === "supervisor" || lower === "supplier") return lower;
+  return "attendant";
+}
 
 async function ensureNoDigitCollision(code: string) {
   const num = canonNum(code);
@@ -98,8 +103,12 @@ async function removeCodeCascade(rawCode: string, role: PersonRole): Promise<boo
     } catch {}
   }
 
-  try { await client.personCode.delete({ where: { code: canonical } }); } catch {}
-  return true;
+  try {
+    const res = await client.personCode.delete({ where: { code: canonical } });
+    return !!res;
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(req: Request) {
@@ -122,10 +131,7 @@ export async function POST(req: Request) {
       const codeRaw = String(p.code ?? p.loginCode);
       const codeFull = normalizeCode(codeRaw);
       if (!codeFull) continue;
-      const roleRaw = String(p?.role || "attendant").toLowerCase();
-      const role: PersonRole = roleRaw === "supervisor" || roleRaw === "supplier"
-        ? roleRaw
-        : "attendant";
+      const role = asPersonRole(p?.role);
       const active = !!p?.active;
 
       keepCodes.set(codeFull, role);
@@ -209,18 +215,17 @@ export async function POST(req: Request) {
       const existing = await (prisma as any).personCode.findMany({
         select: { code: true, role: true },
       });
-      const toRemove = Array.isArray(existing)
-        ? existing.filter((row: any) => {
-            const code = typeof row?.code === "string" ? row.code : "";
-            return code && !keepCodes.has(code);
-          })
-        : [];
-      for (const row of toRemove) {
-        const role = row?.role === "supervisor" || row?.role === "supplier"
-          ? row.role
-          : "attendant";
-        const removed = await removeCodeCascade(row.code, role as PersonRole).catch((err) => {
-          console.error("remove code cascade failed", row?.code, err);
+      const toRemove: Array<{ canonical: string; role: PersonRole }> = [];
+      if (Array.isArray(existing)) {
+        for (const row of existing) {
+          const canonical = normalizeCode(row?.code || "");
+          if (!canonical || keepCodes.has(canonical)) continue;
+          toRemove.push({ canonical, role: asPersonRole(row?.role) });
+        }
+      }
+      for (const entry of toRemove) {
+        const removed = await removeCodeCascade(entry.canonical, entry.role).catch((err) => {
+          console.error("remove code cascade failed", entry.canonical, err);
           return false;
         });
         if (removed) deleted += 1;
