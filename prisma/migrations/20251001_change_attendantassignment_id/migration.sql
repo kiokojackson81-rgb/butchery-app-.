@@ -1,39 +1,56 @@
--- Data-safe ID type change for AttendantAssignment
--- Adjust the template below to your actual source/target types.
--- Our current schema in prisma shows:
--- model AttendantAssignment {
---   id          String   @id @default(uuid()) @db.Uuid
---   code        String   @unique
---   outlet      String
---   productKeys String[] @db.Text
---   updatedAt   DateTime @updatedAt
---   @@map("AttendantAssignment")
--- }
--- If your production DB currently has id as text or integer, use a safe CAST or a new UUID column approach.
+-- Data-safe, idempotent ID fix for AttendantAssignment.id
+-- Handles these states:
+--  - id column missing                  -> add uuid id, backfill, set PK/default
+--  - id column exists with uuid type    -> ensure default only
+--  - id column exists with non-uuid     -> add temp uuid col, backfill (cast or gen), swap, set PK/default
+
+-- Ensure UUID generation available
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 BEGIN;
 
--- Detect column type at runtime is not trivial in a static migration; pick one block and keep it.
--- A) TEXT -> UUID (values are UUID-like strings)
--- If your AttendantAssignment.id is text and contains UUID strings, keep this block and remove others.
--- To verify before applying in prod:
--- SELECT id FROM "AttendantAssignment" WHERE id !~ '^[0-9a-fA-F-]{36}$' LIMIT 1;
+DO $$
+DECLARE
+  current_type text;
+  has_pk bool;
+BEGIN
+  SELECT data_type INTO current_type
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'AttendantAssignment' AND column_name = 'id';
 
--- Drop referencing FKs first if any (none expected in this schema). Example placeholder:
--- ALTER TABLE "SomeChild" DROP CONSTRAINT IF EXISTS "SomeChild_attendantAssignmentId_fkey";
+  IF current_type IS NULL THEN
+    -- Column missing: add and backfill
+    PERFORM 1;
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ADD COLUMN "id" uuid';
+    EXECUTE 'UPDATE "public"."AttendantAssignment" SET "id" = gen_random_uuid() WHERE "id" IS NULL';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ALTER COLUMN "id" SET NOT NULL';
 
--- Change type with cast
-ALTER TABLE "AttendantAssignment"
-  ALTER COLUMN "id" TYPE uuid USING "id"::uuid;
+    SELECT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'public."AttendantAssignment"'::regclass AND contype = 'p'
+    ) INTO has_pk;
+    IF has_pk THEN
+      EXECUTE 'ALTER TABLE "public"."AttendantAssignment" DROP CONSTRAINT "AttendantAssignment_pkey"';
+    END IF;
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ADD CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id")';
 
--- Recreate PK (ensure correct)
-ALTER TABLE "AttendantAssignment"
-  DROP CONSTRAINT IF EXISTS "AttendantAssignment_pkey",
-  ADD  CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id");
+  ELSIF current_type = 'uuid' THEN
+    -- Already correct type; nothing to do here
+    PERFORM 1;
 
--- Recreate dropped FKs if any (none by default)
--- ALTER TABLE "SomeChild"
---   ADD CONSTRAINT "SomeChild_attendantAssignmentId_fkey"
---   FOREIGN KEY ("attendantAssignmentId") REFERENCES "AttendantAssignment"("id") ON DELETE CASCADE;
+  ELSE
+    -- Non-uuid -> swap to uuid safely
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ADD COLUMN "id_uuid" uuid';
+    EXECUTE 'UPDATE "public"."AttendantAssignment" SET "id_uuid" = CASE WHEN "id" ~ ''^[0-9a-fA-F-]{36}$'' THEN ("id")::uuid ELSE gen_random_uuid() END';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" DROP CONSTRAINT IF EXISTS "AttendantAssignment_pkey"';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" DROP COLUMN "id"';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" RENAME COLUMN "id_uuid" TO "id"';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ALTER COLUMN "id" SET NOT NULL';
+    EXECUTE 'ALTER TABLE "public"."AttendantAssignment" ADD CONSTRAINT "AttendantAssignment_pkey" PRIMARY KEY ("id")';
+  END IF;
+END $$;
+
+-- Ensure default for future inserts
+ALTER TABLE "public"."AttendantAssignment" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();
 
 COMMIT;
