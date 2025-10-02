@@ -4,7 +4,7 @@ import { toGraphPhone, toE164DB } from "@/server/canon";
 
 export async function promptWebLogin(phoneE164: string, reason?: string) {
   const { url } = await createLoginLink(phoneE164);
-  const msg = `You’re logged out.${reason ? ` (${reason})` : ""}\nTo continue, tap the link to log in:\n${url}`;
+  const msg = `To continue, tap to log in:\n${url}`;
   const toGraph = toGraphPhone(phoneE164);
   await sendText(toGraph, msg);
   await sendInteractive({

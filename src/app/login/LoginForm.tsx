@@ -47,14 +47,24 @@ export default function LoginForm() {
               } else {
                 setMsg("ℹ️ Check WhatsApp: we sent you a login help message.");
               }
-              // Open WhatsApp chat to ensure the user sees the message
-              const openWa = () => {
+              // If server couldn't send (e.g., outside 24h window), open WA with a prefilled message
+              const sent = !!j?.sent;
+              if (!sent) {
+                try {
+                  const r2 = await fetch("/api/flow/login-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: v }) });
+                  const j2 = await r2.json().catch(() => ({}));
+                  const link = j2?.links?.waMe as string | undefined;
+                  if (link) {
+                    window.location.assign(link);
+                    return;
+                  }
+                } catch {}
+              }
+              // Fallback: open chat without text
+              {
                 const to = String(process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || "").replace(/\D/g, "");
-                if (!to) return;
-                const link = `https://wa.me/${to}`;
-                window.location.assign(link);
-              };
-              openWa();
+                if (to) window.location.assign(`https://wa.me/${to}`);
+              }
             } catch (e: any) {
               setError(String(e?.message || "Failed"));
             }

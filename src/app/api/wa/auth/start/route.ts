@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { normalizeToPlusE164, toGraphPhone } from "@/lib/wa_phone";
 import { sendText, logOutbound } from "@/lib/wa";
+import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean>
   return !!existing;
 }
 
-async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }) {
+async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }): Promise<boolean> {
   const lines = [
     `Welcome to BarakaOps — login successful.`,
     `Hello ${opts.name}. You’re logged in as ${opts.role} for ${opts.outlet || "—"}.`,
@@ -67,18 +68,23 @@ async function sendLoginSuccessDM(opts: { to: string; name: string; role: string
   if (opts.role === "attendant" && opts.products?.length) {
     lines.push(`Products: ${opts.products.join(", ")}.`);
   }
-  lines.push(`Reply MENU to begin.`);
   const toGraph = toGraphPhone(opts.to);
-  await sendText(toGraph, lines.join("\n"));
+  const res = await sendText(toGraph, lines.join("\n"));
+  // Immediately send role-specific interactive menu
+  if (opts.role === "attendant") await sendAttendantMenu(toGraph, opts.outlet || "your outlet");
+  else if (opts.role === "supplier") await sendSupplierMenu(toGraph);
+  else await sendSupervisorMenu(toGraph);
   await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
+  return (res as any)?.ok === true;
 }
 
-async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string }) {
+async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string }): Promise<boolean> {
   const loginUrl = `${APP_ORIGIN}/login?wa=${encodeURIComponent(opts.to)}&src=wa`;
   const body = `Login unsuccessful.\nPlease verify your code and try again: ${loginUrl}\nIf it still fails, contact Admin.`;
   const toGraph = toGraphPhone(opts.to);
-  await sendText(toGraph, body);
+  const res = await sendText(toGraph, body);
   await logOutbound({ direction: "out", templateName: "login-fail", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
+  return (res as any)?.ok === true;
 }
 
 export async function POST(req: Request) {
@@ -91,17 +97,18 @@ export async function POST(req: Request) {
 
     const match = await resolveCode(code || "");
     if (!match.ok) {
-      const res = NextResponse.json({ ok: true, reason: match.reason, nonce, status: "sent" });
+      let sent = false;
+      const res = NextResponse.json({ ok: true, reason: match.reason, nonce, sent });
       if (hasPhone && phoneE164) {
         if (!(await waLogHasNonce(phoneE164, nonce))) {
-          await sendLoginFailDM({ to: phoneE164, reason: match.reason, nonce });
+          sent = await sendLoginFailDM({ to: phoneE164, reason: match.reason, nonce });
         }
         // cache phone for 10 minutes
         const graph = toGraphPhone(phoneE164);
         res.cookies.set("wa_click_phone", phoneE164, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
         res.cookies.set("wa_click_graph", graph, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
       }
-      return res;
+      return NextResponse.json({ ok: true, reason: match.reason, nonce, sent });
     }
 
     const role = match.role;
@@ -127,12 +134,13 @@ export async function POST(req: Request) {
       });
     }
 
+    let sent = false;
     if (hasPhone && phoneE164) {
       if (!(await waLogHasNonce(phoneE164, nonce))) {
-        await sendLoginSuccessDM({ to: phoneE164, name, role, outlet, products: match.products || [], nonce });
+        sent = await sendLoginSuccessDM({ to: phoneE164, name, role, outlet, products: match.products || [], nonce });
       }
     }
-    const res = NextResponse.json({ ok: true, nonce, status: "sent" });
+    const res = NextResponse.json({ ok: true, nonce, sent });
     if (hasPhone && phoneE164) {
       const graph = toGraphPhone(phoneE164);
       res.cookies.set("wa_click_phone", phoneE164, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });

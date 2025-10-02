@@ -41,8 +41,8 @@ export async function createLoginLink(phoneE164: string) {
     });
   }
 
-  const wa = encodeURIComponent(phoneE164);
-  const q = new URLSearchParams({ wa, nonce }).toString();
+  // Avoid double-encoding by letting URLSearchParams handle encoding once
+  const q = new URLSearchParams({ wa: phoneE164, nonce }).toString();
   const url = `${APP_ORIGIN}/login?${q}`;
   return { url, nonce } as const;
 }
