@@ -49,5 +49,8 @@
     "tsx": "^4.20.6",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
+  },
+  "scriptsExtra": {
+    "test:smoke": "vitest run tests/db_persistence.smoke.spec.ts"
   }
 }

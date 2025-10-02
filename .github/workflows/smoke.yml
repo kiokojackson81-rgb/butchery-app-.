@@ -1,0 +1,28 @@
+name: Smoke test (DB-first persistence)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run smoke test against production
+        env:
+          # Optionally override via repo/org secret SMOKE_BASE_URL
+          BASE_URL: ${{ secrets.SMOKE_BASE_URL || 'https://barakafresh.com' }}
+        run: npx vitest run tests/db_persistence.smoke.spec.ts --reporter=dot
