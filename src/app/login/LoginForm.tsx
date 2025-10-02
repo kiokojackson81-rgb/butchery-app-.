@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
@@ -14,6 +14,7 @@ export default function LoginForm() {
   const [msg, setMsg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const waBusinessPublic = useMemo(() => process.env.NEXT_PUBLIC_WA_BUSINESS || "", []);
 
   useEffect(() => {
     (document.getElementById("code-input") as HTMLInputElement | null)?.focus();
@@ -28,7 +29,11 @@ export default function LoginForm() {
             const v = (document.getElementById("code-input") as HTMLInputElement | null)?.value || "";
             if (!looksLikeCode(v)) { setError("Invalid code format"); return; }
             const url = new URL(window.location.href);
-            const wa = url.searchParams.get("wa") || undefined;
+            const wa = url.searchParams.get("wa") || "";
+            if (!wa) {
+              setError("Missing phone (?wa=+2547...) — open the login link from WhatsApp");
+              return;
+            }
             try {
               const r = await fetch("/api/wa/auth/start", {
                 method: "POST",
@@ -37,8 +42,19 @@ export default function LoginForm() {
                 body: JSON.stringify({ code: v, wa }),
               });
               const j = await r.json().catch(() => ({}));
-              if (r.ok && j?.ok) setMsg("Login successful. Check your WhatsApp for next steps.");
-              else setMsg("Login failed. Check WhatsApp for help and try again.");
+              if (r.ok && j?.ok) {
+                setMsg("✅ Check WhatsApp for a message from BarakaOps.");
+              } else {
+                setMsg("ℹ️ Check WhatsApp: we sent you a login help message.");
+              }
+              // Open WhatsApp chat to ensure the user sees the message
+              const openWa = () => {
+                const to = String(process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || "").replace(/\D/g, "");
+                if (!to) return;
+                const link = `https://wa.me/${to}`;
+                window.location.assign(link);
+              };
+              openWa();
             } catch (e: any) {
               setError(String(e?.message || "Failed"));
             }
