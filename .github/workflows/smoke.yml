@@ -21,12 +21,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set BASE_URL default
-        run: echo "BASE_URL=https://barakafresh.com" >> $GITHUB_ENV
-
-      - name: Override BASE_URL from secret (if provided)
-        if: ${{ secrets.SMOKE_BASE_URL != '' }}
-        run: echo "BASE_URL=${{ secrets.SMOKE_BASE_URL }}" >> $GITHUB_ENV
+      - name: Set BASE_URL env (default, with optional secret override)
+        env:
+          SMOKE_BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+        run: |
+          echo "BASE_URL=https://barakafresh.com" >> $GITHUB_ENV
+          if [ -n "${SMOKE_BASE_URL}" ]; then
+            echo "BASE_URL=${SMOKE_BASE_URL}" >> $GITHUB_ENV
+          fi
 
       - name: Run smoke test against production
         run: npx vitest run tests/db_persistence.smoke.spec.ts --reporter=dot
