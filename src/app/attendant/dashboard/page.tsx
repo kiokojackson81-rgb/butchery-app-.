@@ -24,7 +24,7 @@ const ADMIN_OUTLETS_KEY = "admin_outlets";
 const ADMIN_PRODUCTS_KEY = "admin_products";
 
 // localStorage keys are no longer sources of truth; only read when harmless
-const depositKey      = (date: string, outlet: string) => `attendant_deposit_${date}_${outlet}`; // legacy total
+// Removed deposit localStorage fallback — DB is the only source of truth
 
 const SCOPE_KEY = "attendant_scope";
 const PRICEBOOK_KEY = "admin_pricebook";
@@ -34,7 +34,7 @@ function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 function today() { return new Date().toISOString().split("T")[0]; }
 function id() { return Math.random().toString(36).slice(2); }
-function readJSON<T>(k: string, fallback: T): T { return safeReadJSON<T>(k, fallback); }
+// Note: We deliberately avoid reading non-bridged keys from localStorage.
 // writeJSON removed; we no longer persist to localStorage as primary store
 
 /** ========= Waste helper ========= */
@@ -185,7 +185,7 @@ export default function AttendantDashboardPage() {
       } catch { setOpeningRowsRaw([]); }
     })();
 
-    const byItem: Record<ItemKey, number> = {} as any;
+  const byItem: Record<ItemKey, number> = {} as any;
     (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
       const key = r.itemKey as ItemKey;
       byItem[key] = (byItem[key] || 0) + Number(r.qty || 0);
@@ -198,19 +198,14 @@ export default function AttendantDashboardPage() {
       });
     setRows(built);
 
-    // deposits from DB
+    // deposits from DB (no localStorage fallback)
     (async () => {
       try {
         const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID" }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
         const list = (r.rows || []).map((d) => ({ id: id(), code: d.code || "", amount: d.amount, note: d.note || "", status: d.status as any }));
-        if (list.length > 0) setDeposits(list);
-        else {
-          const total = Number(readJSON<number>(depositKey(dateStr, outlet), 0) || 0);
-          setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
-        }
+        setDeposits(list);
       } catch {
-        const total = Number(readJSON<number>(depositKey(dateStr, outlet), 0) || 0);
-        setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
+        setDeposits([]);
       }
     })();
 
