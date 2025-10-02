@@ -154,6 +154,94 @@ export default function SupervisorDashboard() {
     })();
   }, []);
 
+  // Compute outlet names from selection before using in effects
+  const outletNames = useMemo(
+    () =>
+      selectedOutlet === "__ALL__"
+        ? outlets.map((o) => o.name)
+        : [selectedOutlet],
+    [selectedOutlet, outlets]
+  );
+
+  // DB-first hydration for daily data (deposits, expenses, waste, supply opening)
+  useEffect(() => {
+    (async () => {
+      try {
+        const targets = outletNames.filter(Boolean);
+        if (targets.length === 0 || !date) return;
+
+        // Fetch and hydrate per outlet in parallel (lightweight; each endpoint is scoped)
+        await Promise.all(
+          targets.map(async (outletName) => {
+            const query = new URLSearchParams({ date, outlet: outletName }).toString();
+            // Deposits
+            try {
+              const r = await fetch(`/api/deposits?${query}`, { cache: "no-store" });
+              if (r.ok) {
+                const j = await r.json();
+                const rows: Array<{ amount: number }> = (j?.rows || []).map((x: any) => ({ amount: Number(x?.amount || 0) }));
+                safeWriteJSON(depositsKey(date, outletName), rows);
+              }
+            } catch {}
+            // Expenses
+            try {
+              const r = await fetch(`/api/expenses?${query}`, { cache: "no-store" });
+              if (r.ok) {
+                const j = await r.json();
+                const rows: Array<{ amount: number }> = (j?.rows || []).map((x: any) => ({ amount: Number(x?.amount || 0) }));
+                safeWriteJSON(expensesDailyKey(date, outletName), rows);
+              }
+            } catch {}
+            // Closing/Waste
+            try {
+              const r = await fetch(`/api/attendant/closing?${query}`, { cache: "no-store" });
+              if (r.ok) {
+                const j = await r.json();
+                const wasteMap = (j?.wasteMap || {}) as Record<string, number>;
+                safeWriteJSON(WASTE_MAP(date, outletName), wasteMap);
+              }
+            } catch {}
+            // Supply Opening (for Supply View)
+            try {
+              const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
+              if (r.ok) {
+                const j = await r.json();
+                const rows: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({ itemKey: String(x?.itemKey || ""), qty: Number(x?.qty || 0) }));
+                safeWriteJSON(supplierOpeningKey(date, outletName), rows);
+              }
+            } catch {}
+            // Server-computed summary (expected, deposits, expenses, till, variance)
+            try {
+              const r = await fetch(`/api/supervisor/summary?${new URLSearchParams({ date, outlet: outletName }).toString()}`, { cache: "no-store" });
+              if (r.ok) {
+                const j = await r.json();
+                const data = j?.data || {};
+                const summary = {
+                  expectedKsh: Number(data?.totals?.expectedSales ?? 0),
+                  depositedKsh: Number(
+                    Array.isArray(data?.deposits)
+                      ? data.deposits.reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0)
+                      : 0
+                  ),
+                  expensesKsh: Number(
+                    Array.isArray(data?.expenses)
+                      ? data.expenses.reduce((a: number, e: any) => a + (Number(e?.amount) || 0), 0)
+                      : 0
+                  ),
+                  cashAtTill: 0, // computed below
+                  varianceKsh: Number(data?.totals?.expectedDeposit ?? 0), // keep name for legacy UI
+                } as any;
+                summary.cashAtTill = Math.max(0, (summary.expectedKsh || 0) - (summary.depositedKsh || 0) - (summary.expensesKsh || 0));
+                safeWriteJSON(summaryKey(date, outletName), summary);
+              }
+            } catch {}
+          })
+        );
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, selectedOutlet, JSON.stringify(outlets.map(o => o.name))]);
+
   const updateState = (
     key: string,
     id: string,
@@ -178,13 +266,7 @@ export default function SupervisorDashboard() {
   };
 
   /* ========= KPI Summary (date + outlet/all) ========= */
-  const outletNames = useMemo(
-    () =>
-      selectedOutlet === "__ALL__"
-        ? outlets.map((o) => o.name)
-        : [selectedOutlet],
-    [selectedOutlet, outlets]
-  );
+  // outletNames is declared above for earlier use
 
   const kpis: KPIRow[] = useMemo(() => {
     const rows: KPIRow[] = [];

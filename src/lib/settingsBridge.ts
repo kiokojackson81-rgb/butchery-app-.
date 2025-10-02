@@ -47,3 +47,15 @@ export async function pushLocalStorageKeyToDB(key: KnownKey) {
 export async function pushAllToDB(keys: KnownKey[] = KEYS as any) {
   for (const key of keys) await pushLocalStorageKeyToDB(key as KnownKey);
 }
+
+/** DB-first getter that does not write to localStorage */
+export async function getSettingFromDB<T = any>(key: KnownKey): Promise<T | null> {
+  try {
+    const r = await fetch(`/api/settings/${encodeURIComponent(key)}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    return (j?.value ?? null) as T | null;
+  } catch {
+    return null;
+  }
+}

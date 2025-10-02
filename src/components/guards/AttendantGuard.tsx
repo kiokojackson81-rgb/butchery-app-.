@@ -17,14 +17,6 @@ export default function AttendantGuard({ children }: { children: React.ReactNode
           return;
         }
       } catch {}
-      // Legacy fallback
-      try {
-        const legacy = sessionStorage.getItem("attendant_code");
-        if (legacy) {
-          if (!cancelled) setReady(true);
-          return;
-        }
-      } catch {}
       if (!cancelled) router.replace("/attendant");
     })();
     return () => { cancelled = true; };

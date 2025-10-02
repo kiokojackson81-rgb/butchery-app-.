@@ -36,3 +36,22 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const date = (searchParams.get("date") || "").slice(0, 10);
+    const outlet = (searchParams.get("outlet") || "").trim();
+    if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
+
+    const rows = await (prisma as any).supplyOpeningRow.findMany({
+      where: { date, outletName: outlet },
+      select: { itemKey: true, qty: true },
+      orderBy: { itemKey: "asc" },
+    });
+    const opening = (rows || []).map((r: any) => ({ itemKey: r.itemKey, qty: Number(r.qty || 0) }));
+    return NextResponse.json({ ok: true, rows: opening });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
+  }
+}

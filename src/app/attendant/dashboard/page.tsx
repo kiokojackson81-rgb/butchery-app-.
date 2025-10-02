@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
-import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
+import { readJSON as safeReadJSON } from "@/utils/safeStorage";
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -23,14 +23,8 @@ type TillPaymentRow = { time: string; amount: number; code?: string | null; cust
 const ADMIN_OUTLETS_KEY = "admin_outlets";
 const ADMIN_PRODUCTS_KEY = "admin_products";
 
-const supplierOpeningKey = (date: string, outlet: string) => `supplier_opening_${date}_${outlet}`;
-const attClosingKey   = (date: string, outlet: string) => `attendant_closing_${date}_${outlet}`;
-const attWasteKey     = (date: string, outlet: string) => `attendant_waste_${date}_${outlet}`;
+// localStorage keys are no longer sources of truth; only read when harmless
 const depositKey      = (date: string, outlet: string) => `attendant_deposit_${date}_${outlet}`; // legacy total
-const depositsKey     = (date: string, outlet: string) => `attendant_deposits_${date}_${outlet}`;
-const expensesKey     = (date: string, outlet: string) => `attendant_expenses_${date}_${outlet}`;
-const countedTillKey  = (date: string, outlet: string) => `attendant_tillcount_${date}_${outlet}`;
-const summaryKey      = (date: string, outlet: string) => `attendant_summary_${date}_${outlet}`;
 
 const SCOPE_KEY = "attendant_scope";
 const PRICEBOOK_KEY = "admin_pricebook";
@@ -41,7 +35,7 @@ function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDi
 function today() { return new Date().toISOString().split("T")[0]; }
 function id() { return Math.random().toString(36).slice(2); }
 function readJSON<T>(k: string, fallback: T): T { return safeReadJSON<T>(k, fallback); }
-function writeJSON(k: string, v: any) { safeWriteJSON(k, v); }
+// writeJSON removed; we no longer persist to localStorage as primary store
 
 /** ========= Waste helper ========= */
 function askWaste(unit: Unit, current: number | ""): number | null {
@@ -67,17 +61,6 @@ async function postJSON<T>(url: string, body: any): Promise<T> {
 
 export default function AttendantDashboardPage() {
   const router = useRouter();
-  const [authorized, setAuthorized] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = sessionStorage.getItem("attendant_code");
-    if (!stored) {
-      router.replace("/attendant");
-      return;
-    }
-    setAuthorized(true);
-  }, [router]);
 
   const [dateStr] = useState(today()); // locked to today
   const [outlet, setOutlet] = useState<Outlet | null>(null);
@@ -111,53 +94,55 @@ export default function AttendantDashboardPage() {
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
     (async () => {
-      // Prefer server session
       try {
         const me = await fetch("/api/auth/me", { cache: "no-store" });
         if (me.ok) {
           const j = await me.json();
-          const code = (j?.outletCode || "").toString();
-          if (code) {
-            // Resolve outlet name from admin outlets
+          const outletCode = (j?.outletCode || "").toString();
+          if (outletCode) {
             try {
-              const list = safeReadJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
-              const found = list.find(o => o.active && (o.code || "").trim().toLowerCase() === code.trim().toLowerCase());
-              if (found?.name) setOutlet(found.name as Outlet);
+              const r = await fetch(`/api/outlets/${encodeURIComponent(outletCode)}`, { cache: "no-store" });
+              if (r.ok) {
+                const data = await r.json();
+                const name = data?.outlet?.name || null;
+                if (name) setOutlet(name as Outlet);
+              }
             } catch {}
           }
+        } else {
+          router.replace("/attendant");
+          return;
         }
-      } catch {}
+      } catch {
+        router.replace("/attendant");
+        return;
+      }
 
-      // Catalog from admin products (local mirror hydrated at mount)
       const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
       if (arr && arr.length > 0) {
         const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
         setCatalog(map);
       }
     })();
-  }, []);
+  }, [router]);
 
   /** ===== Scope & pricebook overlays (unchanged) ===== */
   useEffect(() => {
-    const code = sessionStorage.getItem("attendant_code") || "";
-    if (!code) return;
-    try {
-      const map = safeReadJSON<Record<string, { outlet: Outlet; productKeys: ItemKey[] }>>(SCOPE_KEY, {} as any);
-      const scope = map[code];
-      if (!scope) return;
-
-      setOutlet(scope.outlet as Outlet);
-
-      setCatalog(prev => {
-        const keys = Object.keys(prev) as ItemKey[];
-        const wanted = new Set(scope.productKeys);
-        const alreadyScoped = keys.every(k => wanted.has(k)) && keys.length === scope.productKeys.length;
-        if (alreadyScoped) return prev;
-        const filtered = {} as Record<ItemKey, AdminProduct>;
-        scope.productKeys.forEach(k => { if (prev[k]) filtered[k] = prev[k]; });
-        return filtered;
-      });
-    } catch {}
+    (async () => {
+      try {
+        const res = await fetch("/api/attendant/scope", { cache: "no-store" });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (j?.outlet) setOutlet(j.outlet as Outlet);
+        if (Array.isArray(j?.productKeys) && j.productKeys.length > 0) {
+          setCatalog(prev => {
+            const filtered: Record<ItemKey, AdminProduct> = {} as any;
+            (j.productKeys as string[]).forEach((k: any) => { if (prev[k as ItemKey]) filtered[k as ItemKey] = prev[k as ItemKey]; });
+            return Object.keys(filtered).length ? filtered : prev;
+          });
+        }
+      } catch {}
+    })();
   }, [catalog]);
 
   useEffect(() => {
@@ -192,11 +177,19 @@ export default function AttendantDashboardPage() {
   useEffect(() => {
     if (!outlet) return;
 
-    const openingRows = readJSON<Array<{ itemKey: ItemKey; qty: number }>>(supplierOpeningKey(dateStr, outlet), []);
-    setOpeningRowsRaw(openingRows || []);
+    // Opening rows from DB
+    (async () => {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/supply/opening?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        setOpeningRowsRaw(r.rows || []);
+      } catch { setOpeningRowsRaw([]); }
+    })();
 
     const byItem: Record<ItemKey, number> = {} as any;
-    (openingRows || []).forEach(r => { byItem[r.itemKey] = (byItem[r.itemKey] || 0) + Number(r.qty || 0); });
+    (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
+      const key = r.itemKey as ItemKey;
+      byItem[key] = (byItem[key] || 0) + Number(r.qty || 0);
+    });
     const built: Row[] = (Object.keys(byItem) as ItemKey[])
       .filter(k => !!catalog[k])
       .map(k => {
@@ -205,22 +198,38 @@ export default function AttendantDashboardPage() {
       });
     setRows(built);
 
-    // deposits
-    const depList = safeReadJSON<Deposit[]>(depositsKey(dateStr, outlet), []);
-    if (depList && depList.length > 0) {
-      setDeposits(depList.map(d => ({ ...d, id: d.id || id() })));
-    } else {
-      const total = Number(safeReadJSON<number>(depositKey(dateStr, outlet), 0) || 0);
-      setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
-    }
+    // deposits from DB
+    (async () => {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID" }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        const list = (r.rows || []).map((d) => ({ id: id(), code: d.code || "", amount: d.amount, note: d.note || "", status: d.status as any }));
+        if (list.length > 0) setDeposits(list);
+        else {
+          const total = Number(readJSON<number>(depositKey(dateStr, outlet), 0) || 0);
+          setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
+        }
+      } catch {
+        const total = Number(readJSON<number>(depositKey(dateStr, outlet), 0) || 0);
+        setDeposits(total > 0 ? [{ id: id(), code: "", amount: total, note: "" }] : []);
+      }
+    })();
 
-    // expenses
-    const ex = safeReadJSON<Array<{ name: string; amount: number }>>(expensesKey(dateStr, outlet), []);
-    setExpenses((ex || []).map(e => ({ id: id(), name: e.name, amount: e.amount })));
+    // expenses from DB
+    (async () => {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        const list = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any }));
+        setExpenses(list);
+      } catch { setExpenses([]); }
+    })();
 
-    // till count
-  const t = safeReadJSON<number | null>(countedTillKey(dateStr, outlet), null);
-  setCountedTill(typeof t === "number" && !Number.isNaN(t) ? t : "");
+    // tillcount from DB (optional)
+    (async () => {
+      try {
+        const r = await getJSON<{ ok: boolean; counted: number }>(`/api/tillcount?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        setCountedTill(typeof r.counted === "number" ? r.counted : "");
+      } catch { setCountedTill(""); }
+    })();
 
     // API-backed bits
     refreshPeriodAndHeader(outlet).catch(()=>{});
@@ -272,21 +281,8 @@ export default function AttendantDashboardPage() {
     const closingMap: Record<string, number> = {};
     const wasteMap: Record<string, number> = {};
     rows.forEach(r => { closingMap[r.key] = toNum(r.closing); wasteMap[r.key] = toNum(r.waste); });
-    writeJSON(attClosingKey(dateStr, outlet), closingMap);
-    writeJSON(attWasteKey(dateStr, outlet), wasteMap);
-    writeJSON(depositsKey(dateStr, outlet), deposits.filter(d => toNum(d.amount) > 0 || (d.code || "").trim() !== ""));
-    writeJSON(expensesKey(dateStr, outlet), expenses.filter(e => (e.name || "").trim() !== "" && toNum(e.amount) > 0)
-      .map(e => ({ name: e.name.trim(), amount: toNum(e.amount) })));
-    writeJSON(countedTillKey(dateStr, outlet), toNum(countedTill));
-    writeJSON(summaryKey(dateStr, outlet), {
-      expectedKsh: computed.expectedKsh,
-      depositedKsh: computed.depositedKsh,
-      expensesKsh: computed.expensesKsh,
-      cashAtTill: computed.projectedTill,
-      varianceKsh: computed.varianceKsh,
-    });
 
-    // Persist closing/waste to server (non-blocking)
+    // Persist closing/waste to server
     try {
       await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
     } catch {}
@@ -309,15 +305,23 @@ export default function AttendantDashboardPage() {
       await postJSON("/api/notify/low-stock", { outlet, closingMap });
     } catch {}
 
+    // Persist counted till to DB (if entered)
+    try {
+      if (countedTill !== "") {
+        await postJSON("/api/tillcount", { date: dateStr, outlet, counted: toNum(countedTill) });
+      }
+    } catch {}
+
     setSubmitted(true);
-    setTab("summary"); // go straight to Summary tab
+    setTab("summary");
     await refreshPeriodAndHeader(outlet);
+    // refresh closing/waste reads from DB for consistency
+    try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const submitDeposits = async () => {
     if (!outlet) return;
-    writeJSON(depositsKey(dateStr, outlet), deposits.filter(d => toNum(d.amount) > 0 || (d.code || "").trim() !== ""));
     try {
       await postJSON("/api/deposits", {
         outlet,
@@ -330,12 +334,12 @@ export default function AttendantDashboardPage() {
       });
     } catch {}
     await refreshPeriodAndHeader(outlet);
+    // refresh from DB
+    try { await getJSON(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
   };
 
   const submitExpenses = async () => {
     if (!outlet) return;
-    writeJSON(expensesKey(dateStr, outlet), expenses.filter(e => (e.name || "").trim() !== "" && toNum(e.amount) > 0)
-      .map(e => ({ name: e.name.trim(), amount: toNum(e.amount) })));
     try {
       await postJSON("/api/expenses", {
         outlet,
@@ -344,6 +348,8 @@ export default function AttendantDashboardPage() {
       });
     } catch {}
     await refreshPeriodAndHeader(outlet);
+    // refresh from DB
+    try { await getJSON(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
   };
 
   async function refreshPeriodAndHeader(outletName: string) {
@@ -390,10 +396,7 @@ export default function AttendantDashboardPage() {
   }
 
   /** ===== Logout ===== */
-  const logout = () => {
-    try { sessionStorage.removeItem("attendant_code"); } catch {}
-    window.location.href = "/attendant";
-  };
+  const logout = () => { window.location.href = "/attendant"; };
 
   /** ===== Guard ===== */
   useEffect(() => {
@@ -415,10 +418,6 @@ export default function AttendantDashboardPage() {
         </p>
       </main>
     );
-  }
-
-  if (!authorized) {
-    return null;
   }
 
 

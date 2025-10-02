@@ -5,13 +5,23 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 
 export async function GET(_req: Request, ctx: { params: { code: string } }) {
+  const raw = (ctx?.params?.code || "").trim();
+  if (!raw) {
+    return NextResponse.json({ ok: false, error: "code required" }, { status: 400 });
+  }
   try {
-    const code = ctx.params?.code;
-    if (!code) return NextResponse.json({ ok: false }, { status: 400 });
-    const outlet = await prisma.outlet.findFirst({ where: { code } });
-    if (!outlet) return NextResponse.json({ ok: false }, { status: 404 });
-    return NextResponse.json({ ok: true, outlet });
-  } catch (e) {
-    return NextResponse.json({ ok: false }, { status: 500 });
+    const outlet = await (prisma as any).outlet.findFirst({
+      where: { code: { equals: raw, mode: "insensitive" } },
+      select: { name: true, code: true, active: true },
+    });
+    return NextResponse.json({ ok: true, outlet: outlet || null });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Failed" },
+      { status: 500 }
+    );
   }
 }
+
+
+

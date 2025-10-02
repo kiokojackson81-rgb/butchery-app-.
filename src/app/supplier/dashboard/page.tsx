@@ -225,6 +225,19 @@ export default function SupplierDashboard(): JSX.Element {
   useEffect(() => {
     if (!selectedOutletName) return;
 
+    // DB-first hydrate minimal opening for this date/outlet into local mirror
+    (async () => {
+      try {
+        const query = new URLSearchParams({ date: dateStr, outlet: selectedOutletName }).toString();
+        const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          const rows: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({ itemKey: String(x?.itemKey || ""), qty: Number(x?.qty || 0) }));
+          saveLS(supplierOpeningKey(dateStr, selectedOutletName), rows);
+        }
+      } catch {}
+    })();
+
     // Prefer FULL editable rows; if absent, hydrate from minimal opening
     const full = loadLS<SupplyRow[]>(
       supplierOpeningFullKey(dateStr, selectedOutletName),
@@ -251,9 +264,29 @@ export default function SupplierDashboard(): JSX.Element {
     );
     setSubmitted(isSubmitted);
 
-    // transfers for date
-    const tx = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
-    setTransfers(tx);
+    // transfers for date (server-first if available)
+    (async () => {
+      try {
+        const r = await fetch(`/api/supply/transfer?date=${encodeURIComponent(dateStr)}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          const list: TransferRow[] = (j?.rows || []).map((t: any) => ({
+            id: String(t?.id || rid()),
+            date: String(t?.date || dateStr),
+            fromOutletName: String(t?.fromOutletName || ""),
+            toOutletName: String(t?.toOutletName || ""),
+            itemKey: String(t?.itemKey || ""),
+            qty: Number(t?.qty || 0),
+            unit: (t?.unit === "pcs" ? "pcs" : "kg") as Unit,
+          }));
+          saveLS(supplierTransfersKey(dateStr), list);
+          setTransfers(list);
+          return;
+        }
+      } catch {}
+      const tx = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
+      setTransfers(tx);
+    })();
 
     // disputes (show open supply disputes for this outlet or all)
     const rawAmends = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);

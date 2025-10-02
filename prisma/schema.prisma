@@ -114,6 +114,16 @@ model AttendantExpense {
   createdAt  DateTime @default(now())
 }
 
+/// Manual counted till per day/outlet
+model AttendantTillCount {
+  id         String   @id @default(cuid())
+  date       String
+  outletName String
+  counted    Float    @default(0)
+
+  @@unique([date, outletName])
+}
+
 model ActivePeriod {
   id            String   @id @default(cuid())
   outletName    String   @unique
