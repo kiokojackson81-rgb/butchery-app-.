@@ -5,6 +5,10 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { sendClosingSubmitted } from "@/lib/wa";
 
+type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
+type PhoneMap = { code: string; phoneE164: string | null };
+type AttendantRow = { loginCode: string | null; name: string | null };
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
   for (let i = 0; i < attempts; i++) {
@@ -72,33 +76,39 @@ export async function POST(req: Request) {
   }, { timeout: 15000, maxWait: 10000 }));
 
     // Read back rows to compute actual saved maps and counts
-  const rowsArr: any[] = await withRetry<any[]>(() => (prisma as any).attendantClosing.findMany({ where: { date: day, outletName } }));
+    const rows = (await withRetry(
+      () => (prisma as any).attendantClosing.findMany({ where: { date: day, outletName } }) as Promise<ClosingRow[]>
+    )) as unknown as ClosingRow[];
     const closingMapOut: Record<string, number> = {};
     const wasteMapOut: Record<string, number> = {};
-    for (const r of rowsArr) {
-      const k = (r as any).itemKey as string;
-      closingMapOut[k] = Number((r as any).closingQty || 0);
-      wasteMapOut[k] = Number((r as any).wasteQty || 0);
+    for (const r of rows) {
+      const k = r.itemKey;
+      closingMapOut[k] = Number(r.closingQty || 0);
+      wasteMapOut[k] = Number(r.wasteQty || 0);
     }
-    const savedCount = rowsArr.length;
+    const savedCount = rows.length;
 
     // Try to notify the submitting attendant if we can resolve their phone.
     try {
       // Best-effort: notify all mapped phones for attendants at this outlet.
-      const mapsArr: any[] = await withRetry<any[]>(() => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }));
-      const codes = mapsArr.map((m: any) => m.code).filter(Boolean);
-      const attendantsArr: any[] = codes.length
-        ? await withRetry<any[]>(() => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }))
-        : [];
+      const maps = (await withRetry(
+        () => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }) as Promise<PhoneMap[]>
+      )) as unknown as PhoneMap[];
+      const codes = maps.map((m) => m.code).filter(Boolean) as string[];
+      const attendants = (codes.length
+        ? await withRetry(
+            () => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }) as Promise<AttendantRow[]>
+          )
+        : []) as unknown as AttendantRow[];
       const nameByCode = new Map<string, string>();
-      for (const a of attendantsArr) {
+      for (const a of attendants) {
         if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
       }
   // A very rough expected value: number of items saved (business can refine to expected Ksh)
   const expected = savedCount;
       await Promise.allSettled(
-        mapsArr.map((m: any) =>
-          sendClosingSubmitted(m.phoneE164, nameByCode.get(m.code) || m.code || "Attendant", expected)
+        maps.map((m) =>
+          sendClosingSubmitted(m.phoneE164 || "", nameByCode.get(m.code) || m.code || "Attendant", expected)
         )
       );
     } catch {}

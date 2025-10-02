@@ -1,0 +1,95 @@
+name: Playwright Smokes
+
+on:
+  workflow_dispatch:
+    inputs:
+      allowRealWA:
+        description: "Send real WhatsApp in login smoke"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+      testWaE164:
+        description: "Test WA phone in E.164 (e.g., +2547XXXXXXX). Optional if secret REAL_WA_TEST_E164 is set."
+        required: false
+        type: string
+      baseUrl:
+        description: "Override BASE_URL (defaults to production or SMOKE_BASE_URL secret)"
+        required: false
+        type: string
+  # Uncomment to run post-deploy (requires appropriate environment/permissions)
+  # deployment_status:
+  #   types: [success]
+
+jobs:
+  playwright:
+    name: Playwright UI + API smokes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps
+
+      - name: Set BASE_URL
+        env:
+          SMOKE_BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+        run: |
+          # Priority: workflow input baseUrl > secret SMOKE_BASE_URL > production default
+          if [ -n "${{ github.event.inputs.baseUrl }}" ]; then
+            echo "BASE_URL=${{ github.event.inputs.baseUrl }}" >> $GITHUB_ENV
+          elif [ -n "${SMOKE_BASE_URL}" ]; then
+            echo "BASE_URL=${SMOKE_BASE_URL}" >> $GITHUB_ENV
+          else
+            echo "BASE_URL=https://barakafresh.com" >> $GITHUB_ENV
+          fi
+
+      - name: Run Playwright UI smoke
+        run: npx playwright test -c playwright.config.ts -g "UI smoke" --reporter=line
+
+      - name: Run Playwright API persistence smoke
+        run: npx playwright test -c playwright.config.ts -g "API persistence smoke" --reporter=line
+
+      - name: Run Playwright real WA login (opt-in)
+        if: ${{ github.event.inputs.allowRealWA == 'true' || (github.event.inputs.allowRealWA == '' && false) }}
+        env:
+          ALLOW_REAL_WA: "true"
+          INPUT_WA: ${{ github.event.inputs.testWaE164 }}
+          SECRET_WA: ${{ secrets.REAL_WA_TEST_E164 }}
+        run: |
+          # Determine target WhatsApp number: input takes precedence over secret
+          TGT_WA="${INPUT_WA}"
+          if [ -z "$TGT_WA" ] && [ -n "$SECRET_WA" ]; then
+            TGT_WA="$SECRET_WA"
+          fi
+          if [ -z "$TGT_WA" ]; then
+            echo "No TEST_WA_E164 provided (input or secret). Skipping real WA login test."
+            exit 0
+          fi
+          echo "Using TEST_WA_E164=$TGT_WA"
+          BASE_URL="$BASE_URL" ALLOW_REAL_WA="true" TEST_WA_E164="$TGT_WA" npx playwright test -c playwright.config.ts -g "Login WA real" --reporter=line
+
+      - name: Upload Playwright report (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results
+          if-no-files-found: ignore

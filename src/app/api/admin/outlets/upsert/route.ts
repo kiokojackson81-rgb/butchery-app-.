@@ -57,6 +57,7 @@ export async function POST(req: Request) {
     }
 
     const result = await (prisma as any).$transaction(async (tx: any) => {
+      // Upsert incoming outlets
       for (const entry of sanitized) {
         const where = entry.id ? { id: entry.id } : { name: entry.name };
         await tx.outlet.upsert({
@@ -72,6 +73,30 @@ export async function POST(req: Request) {
             active: entry.active,
           },
         });
+      }
+
+      // Deletion semantics: any existing outlet not present in the submitted set
+      // will be removed. If it has dependent attendants, mark inactive instead.
+      const existing: Array<{ id: string; name: string; active: boolean }> = await tx.outlet.findMany({
+        select: { id: true, name: true, active: true },
+      });
+      const keepNames = new Set(sanitized.map((s) => s.name));
+      for (const row of existing) {
+        if (!keepNames.has(row.name)) {
+          try {
+            const refCount = await tx.attendant.count({ where: { outletId: row.id } }).catch(() => 0);
+            if (refCount > 0) {
+              // Soft delete: deactivate when referenced
+              await tx.outlet.update({ where: { id: row.id }, data: { active: false } });
+            } else {
+              // Hard delete: safe to remove
+              await tx.outlet.delete({ where: { id: row.id } });
+            }
+          } catch (e) {
+            // On any failure, fallback to soft-deactivate to preserve integrity
+            try { await tx.outlet.update({ where: { id: row.id }, data: { active: false } }); } catch {}
+          }
+        }
       }
 
       const latest = await tx.outlet.findMany({ orderBy: { name: "asc" } });

@@ -131,6 +131,50 @@
 			"type": "shell",
 			"command": "npx prisma migrate deploy",
 			"group": "build"
+		},
+		{
+			"label": "vitest (db persistence)",
+			"type": "shell",
+			"command": "npm run -s test -w",
+			"args": [],
+			"group": "build"
+		},
+		{
+			"label": "typecheck (after closing route fix)",
+			"type": "shell",
+			"command": "npm run typecheck",
+			"args": [],
+			"group": "build"
+		},
+		{
+			"label": "typecheck (second pass)",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"group": "build"
+		},
+		{
+			"label": "typecheck (finalize)",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"group": "build"
+		},
+		{
+			"label": "playwright: install browsers",
+			"type": "shell",
+			"command": "npx playwright install --with-deps",
+			"group": "build"
+		},
+		{
+			"label": "playwright: live smoke (BASE_URL)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"https://barakafresh.com\"; npx playwright test -c playwright.config.ts",
+			"group": "build"
+		},
+		{
+			"label": "install playwright deps",
+			"type": "shell",
+			"command": "npm i -D @playwright/test@^1.48.2",
+			"group": "build"
 		}
 	]
 }
