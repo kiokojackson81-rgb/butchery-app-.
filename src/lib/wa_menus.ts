@@ -1,64 +1,60 @@
 // lib/wa_menus.ts
 import { sendInteractive } from "@/lib/wa";
-import { buildInteractiveListPayload } from "@/lib/wa_messages";
 
 export async function sendAttendantMenu(to: string, outlet: string) {
-  const payload = buildInteractiveListPayload({
+  // Compact 3-button menu (WhatsApp allows max 3 buttons)
+  await sendInteractive({
+    messaging_product: "whatsapp",
     to,
-    bodyText: `Welcome — managing ${outlet}. Choose an action:`,
-    footerText: "BarakaOps",
-    buttonLabel: "Choose",
-    sections: [
-      {
-        title: "Actions",
-        rows: [
-          { id: "ATTENDANT_CLOSING", title: "Submit Closing", description: "Enter closing & waste" },
-          { id: "ATTENDANT_EXPENSE", title: "Record Expense", description: "Add an expense" },
-          { id: "ATTENDANT_DEPOSIT", title: "Record Deposit", description: "Bank/Till deposit" },
-          { id: "ATTENDANT_SUMMARY", title: "Today Summary", description: "Sales & totals" },
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: `Managing ${outlet}. What would you like to do?` },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "ATD_CLOSING", title: "Closing" } },
+          { type: "reply", reply: { id: "ATD_EXPENSE", title: "Expense" } },
+          { type: "reply", reply: { id: "ATD_TXNS", title: "TXNS" } },
         ],
       },
-    ],
+    },
   });
-  await sendInteractive(payload);
 }
 
 export async function sendSupplierMenu(to: string) {
-  const payload = buildInteractiveListPayload({
+  await sendInteractive({
+    messaging_product: "whatsapp",
     to,
-    bodyText: "Supplier — what would you like to do?",
-    footerText: "BarakaOps",
-    buttonLabel: "Choose",
-    sections: [
-      {
-        title: "Actions",
-        rows: [
-          { id: "SUPPLY_OPENING", title: "Opening Supply", description: "Add opening stock" },
-          { id: "SUPPLY_TRANSFER", title: "Transfer", description: "Transfer between outlets" },
-          { id: "SUPPLY_REPORT", title: "PDF / Report", description: "Get a report" },
-          { id: "SUPPLY_DISPUTE", title: "Dispute", description: "Raise a dispute" },
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Supplier — choose an action" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "SPL_DELIVER", title: "Deliver" } },
+          { type: "reply", reply: { id: "SPL_TXNS", title: "TXNS" } },
+          { type: "reply", reply: { id: "SPL_LOGOUT", title: "Logout" } },
         ],
       },
-    ],
+    },
   });
-  await sendInteractive(payload);
 }
 
 export async function sendSupervisorMenu(to: string) {
-  const payload = buildInteractiveListPayload({
+  await sendInteractive({
+    messaging_product: "whatsapp",
     to,
-    bodyText: "Supervisor — choose a task:",
-    footerText: "BarakaOps",
-    buttonLabel: "Choose",
-    sections: [
-      {
-        title: "Actions",
-        rows: [
-          { id: "SUPERVISOR_REVIEW", title: "Review Queue", description: "Approve/reject items" },
-          { id: "SUPERVISOR_SUMMARY", title: "Outlet Summary", description: "Daily overview" },
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Supervisor — choose a task" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "SUP_REVIEW", title: "Review" } },
+          { type: "reply", reply: { id: "SUP_TXNS", title: "TXNS" } },
+          { type: "reply", reply: { id: "SUP_LOGOUT", title: "Logout" } },
         ],
       },
-    ],
+    },
   });
-  await sendInteractive(payload);
 }

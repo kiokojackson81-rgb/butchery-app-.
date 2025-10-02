@@ -391,7 +391,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   }
 
   // Interpret menu choices
-  if (id === "MENU_SUBMIT_CLOSING") {
+  if (id === "MENU_SUBMIT_CLOSING" || id === "ATD_CLOSING") {
     if (!s.code || !s.outlet) {
       await sendText(phone, "Login first (send your code).");
       return;
@@ -401,12 +401,12 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await sendInteractive(listProducts(phone, prods, s.outlet));
     return;
   }
-  if (id === "MENU_EXPENSE") {
+  if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
     await sendInteractive(expenseNamePrompt(phone));
     return;
   }
-  if (id === "MENU_TXNS") {
+  if (id === "MENU_TXNS" || id === "ATD_TXNS") {
     const rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
     if (!rows.length) await sendText(phone, "No deposits yet today.");
     else await sendText(phone, rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"));
@@ -474,6 +474,19 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     const items = cur.rows.map((r) => ({ key: r.key, name: r.name }));
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
     await sendInteractive(listProducts(phone, items, s.outlet || "Outlet"));
+    return;
+  }
+
+  // Expense follow-ups
+  if (id === "EXP_ADD_ANOTHER") {
+    await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
+    await sendInteractive(expenseNamePrompt(phone));
+    return;
+  }
+  if (id === "EXP_FINISH") {
+    await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
+    const to = phone.replace(/^\+/, "");
+    await sendAttendantMenu(to, s.outlet || "your outlet");
     return;
   }
 }

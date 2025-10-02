@@ -62,7 +62,7 @@ async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean>
 
 async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }): Promise<boolean> {
   const lines = [
-    `Welcome to BarakaOps — login successful.`,
+    `Login successful.`,
     `Hello ${opts.name}. You’re logged in as ${opts.role} for ${opts.outlet || "—"}.`,
   ];
   if (opts.role === "attendant" && opts.products?.length) {
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const state = role === "attendant" ? "MENU" : "HOME";
+  const state = role === "attendant" ? "MENU" : role === "supplier" ? "SPL_MENU" : role === "supervisor" ? "SUP_MENU" : "HOME";
     const cursor: any = { date: new Date().toISOString().slice(0, 10) };
     if (hasPhone && phoneE164) {
       await (prisma as any).waSession.upsert({

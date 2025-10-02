@@ -1,87 +1,251 @@
-// src/server/wa/wa_supervisor_flow.ts
-import { sendText } from "@/lib/wa";
+// server/wa/wa_supervisor_flow.ts
+// Clean single-definition supervisor WhatsApp flow (review, deposits, summary)
 import { prisma } from "@/lib/prisma";
-import { listQueue } from "@/server/supervisor/queue.service";
-import { reviewItem } from "@/server/supervisor/review.service";
-import { getOutletSummary } from "@/server/supervisor/summary.service";
+import { sendText, sendInteractive } from "@/lib/wa";
+import { toGraphPhone } from "@/lib/wa_phone";
+import {
+  buildSupervisorMenu,
+  buildReviewFilterButtons,
+  buildReviewList,
+  buildApproveReject,
+  buildDepositList,
+  buildDepositModerationButtons,
+  buildSummaryChoiceButtons,
+} from "@/server/wa/wa_messages";
 
-function pick<T>(arr: T[], n = 5) {
-  return arr.slice(0, n);
+export type SupervisorState =
+  | "SUP_MENU"
+  | "SUP_REVIEW_PICK_FILTER"
+  | "SUP_REVIEW_LIST"
+  | "SUP_REVIEW_ITEM"
+  | "SUP_DEPOSIT_LIST"
+  | "SUP_DEPOSIT_ITEM"
+  | "SUP_SUMMARY"
+  | "SUP_LOCK_CONFIRM"
+  | "SUP_UNLOCK_CONFIRM";
+
+export type SupervisorCursor = {
+  outlet?: string;
+  date: string;
+  reviewType?: string;
+  reviewId?: string;
+  depositId?: string;
+};
+
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
+
+function todayLocalISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-export async function handleSupervisorText(fromGraph: string, text: string) {
-  const t = text.trim();
-  // Resolve supervisor code from phone mapping
-  let supCode: string | undefined = undefined;
-  try {
-    const phoneE164 = "+" + (fromGraph || "");
-    const map = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supervisor" } });
-    supCode = map?.code as string | undefined;
-  } catch {}
+function isSessionValid(sess: any) {
+  if (!sess?.code || sess.role !== "supervisor") return false;
+  const updatedAt = new Date(sess.updatedAt).getTime();
+  return Date.now() - updatedAt <= TTL_MIN * 60 * 1000;
+}
 
-  if (/^QUEUE$/i.test(t)) {
-    const { items } = await listQueue({ status: "pending", limit: 5 });
-    if (!items.length) {
-      await sendText(fromGraph, "Queue is empty. ✅");
-      return true;
+async function sendLoginLink(phoneGraph: string) {
+  await sendText(phoneGraph, `You're not logged in. Tap to log in: ${process.env.APP_ORIGIN}/login`);
+}
+
+async function saveSession(sessId: string, patch: Partial<{ state: string; cursor: SupervisorCursor }>) {
+  await (prisma as any).waSession.update({ where: { id: sessId }, data: { ...patch } });
+}
+
+function mapFilterToType(id: string): string | undefined {
+  switch (id) {
+    case "SUP_FILTER_WASTE":
+      return "waste";
+    case "SUP_FILTER_EXPENSE":
+      return "expense";
+    case "SUP_FILTER_DEPOSIT":
+      return "deposit";
+    case "SUP_FILTER_DISPUTE":
+      return "supply_dispute";
+    case "SUP_FILTER_MOD":
+      return "supply_mod_request";
+    default:
+      return undefined; // All
+  }
+}
+
+async function getPendingReviewItems(type: string | undefined, date: string, outlet?: string) {
+  const where: any = { status: "pending" };
+  if (type) where.type = type;
+  if (outlet) where.outlet = outlet;
+  // date is DateTime; filter recent (last 3 days) to keep list relevant
+  const since = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+  where.date = { gte: since };
+  const items = await (prisma as any).reviewItem.findMany({ where, orderBy: { createdAt: "desc" }, take: 10 });
+  return items as any[];
+}
+
+function compactReviewText(item: any) {
+  const p = (item?.payload as any) || {};
+  const head = String(item?.type || "").replace(/_/g, " ").toUpperCase();
+  const outlet = item?.outlet || "-";
+  const date = new Date(item?.date || new Date()).toISOString().slice(0, 10);
+  const detail = p?.summary || p?.reason || p?.itemKey || "";
+  return `${head} • ${outlet}\n${date}\n${detail}`.slice(0, 300);
+}
+
+function compactDepositLine(dep: any) {
+  const note = dep?.note || "";
+  return `${dep?.outletName || "?"} — Ksh ${dep?.amount} — ${dep?.status} — ${note}`;
+}
+
+export async function handleSupervisorAction(sess: any, replyId: string, phoneE164: string) {
+  const gp = toGraphPhone(phoneE164);
+  const today = todayLocalISO();
+  if (!isSessionValid(sess)) return sendLoginLink(gp);
+
+  switch (replyId) {
+    case "SUP_REVIEW": {
+      await saveSession(sess.id, { state: "SUP_REVIEW_PICK_FILTER", cursor: { ...(sess.cursor as any), date: today } });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewFilterButtons() as any });
     }
-    const lines = pick(items as any, 5)
-      .map((i: any) => {
-        const p = i.payload as any;
-        const head = `#${i.id.slice(-6)} ${i.type.toUpperCase()} (${i.status})`;
-        const outlet = i.outlet;
-        const date = String(i.date).slice(0, 10);
-        let detail = "";
-        if (i.type === "dispute") detail = `${p?.itemKey} ${p?.qty ?? ""} • ${p?.reason ?? ""}`;
-        if (i.type === "supply_edit") detail = `rows: ${(p?.rows?.length ?? 0)}`;
-        if (i.type === "deposit") detail = `KSh ${p?.parsed?.amount ?? "?"} vs exp ${p?.expected ?? "?"}`;
-        return `${head}\n${outlet} • ${date}\n${detail}\n`;
-      })
-      .join("\n");
-    await sendText(fromGraph, `Pending:\n\n${lines}\nReply:\nAPPROVE <id> or REJECT <id> <note>`);
-    return true;
+    case "SUP_FILTER_ALL":
+    case "SUP_FILTER_WASTE":
+    case "SUP_FILTER_EXPENSE":
+    case "SUP_FILTER_DEPOSIT":
+    case "SUP_FILTER_DISPUTE":
+    case "SUP_FILTER_MOD": {
+      const filter = mapFilterToType(replyId);
+      const cur: SupervisorCursor = { ...(sess.cursor as any), date: today, reviewType: filter };
+      const items = await getPendingReviewItems(filter, today, cur.outlet);
+      await saveSession(sess.id, { state: "SUP_REVIEW_LIST", cursor: cur });
+      if (!items.length) {
+        await sendText(gp, "No pending items.");
+        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+      }
+      const rows = items.map((i) => ({ id: i.id, title: `${String(i.type || "").replace(/_/g, " ")}`, desc: `${new Date(i.date).toISOString().slice(0, 10)} • ${i.outlet}` }));
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewList(rows) as any });
+    }
+    case "SUP_TXNS": {
+      // Top 10 today; if none, last 3 days
+      let deps = await (prisma as any).attendantDeposit.findMany({ where: { date: today }, orderBy: { createdAt: "desc" }, take: 10 });
+      if (!deps.length) {
+        const since = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+        deps = await (prisma as any).attendantDeposit.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10 });
+      }
+      if (!deps.length) {
+        await sendText(gp, "No deposits.");
+        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+      }
+      const items = deps.map((d: any) => ({ id: d.id, line: compactDepositLine(d) }));
+      await saveSession(sess.id, { state: "SUP_DEPOSIT_LIST", cursor: { ...(sess.cursor as any), date: today } });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositList(items) as any });
+    }
+    case "SUP_REPORT": {
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSummaryChoiceButtons() as any });
+    }
+    case "SUP_SUMMARY_ALL": {
+      const text = await computeSummaryText(today, undefined);
+      await sendText(gp, text);
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+    }
   }
 
-  const mA = t.match(/^APPROVE\s+([A-Za-z0-9\-_]+)/i);
-  if (mA) {
-    const id = mA[1];
-  await reviewItem({ id, action: "approve" }, supCode || "SUPERVISOR");
-    await sendText(fromGraph, `✅ Approved #${id.slice(-6)}.`);
-    return true;
+  // Dynamic handlers
+  if (replyId.startsWith("SUP_R:")) {
+    const id = replyId.split(":")[1]!;
+    const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
+    if (!item) {
+      await sendText(gp, "Item not found.");
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+    }
+    await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
+    await sendText(gp, compactReviewText(item));
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any });
   }
 
-  const mR = t.match(/^REJECT\s+([A-Za-z0-9\-_]+)\s*(.*)$/i);
-  if (mR) {
-    const id = mR[1];
-    const note = (mR[2] || "").trim() || undefined;
-  await reviewItem({ id, action: "reject", note }, supCode || "SUPERVISOR");
-    await sendText(fromGraph, `❌ Rejected #${id.slice(-6)}${note ? ` — ${note}` : ""}.`);
-    return true;
+  if (replyId.startsWith("SUP_APPROVE:")) {
+    const id = replyId.split(":")[1]!;
+    await (prisma as any).reviewItem.update({ where: { id }, data: { status: "approved" } });
+    await sendText(gp, "Approved ✅");
+    await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
   }
 
-  const mS = t.match(/^SUMMARY\s+(\d{4}-\d{2}-\d{2})\s+OUTLET\s+(.+)$/i);
-  if (mS) {
-    const date = mS[1];
-    const outlet = mS[2].trim();
-    const { data } = (await getOutletSummary({ date, outlet })) as any;
-    const dep = data.totals?.expectedDeposit ?? "?";
-    const cs = data.closings?.length ?? 0;
-    const ex = (data.expenses || []).reduce((s: number, e: any) => s + e.amount, 0);
-    await sendText(fromGraph, `Summary ${outlet} • ${date}\nClosing rows: ${cs}\nExpenses: KSh ${ex}\nExpected deposit: KSh ${dep}`);
-    return true;
+  if (replyId.startsWith("SUP_REJECT:")) {
+    await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), date: today } });
+    return sendText(gp, "Send a short reason (max 200 chars).");
   }
 
-  if (/^HELP$/i.test(t)) {
-    await sendText(
-      fromGraph,
-      "Supervisor commands:\n" +
-        "QUEUE\n" +
-        "APPROVE <id>\n" +
-        "REJECT <id> <note>\n" +
-        "SUMMARY YYYY-MM-DD OUTLET <name>"
-    );
-    return true;
+  if (replyId.startsWith("SUP_D:")) {
+    const id = replyId.split(":")[1]!;
+    const dep = await (prisma as any).attendantDeposit.findUnique({ where: { id } });
+    if (!dep) {
+      await sendText(gp, "Deposit not found.");
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+    }
+    await saveSession(sess.id, { state: "SUP_DEPOSIT_ITEM", cursor: { ...(sess.cursor as any), depositId: id, date: today } });
+    await sendText(gp, compactDepositLine(dep));
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositModerationButtons(id) as any });
   }
 
-  return false;
+  if (replyId.startsWith("SUP_D_VALID:")) {
+    const id = replyId.split(":")[1]!;
+    await (prisma as any).attendantDeposit.update({ where: { id }, data: { status: "VALID" } });
+    await sendText(gp, "Marked VALID ✅");
+    await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+  }
+
+  if (replyId.startsWith("SUP_D_INVALID:")) {
+    await saveSession(sess.id, { state: "SUP_DEPOSIT_ITEM", cursor: { ...(sess.cursor as any), date: today } });
+    return sendText(gp, "Send a short reason for invalidation.");
+  }
+
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
 }
+
+// Text handler: consumes free-text reasons for reject/invalid flows
+export async function handleSupervisorText(sess: any, text: string, phoneE164: string) {
+  const gp = toGraphPhone(phoneE164);
+  if (!isSessionValid(sess)) return sendLoginLink(gp);
+
+  const cur: SupervisorCursor = (sess.cursor as any) || { date: todayLocalISO() };
+  const today = cur.date || todayLocalISO();
+
+  if ((sess.state as SupervisorState) === "SUP_REVIEW_ITEM" && cur.reviewId) {
+    const reason = String(text || "").slice(0, 200);
+    // Merge reason into payload
+    const item = await (prisma as any).reviewItem.findUnique({ where: { id: cur.reviewId } });
+    const payload = { ...(item?.payload as any), reason };
+    await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: "rejected", payload } });
+    await sendText(gp, "Rejected ❌");
+    await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, reviewId: undefined } });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+  }
+
+  if ((sess.state as SupervisorState) === "SUP_DEPOSIT_ITEM" && cur.depositId) {
+    const reason = String(text || "").slice(0, 200);
+    const dep = await (prisma as any).attendantDeposit.findUnique({ where: { id: cur.depositId } });
+    const newNote = `${dep?.note || ""}${reason ? ` | invalid: ${reason}` : ""}`.slice(0, 200);
+    await (prisma as any).attendantDeposit.update({ where: { id: cur.depositId }, data: { status: "INVALID", note: newNote } });
+    await sendText(gp, "Marked INVALID ❌");
+    await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, depositId: undefined } });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+  }
+
+  // Default
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+}
+
+async function computeSummaryText(date: string, outlet?: string) {
+  const whereOutlet: any = outlet ? { outletName: outlet } : {};
+  const closings = await (prisma as any).attendantClosing.count({ where: { date, ...whereOutlet } });
+  const expenses = await (prisma as any).attendantExpense.findMany({ where: { date, ...whereOutlet } });
+  const expenseSum = (expenses || []).reduce((s: number, e: any) => s + (e.amount || 0), 0);
+  const deposits = await (prisma as any).attendantDeposit.findMany({ where: { date, status: "VALID", ...whereOutlet } });
+  const depositSum = (deposits || []).reduce((s: number, d: any) => s + (d.amount || 0), 0);
+  const deliveries = await (prisma as any).supplyOpeningRow.count({ where: { date, ...(outlet ? { outletName: outlet } : {}) } });
+  const head = outlet ? `${outlet} • ${date}` : `All Outlets • ${date}`;
+  return `${head}\nDeliveries: ${deliveries}\nClosings: ${closings}\nExpenses: KSh ${expenseSum}\nDeposits: KSh ${depositSum}`;
+}
+ 

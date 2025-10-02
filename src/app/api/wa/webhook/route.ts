@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
 import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
-import { handleSupervisorText } from "@/server/wa/wa_supervisor_flow";
+import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
+import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,18 +97,23 @@ export async function POST(req: Request) {
             const id = listId || buttonId || "";
             if (!id) continue;
             if (sessRole === "supervisor") {
-              // For now, supervisors don't use interactive menus here; ignore or extend later.
-              continue;
-            } else {
-              await handleAuthenticatedInteractive(auth.sess, id);
+              await handleSupervisorAction(auth.sess, id, phoneE164);
               continue;
             }
+            if (sessRole === "supplier") {
+              await handleSupplierAction(auth.sess, id, phoneE164);
+              continue;
+            }
+            await handleAuthenticatedInteractive(auth.sess, id);
+            continue;
           }
 
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
             if (sessRole === "supervisor") {
-              await handleSupervisorText(fromGraph!, text);
+              await handleSupervisorText(auth.sess, text, phoneE164);
+            } else if (sessRole === "supplier") {
+              await handleSupplierText(auth.sess, text, phoneE164);
             } else {
               await handleAuthenticatedText(auth.sess, text);
             }
