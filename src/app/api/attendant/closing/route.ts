@@ -5,6 +5,24 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { sendClosingSubmitted } from "@/lib/wa";
 
+async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastErr = e;
+      const msg = String(e?.message || e || "");
+      if (/ConnectionReset|ECONNRESET|closed by the remote host|TLS handshake|socket|timeout/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 150 + i * 200));
+        continue;
+      }
+      break;
+    }
+  }
+  throw lastErr;
+}
+
 export async function POST(req: Request) {
   try {
     const { outlet, date, closingMap, wasteMap } = (await req.json()) as {
@@ -23,7 +41,7 @@ export async function POST(req: Request) {
     const keys = rawKeys.map((k) => (k ?? "").trim()).filter((k) => k.length > 0);
     let prunedCount = 0;
 
-    await prisma.$transaction(async (tx) => {
+    await withRetry(() => prisma.$transaction(async (tx) => {
       for (const itemKey of keys) {
         const rawClosing = Number((safeClosing as any)?.[itemKey] ?? 0);
         const rawWaste = Number((safeWaste as any)?.[itemKey] ?? 0);
@@ -51,35 +69,35 @@ export async function POST(req: Request) {
         const res = await tx.attendantClosing.deleteMany({ where: { date: day, outletName } });
         prunedCount = (res as any)?.count ?? 0;
       }
-    });
+  }, { timeout: 15000, maxWait: 10000 }));
 
     // Read back rows to compute actual saved maps and counts
-    const rows = await (prisma as any).attendantClosing.findMany({ where: { date: day, outletName } });
+  const rowsArr: any[] = await withRetry<any[]>(() => (prisma as any).attendantClosing.findMany({ where: { date: day, outletName } }));
     const closingMapOut: Record<string, number> = {};
     const wasteMapOut: Record<string, number> = {};
-    for (const r of rows) {
+    for (const r of rowsArr) {
       const k = (r as any).itemKey as string;
       closingMapOut[k] = Number((r as any).closingQty || 0);
       wasteMapOut[k] = Number((r as any).wasteQty || 0);
     }
-    const savedCount = rows.length;
+    const savedCount = rowsArr.length;
 
     // Try to notify the submitting attendant if we can resolve their phone.
     try {
       // Best-effort: notify all mapped phones for attendants at this outlet.
-      const maps = await (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } });
-      const codes = maps.map((m: any) => m.code).filter(Boolean);
-      const attendants = codes.length
-        ? await (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } })
+      const mapsArr: any[] = await withRetry<any[]>(() => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }));
+      const codes = mapsArr.map((m: any) => m.code).filter(Boolean);
+      const attendantsArr: any[] = codes.length
+        ? await withRetry<any[]>(() => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }))
         : [];
       const nameByCode = new Map<string, string>();
-      for (const a of attendants) {
+      for (const a of attendantsArr) {
         if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
       }
   // A very rough expected value: number of items saved (business can refine to expected Ksh)
   const expected = savedCount;
       await Promise.allSettled(
-        maps.map((m: any) =>
+        mapsArr.map((m: any) =>
           sendClosingSubmitted(m.phoneE164, nameByCode.get(m.code) || m.code || "Attendant", expected)
         )
       );
@@ -100,10 +118,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
     }
 
-    const rows = await (prisma as any).attendantClosing.findMany({ where: { date, outletName: outlet } });
+    const rowsArr2: any[] = await (prisma as any).attendantClosing.findMany({ where: { date, outletName: outlet } });
     const closingMap: Record<string, number> = {};
     const wasteMap: Record<string, number> = {};
-    for (const r of rows) {
+    for (const r of rowsArr2) {
       const key = (r as any).itemKey;
       closingMap[key] = Number((r as any).closingQty || 0);
       wasteMap[key] = Number((r as any).wasteQty || 0);

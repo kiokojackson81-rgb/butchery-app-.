@@ -3,8 +3,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { chatraceSendText } from "@/lib/chatrace";
-import { FLAGS } from "@/lib/flags";
 import { sendText } from "@/lib/wa";
 
 export async function POST(req: Request) {
@@ -30,31 +28,16 @@ export async function POST(req: Request) {
       const supervisors = await (prisma as any).phoneMapping.findMany({ where: { role: "supervisor" } });
 
       const notice = `\uD83D\uDCE6 Supply request: ${outlet} needs ${qty} ${productKey}.`;
-      if (FLAGS.CHATRACE_ENABLED) {
-        await Promise.all([
-          ...suppliers.map((s: any) => chatraceSendText({ to: s.phoneE164, text: notice })),
-          ...supervisors.map((s: any) => chatraceSendText({ to: s.phoneE164, text: notice })),
-          chatraceSendText({ to: from, text: `\u2705 Request received for ${qty} ${productKey}. Supervisor will confirm.` }),
-        ]);
-      } else {
-        await Promise.all([
-          ...suppliers.map((s: any) => sendText(s.phoneE164, notice)),
-          ...supervisors.map((s: any) => sendText(s.phoneE164, notice)),
-          sendText(from, `\u2705 Request received for ${qty} ${productKey}. Supervisor will confirm.`),
-        ]);
-      }
+      await Promise.all([
+        ...suppliers.map((s: any) => sendText(s.phoneE164, notice)),
+        ...supervisors.map((s: any) => sendText(s.phoneE164, notice)),
+        sendText(from, `\u2705 Request received for ${qty} ${productKey}. Supervisor will confirm.`),
+      ]);
 
       return NextResponse.json({ ok: true });
     }
 
-    if (FLAGS.CHATRACE_ENABLED) {
-      await chatraceSendText({
-        to: from,
-        text: `\uD83D\uDC4B Hi! To request supply, send: "request <itemKey> <qty>". Example: request beef 20`,
-      });
-    } else {
-      await sendText(from, `\uD83D\uDC4B Hi! To request supply, send: "request <itemKey> <qty>". Example: request beef 20`);
-    }
+    await sendText(from, `\uD83D\uDC4B Hi! To request supply, send: "request <itemKey> <qty>". Example: request beef 20`);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });

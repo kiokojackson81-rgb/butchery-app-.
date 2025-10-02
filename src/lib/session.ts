@@ -3,18 +3,19 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
 const COOKIE_NAME = "bk_sess";
-const SESSION_TTL_HOURS = 24;
+// Short TTL with sliding renewal
+const SESSION_TTL_SECONDS = 10 * 60; // 10 minutes
 
 export async function createSession(attendantId: string, outletCode?: string) {
   const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600 * 1000);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
 
   await (prisma as any).session.create({
     data: { attendantId, token, outletCode, expiresAt },
   });
 
   // Set cookie here to centralize attributes and avoid duplication in routes
-  const maxAge = SESSION_TTL_HOURS * 3600;
+  const maxAge = SESSION_TTL_SECONDS;
   const jar = (await cookies()) as any;
   jar.set({
     name: COOKIE_NAME,
@@ -29,7 +30,7 @@ export async function createSession(attendantId: string, outletCode?: string) {
   return { token, expiresAt };
 }
 
-export function serializeSessionCookie(token: string, maxAgeSeconds = SESSION_TTL_HOURS * 3600) {
+export function serializeSessionCookie(token: string, maxAgeSeconds = SESSION_TTL_SECONDS) {
   const secure = process.env.NODE_ENV === "production";
   const parts = [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
@@ -51,6 +52,23 @@ export async function getSession() {
     include: { attendant: { include: { outletRef: true } } },
   });
   if (!sess || sess.expiresAt < new Date()) return null;
+  // Sliding renewal when less than half TTL remains
+  const now = Date.now();
+  const remainingMs = new Date(sess.expiresAt).getTime() - now;
+  if (remainingMs < (SESSION_TTL_SECONDS * 1000) / 2) {
+    const newExpiry = new Date(now + SESSION_TTL_SECONDS * 1000);
+    await (prisma as any).session.update({ where: { token }, data: { expiresAt: newExpiry } }).catch(() => {});
+    (jar as any).set({
+      name: COOKIE_NAME,
+      value: token,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: SESSION_TTL_SECONDS,
+    });
+    return { ...sess, expiresAt: newExpiry };
+  }
   return sess;
 }
 

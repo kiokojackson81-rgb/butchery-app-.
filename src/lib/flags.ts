@@ -1,3 +1,1 @@
-export const FLAGS = {
-  CHATRACE_ENABLED: process.env.CHATRACE_ENABLED === "true",
-};
+export const FLAGS = {} as const;

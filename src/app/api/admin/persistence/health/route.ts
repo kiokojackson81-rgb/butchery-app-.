@@ -24,7 +24,6 @@ export async function GET() {
       activePeriods,
       phoneMappings,
       personCodes,
-      chatraceSettings,
       supplyRequests,
       reviewItems,
     ] = await Promise.all([
@@ -44,7 +43,6 @@ export async function GET() {
       p.activePeriod?.count?.() ?? 0,
       p.phoneMapping?.count?.() ?? 0,
       p.personCode?.count?.() ?? 0,
-      p.chatraceSetting?.count?.() ?? 0,
       p.supplyRequest?.count?.() ?? 0,
       p.reviewItem?.count?.() ?? 0,
     ]);
@@ -66,7 +64,6 @@ export async function GET() {
       activePeriods,
       phoneMappings,
       personCodes,
-      chatraceSettings,
       supplyRequests,
       reviewItems,
     });

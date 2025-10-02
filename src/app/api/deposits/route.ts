@@ -3,6 +3,25 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastErr = e;
+      const msg = String(e?.message || e || "");
+      // Retry on common transient errors
+      if (/ConnectionReset|ECONNRESET|closed by the remote host|TLS handshake|socket|timeout/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 150 + i * 200));
+        continue;
+      }
+      break;
+    }
+  }
+  throw lastErr;
+}
 import { DepositStatus } from "@prisma/client";
 
 export async function POST(req: Request) {
@@ -16,7 +35,7 @@ export async function POST(req: Request) {
 
     const date = new Date().toISOString().slice(0, 10);
 
-    await prisma.$transaction(async (tx) => {
+    await withRetry(() => prisma.$transaction(async (tx) => {
       await tx.attendantDeposit.deleteMany({ where: { date, outletName } });
       const data = (entries || [])
         .map((e) => {
@@ -35,9 +54,8 @@ export async function POST(req: Request) {
           };
         })
         .filter((d) => d.amount > 0 || (d.code && d.code !== ""));
-
       if (data.length) await tx.attendantDeposit.createMany({ data });
-    });
+    }, { timeout: 15000, maxWait: 10000 }));
 
     return NextResponse.json({ ok: true });
   } catch (e) {

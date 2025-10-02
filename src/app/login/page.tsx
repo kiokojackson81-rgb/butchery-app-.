@@ -14,9 +14,7 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deepLink, setDeepLink] = useState<{ waMe: string; ios: string } | null>(null);
-  const [waText, setWaText] = useState<string>("");
-  const [finalized, setFinalized] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string>("");
 
   // Pull WA business phone for the "Open WhatsApp" link
   const waBusiness = useMemo(() => {
@@ -34,11 +32,13 @@ export default function LoginPage() {
     return /iP(ad|hone|od)/i.test(navigator.userAgent);
   };
 
-  const goWhatsApp = (links?: { waMe: string; ios: string }) => {
-    const target = links ? (isIOS() ? links.ios : links.waMe) : undefined;
-    if (!target) return;
-    window.location.assign(target);
-  };
+  function openWhatsAppNoText() {
+    const raw = process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || "";
+    const digits = String(raw).replace(/\D/g, "");
+    if (!digits) return;
+    const url = `https://wa.me/${digits}`;
+    window.location.assign(url);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,40 +49,23 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const r = await fetch("/api/flow/login-link", {
+      const url = new URL(window.location.href);
+      const waParam = url.searchParams.get("wa") || "";
+      // Ask the server to validate, bind, set session, and DM success/fail (no LINK roundtrip required)
+      const r = await fetch("/api/wa/auth/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, wa: waParam || undefined }),
       });
-      const j = await r.json();
-      if (!r.ok || !j?.ok) throw new Error(j?.error || "Login failed");
-      setDeepLink(j.links);
-      setWaText(j.waText);
-      // Attempt to finalize server-side if wa + nonce are present (deep-link roundtrip)
-      const url = new URL(window.location.href);
-      const wa = url.searchParams.get("wa");
-      const nonce = url.searchParams.get("nonce");
-      if (wa && nonce && !finalized) {
-        // Validate code to fetch role/outlet, then finalize WA auth so we can greet in chat immediately
-        const v = await fetch("/api/auth/validate-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
-        const vj = await v.json();
-        if (vj?.ok) {
-          const fin = await fetch("/api/wa/auth/finalize", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phoneE164: wa, nonce, role: vj.role, code: vj.code, outlet: vj.outlet ?? null }),
-          });
-          const fj = await fin.json();
-          if (!fin.ok || !fj?.ok) {
-            console.warn("Finalize failed", fj?.error);
-          } else {
-            setFinalized(true);
-          }
-        }
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j?.ok) {
+        setStatusMsg("✅ Check WhatsApp for a message from BarakaOps.");
+      } else {
+        setStatusMsg("ℹ️ Check WhatsApp: we sent you a login help message.");
       }
-      // Open WhatsApp with prefilled LINK <nonce>
-      goWhatsApp(j.links);
+      // Open chat with no prefilled text
+      openWhatsAppNoText();
     } catch (err: any) {
       setError(err?.message || "Failed");
     } finally {
@@ -158,20 +141,9 @@ export default function LoginPage() {
               </div>
             )}
 
-            {/* Fallback area if redirect was blocked */}
-            {deepLink && (
-              <div className="mt-5 space-y-2">
-                <div className="text-sm text-white/80">If WhatsApp didn’t open:</div>
-                <a
-                  href={isIOS() ? deepLink.ios : deepLink.waMe}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 py-3 font-semibold text-emerald-900 active:scale-[.995]"
-                >
-                  <WhatsAppIcon />
-                  Open WhatsApp
-                </a>
-                <div className="text-xs text-white/70">
-                  We prefilled: <span className="font-mono">{waText}</span>
-                </div>
+            {statusMsg && (
+              <div className="mt-4 rounded-xl bg-emerald-400/15 px-4 py-3 text-sm ring-1 ring-emerald-300/30">
+                {statusMsg}
               </div>
             )}
           </div>

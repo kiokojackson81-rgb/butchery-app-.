@@ -3,8 +3,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { chatraceSendText } from "@/lib/chatrace";
-import { FLAGS } from "@/lib/flags";
 import { sendLowStockAlert } from "@/lib/wa";
 
 const DEFAULT_THRESHOLDS: Record<string, number> = {
@@ -49,15 +47,8 @@ export async function POST(req: Request) {
     const msg = `\u26A0\uFE0F Low Stock @ ${outlet}: ${list}`;
 
     await Promise.all([
-      ...(FLAGS.CHATRACE_ENABLED
-        ? [
-            ...suppliers.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
-            ...supervisors.map((s: any) => chatraceSendText({ to: s.phoneE164, text: msg })),
-          ]
-        : [
-            ...suppliers.map((s: any) => sendLowStockAlert(s.phoneE164, msg)),
-            ...supervisors.map((s: any) => sendLowStockAlert(s.phoneE164, msg)),
-          ]),
+      ...suppliers.map((s: any) => sendLowStockAlert(s.phoneE164, msg)),
+      ...supervisors.map((s: any) => sendLowStockAlert(s.phoneE164, msg)),
     ]);
 
     return NextResponse.json({ ok: true, low });

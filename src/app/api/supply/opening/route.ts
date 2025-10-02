@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { notifySupplyPosted } from "@/server/supply_notify";
 
 export async function POST(req: Request) {
   const { date, outlet, rows } = (await req.json()) as {
@@ -33,6 +34,15 @@ export async function POST(req: Request) {
       });
     }
   });
+
+  // Optional: auto-notify via WhatsApp after supply is posted
+  try {
+    // DB setting overrides env; fall back to env if no setting exists
+    const setting = await (prisma as any).setting.findUnique({ where: { key: "auto_notify_supply" } });
+    const dbEnabled = setting?.value === true || String(setting?.value).toLowerCase() === "true";
+    const envEnabled = String(process.env.WA_NOTIFY_ON_SUPPLY || "").toLowerCase() === "true";
+    if (dbEnabled || envEnabled) await notifySupplyPosted({ outletName: outlet, date });
+  } catch {}
 
   return NextResponse.json({ ok: true });
 }

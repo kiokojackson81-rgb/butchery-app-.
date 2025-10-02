@@ -11,11 +11,11 @@ This project is a Next.js (App Router) app with a Prisma/Postgres backend and Wh
 - Auth/session (attendant): Cookie-based session stored in table `Session` with helper APIs in `src/lib/session.ts`. Admin auth is client-only (sessionStorage flag) via `components/guards/AdminGuard.tsx`.
 - LocalStorage mirroring: `StorageBridge` selectively mirrors local/session storage keys to DB via `/api/state/bulk-get|bulk-set` and table `AppState`. Treat these keys as server-backed.
 - External integrations:
-  - WhatsApp via Chatrace: `src/lib/chatrace.ts` and `src/lib/wa.ts` (env-driven). Server-only usage.
+  - WhatsApp via Meta Graph API: `src/lib/wa.ts` (env-driven). Server-only usage.
   - Safaricom Daraja: `src/lib/daraja.ts`.
 
 ## Data model highlights (Prisma)
-- Core entities: `Outlet`, `Product`, `Attendant`, `Session`, `LoginCode`, `AttendantScope`, `PricebookRow`, `Supply*`, `AttendantClosing/Deposit/Expense`, `ActivePeriod`, `Setting`, `AppState`, `ReviewItem`, `PhoneMapping`, `ChatraceSetting`.
+- Core entities: `Outlet`, `Product`, `Attendant`, `Session`, `LoginCode`, `AttendantScope`, `PricebookRow`, `Supply*`, `AttendantClosing/Deposit/Expense`, `ActivePeriod`, `Setting`, `AppState`, `ReviewItem`, `PhoneMapping`.
 - Roles are enum `PersonRole` (attendant|supervisor|supplier). Deposits track `DepositStatus`.
 - Use `src/lib/prisma.ts` for DB ops; prefer `(prisma as any).model.method(...)` to avoid stale type friction in API routes.
 
@@ -26,7 +26,7 @@ This project is a Next.js (App Router) app with a Prisma/Postgres backend and Wh
 - Sessions: use `createSession/getSession/destroySession` from `src/lib/session.ts`. Cookies set under `bk_sess` with lax/HttpOnly; don’t hand-roll cookie headers.
 - Admin auth: client-side only. Check `sessionStorage.getItem("admin_auth") === "true"`; redirect to `/admin/login` if absent. Use `AdminLogoutButton` to clear only admin flags.
 - StorageBridge: only persist whitelisted keys. Read/write localStorage/sessionStorage normally—bridge will sync via `/api/state/*`. Don’t fetch the same data again if a key already mirrors DB.
-- Env flexibility for WA/Chatrace: prefer `src/lib/wa.ts` or `src/lib/chatrace.ts` and supply envs `CHATRACE_*` rather than hardcoding endpoints.
+- WhatsApp envs: prefer `src/lib/wa.ts` and supply `WHATSAPP_*` rather than hardcoding endpoints.
 - Prisma on Vercel/Edge: all DB code must run on Node runtime; never mark Prisma routes as `edge`.
 
 ## Developer workflows

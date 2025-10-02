@@ -6,7 +6,7 @@ This document inventories the app’s architecture, all user-facing pages, API r
 
 - Framework: Next.js (App Router)
 - Backend: API routes (Node.js runtime) with Prisma/Postgres
-- Integrations: WhatsApp (Graph/Chatrace), Safaricom Daraja C2B
+- Integrations: WhatsApp (Meta Graph API), Safaricom Daraja C2B
 - Auth: Cookie-based attendant sessions; admin gated client-side; WhatsApp chat state machine
 
 ## Layout and Conventions
@@ -66,7 +66,7 @@ Auth and Sessions
 - POST `/api/auth/code/login` — Code-based login (legacy)
 
 WhatsApp (WA)
-- POST `/api/wa/webhook` — WhatsApp inbound webhook (Graph/Chatrace dispatcher)
+- POST `/api/wa/webhook` — WhatsApp inbound webhook (Meta Graph)
 - POST `/api/wa/send` — Send WhatsApp message (server-only)
 - POST `/api/wa/portal-login` — Assist portal login binding via WA
 - POST `/api/wa/auth/finalize` — Finalize link-based login from the web (bind + greet)
@@ -76,9 +76,7 @@ WhatsApp (WA)
 Link-only login flow
 - POST `/api/flow/login-link` — Generate per-phone WA deep link and LINK <nonce> text
 
-Chatrace webhook(s)
-- POST `/api/webhooks/chatrace` — Chatrace webhook
-- POST `/api/chatrace/webhook` — Alternate Chatrace webhook path
+Legacy Chatrace webhook(s) have been removed in favor of Meta Graph-only integration.
 
 Settings and AppState
 - GET/PUT `/api/settings/[key]` — Settings KV (JSON)
@@ -129,14 +127,12 @@ Daraja (M-Pesa C2B)
 
 Admin
 - GET `/api/admin/low-stock-thresholds`
-- GET `/api/admin/chatrace-env`
 - GET `/api/admin/phones`
 - POST `/api/admin/phone`
 - POST `/api/admin/test-wa-template`
 - POST `/api/admin/save-scope-pricebook`
 - POST `/api/admin/scope`
 - POST `/api/admin/bootstrap`
-- GET/POST `/api/admin/chatrace-settings`
 - GET `/api/admin/persistence/health`
 - POST `/api/admin/persistence/patch-auth`
 - POST `/api/admin/outlets/upsert`
@@ -196,13 +192,12 @@ Auth/WA linkage
 - Database/Prisma
   - `DATABASE_URL`, `DATABASE_URL_UNPOOLED`
   - `PRISMA_*` — Engine toggles (implicit via Prisma)
-- WhatsApp/Chatrace
+- WhatsApp
   - `NEXT_PUBLIC_WA_BUSINESS` — Business WA number (public)
   - `NEXT_PUBLIC_WA_PUBLIC_E164` — Public E.164 for wa.me link
-  - `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`
-  - `CHATRACE_ENABLED` — Feature flag
-  - `CHATRACE_API_BASE|CHATRACE_BASE`, `CHATRACE_API_KEY|CHATRACE_API_TOKEN`, `CHATRACE_FROM_PHONE|CHATRACE_SENDER_ID`
+  - `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TOKEN`
   - `WA_DRY_RUN` — Don’t call WA; log instead
+  - `WA_NOTIFY_ON_SUPPLY` — Auto-send a confirmation after supply POST
   - `WA_SESSION_TTL_MIN` — Idle timeout in minutes (default 10)
 - Daraja
   - `DARAJA_BASE_URL`, `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_C2B_SHORTCODE`
@@ -261,7 +256,7 @@ PowerShell examples (Windows)
 npm run typecheck
 
 # Dev server (dry-run for WA)
-$env:WA_DRY_RUN="true"; $env:CHATRACE_ENABLED="false"; npm run dev
+$env:WA_DRY_RUN="true"; npm run dev
 
 # Show codes
 npm run -s show:attendant:codes

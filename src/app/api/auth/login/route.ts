@@ -3,7 +3,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { normalizeCode, canonNum } from "@/lib/codeNormalize";
+import { normalizeCode, canonNum, canonFull } from "@/lib/codeNormalize";
+import { createSession } from "@/lib/session";
+import { serializeRoleCookie } from "@/lib/roleSession";
 
 async function ensureLoginProvision(loginCode: string) {
   const code = normalizeCode(loginCode || "");
@@ -116,16 +118,46 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
     }
 
-    const response = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
-    response.cookies.set("attendant_auth", "1", {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
-    return response;
+    // Create DB-backed session and set bk_sess cookie (attendant)
+    await createSession(att.id);
+
+    // Also set a unified role cookie for convenience
+    const res = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
+    res.headers.append("Set-Cookie", serializeRoleCookie({ role: "attendant", code: row.code, outlet: (att as any)?.outletId || null }));
+    return res;
   } catch (e) {
     console.error(e);
+    return NextResponse.json({ ok: false, error: "SERVER_ERROR" }, { status: 500 });
+  }
+}
+
+export async function PUT(req: Request) {
+  // Unified login for supervisor/supplier via admin_codes Setting
+  try {
+    const { code } = (await req.json().catch(() => ({}))) as { code?: string };
+    const full = canonFull(code || "");
+    const num = canonNum(code || "");
+    if (!full && !num) return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
+
+    const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+    const list: any[] = Array.isArray((row as any)?.value) ? (row as any).value : [];
+
+    const active = list.filter((p: any) => !!p?.active && ["supervisor", "supplier"].includes(String(p?.role || "").toLowerCase()));
+    let found = active.find((p: any) => canonFull(p?.code || "") === full);
+    if (!found && num) {
+      const matches = active.filter((p: any) => canonNum(p?.code || "") === num);
+      if (matches.length === 1) found = matches[0];
+      else if (matches.length > 1) return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
+    }
+    if (!found) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
+
+  const role = String(found.role).toLowerCase() as "supervisor" | "supplier";
+    const outlet = (found as any)?.outlet || null;
+    const res = NextResponse.json({ ok: true, role, code: found.code, outlet });
+  res.headers.set("Set-Cookie", serializeRoleCookie({ role, code: found.code, outlet }));
+    return res;
+  } catch (e) {
+    console.error("unified login error", e);
     return NextResponse.json({ ok: false, error: "SERVER_ERROR" }, { status: 500 });
   }
 }

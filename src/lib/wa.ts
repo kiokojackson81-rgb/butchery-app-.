@@ -1,9 +1,7 @@
 // src/lib/wa.ts
-// WhatsApp Cloud service with feature-flag fallback to legacy Chatrace helpers.
+// WhatsApp Cloud (Meta Graph API) transport with optional dry-run.
 
 import { prisma } from "@/lib/prisma";
-import { FLAGS } from "@/lib/flags";
-import { chatraceSendText, chatraceSendTemplate } from "@/lib/chatrace";
 
 const GRAPH_BASE = "https://graph.facebook.com/v20.0";
 
@@ -30,13 +28,6 @@ export async function sendTemplate(opts: {
     const waMessageId = `DRYRUN-${Date.now()}`;
     await logOutbound({ direction: "out", templateName: opts.template, payload: { request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
-  }
-  if (FLAGS.CHATRACE_ENABLED) {
-    // Legacy path: use existing Chatrace integration
-    const res = await chatraceSendTemplate(opts.to, opts.template, opts.params || []);
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { request: { via: "chatrace", ...opts }, response: res }, waMessageId: (res as any)?.id || null, status: (res as any)?.ok ? "SENT" : "ERROR" });
-    if ((res as any)?.ok) return { ok: true, waMessageId: (res as any)?.id } as const;
-    return { ok: false, error: (res as any)?.error || "Chatrace send failed" } as const;
   }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
@@ -87,12 +78,6 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
     await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", text }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
-  if (FLAGS.CHATRACE_ENABLED) {
-    const res = await chatraceSendText({ to, text });
-    await logOutbound({ direction: "out", templateName: null, payload: { via: "chatrace", text, response: res }, waMessageId: (res as any)?.id || null, status: (res as any)?.ok ? "SENT" : "ERROR" });
-    if ((res as any)?.ok) return { ok: true, waMessageId: (res as any)?.id } as const;
-    return { ok: false, error: (res as any)?.error || "Chatrace send failed" } as const;
-  }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
@@ -126,13 +111,6 @@ export async function sendInteractive(body: any): Promise<SendResult> {
     const waMessageId = `DRYRUN-${Date.now()}`;
     await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", body }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
-  }
-  if (FLAGS.CHATRACE_ENABLED) {
-    // No interactive support on legacy path; fall back to text if present
-    const to = body?.to ? String(body.to) : "";
-    const text = body?.text?.body || "";
-    if (to && text) return sendText(to, text);
-    return { ok: false, error: "Interactive not supported in legacy mode" } as const;
   }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");

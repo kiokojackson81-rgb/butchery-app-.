@@ -79,5 +79,5 @@ describe("DB-first persistence smoke", () => {
     try {
       await j(U("/api/attendant/closing"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet, date, closingMap: {}, wasteMap: {} }) });
     } catch {}
-  });
+  }, 60000);
 });
