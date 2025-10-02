@@ -339,28 +339,67 @@ export default function AdminPage() {
   const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
   const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
   const saveCodesNow    = async () => {
+    const payload = codes
+      .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
+      .map((c) => ({
+        role: c.role,
+        code: c.code.trim(),
+        name: c.name,
+        active: c.active,
+      }));
+    if (!payload.length) {
+      alert('Add at least one code before saving.');
+      return;
+    }
+
     saveLS(K_CODES, codes);
-    try { await pushLocalStorageKeyToDB(K_CODES as any); } catch {}
+
     try {
-      const payload = codes
-        .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
-        .map((c) => ({
-          role: c.role,
-          code: c.code.trim(),
-          name: c.name,
-          active: c.active,
-        }));
-      if (!payload.length) {
-        alert('Add at least one code before saving.');
-        return;
-      }
       const res = await fetch('/api/admin/attendants/upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         cache: 'no-store',
         body: JSON.stringify({ people: payload }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      const textBody = await res.text();
+      let json: any = null;
+      try { json = JSON.parse(textBody); } catch {}
+      if (!res.ok || !json?.ok) {
+        const message = json?.error || textBody || 'Failed to save codes';
+        throw new Error(message);
+      }
+
+      try { await hydrateLocalStorageFromDB([K_CODES as any]); } catch {}
+      const refreshed = parseLS<PersonCode[]>(K_CODES) ?? payload;
+
+      const byNorm = new Map<string, PersonCode>();
+      codes.forEach((item) => {
+        const key = normCode(item.code);
+        if (key) byNorm.set(key, item);
+      });
+
+      const normalized = refreshed.map((row: any) => {
+        const key = normCode(row?.code || '');
+        const prev = key ? byNorm.get(key) : undefined;
+        return {
+          id: prev?.id ?? rid(),
+          name: typeof row?.name === 'string' ? row.name : '',
+          code: typeof row?.code === 'string' ? row.code : '',
+          role: row?.role === 'supervisor' || row?.role === 'supplier' ? row.role : 'attendant',
+          active: row?.active === false ? false : true,
+        } as PersonCode;
+      });
+
+      setCodes(normalized);
+      setScope((prev) => {
+        const allow = new Set(normalized.map((c) => normCode(c.code)));
+        const next: ScopeMap = {};
+        Object.entries(prev).forEach(([key, value]) => {
+          if (allow.has(key)) next[key] = value;
+        });
+        return next;
+      });
+      saveLS(K_CODES, normalized);
       alert('People & Codes saved ✅');
     } catch (err) {
       console.error('save codes error', err);

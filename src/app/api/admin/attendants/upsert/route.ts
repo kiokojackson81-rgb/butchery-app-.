@@ -178,17 +178,15 @@ export async function POST(req: Request) {
       return base;
     });
 
-    const previousSetting = await (prisma as any).setting.findUnique({
-      where: { key: "admin_codes" },
-      select: { value: true },
+    const existingRows = await (prisma as any).personCode.findMany({
+      select: { id: true, code: true, role: true },
     });
-
-    const previousEntries = Array.isArray(previousSetting?.value) ? previousSetting.value : [];
-    const previousByCode = new Map<string, PersonRole>();
-    for (const row of previousEntries) {
-      const canonical = normalizeCode(row?.code ?? row?.loginCode ?? "");
+    const previousByCode = new Map<string, { id: string; role: PersonRole }>();
+    for (const row of existingRows) {
+      const canonical = normalizeCode((row as any)?.code ?? "");
       if (!canonical) continue;
-      previousByCode.set(canonical, asPersonRole(row?.role));
+      const role = asPersonRole((row as any)?.role);
+      previousByCode.set(canonical, { id: (row as any).id, role });
     }
 
     let count = 0;
@@ -196,12 +194,20 @@ export async function POST(req: Request) {
       const entry = cleanByCode.get(code)!;
       await ensureNoDigitCollision(entry.rawCode);
 
+      const existing = previousByCode.get(code);
+      if (existing) previousByCode.delete(code);
+
       try {
-        await (prisma as any).personCode.upsert({
-          where: { code },
-          update: { name: entry.name, role: entry.role, active: entry.active },
-          create: { code, name: entry.name, role: entry.role, active: entry.active },
-        });
+        if (existing) {
+          await (prisma as any).personCode.update({
+            where: { id: existing.id },
+            data: { code, name: entry.name, role: entry.role, active: entry.active },
+          });
+        } else {
+          await (prisma as any).personCode.create({
+            data: { code, name: entry.name, role: entry.role, active: entry.active },
+          });
+        }
       } catch {}
 
       if (entry.role === "attendant") {
@@ -270,9 +276,9 @@ export async function POST(req: Request) {
     }
 
     const toDelete: Array<{ canonical: string; role: PersonRole }> = [];
-    for (const [code, role] of previousByCode.entries()) {
-      if (!cleanByCode.has(code)) {
-        toDelete.push({ canonical: code, role });
+    for (const [canonical, meta] of previousByCode.entries()) {
+      if (!cleanByCode.has(canonical)) {
+        toDelete.push({ canonical, role: meta.role });
       }
     }
 
