@@ -1,0 +1,39 @@
+name: Live WA smokes
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Base URL to test against
+        required: true
+        default: https://barakafresh.com
+      attendant_code:
+        description: Attendant code to use (active)
+        required: true
+        default: MutiaA
+      test_wa_e164:
+        description: Optional +E164 phone to verify menu send
+        required: false
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Run WA login smokes
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url }}
+          SMOKE_ATTENDANT_CODE: ${{ github.event.inputs.attendant_code }}
+          TEST_WA_E164: ${{ github.event.inputs.test_wa_e164 }}
+        run: npx vitest run tests/login_whatsapp.smoke.spec.ts tests/wa_menu_after_login.smoke.spec.ts --reporter basic --passWithNoTests
