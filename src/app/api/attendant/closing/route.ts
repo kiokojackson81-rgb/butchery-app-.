@@ -76,9 +76,9 @@ export async function POST(req: Request) {
   }, { timeout: 15000, maxWait: 10000 }));
 
     // Read back rows to compute actual saved maps and counts
-    const rows = (await withRetry(
+    const rows: ClosingRow[] = await withRetry<ClosingRow[]>(
       () => (prisma as any).attendantClosing.findMany({ where: { date: day, outletName } }) as Promise<ClosingRow[]>
-    )) as unknown as ClosingRow[];
+    );
     const closingMapOut: Record<string, number> = {};
     const wasteMapOut: Record<string, number> = {};
     for (const r of rows) {
@@ -91,15 +91,15 @@ export async function POST(req: Request) {
     // Try to notify the submitting attendant if we can resolve their phone.
     try {
       // Best-effort: notify all mapped phones for attendants at this outlet.
-      const maps = (await withRetry(
+      const maps: PhoneMap[] = await withRetry<PhoneMap[]>(
         () => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }) as Promise<PhoneMap[]>
-      )) as unknown as PhoneMap[];
+      );
       const codes = maps.map((m) => m.code).filter(Boolean) as string[];
-      const attendants = (codes.length
-        ? await withRetry(
+      const attendants: AttendantRow[] = codes.length
+        ? await withRetry<AttendantRow[]>(
             () => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }) as Promise<AttendantRow[]>
           )
-        : []) as unknown as AttendantRow[];
+        : [];
       const nameByCode = new Map<string, string>();
       for (const a of attendants) {
         if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);

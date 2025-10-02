@@ -180,6 +180,21 @@ export default function AdminPage() {
     }
   }, [normalizeOutletList]);
 
+  const refreshScopeFromServer = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/assignments/list", { cache: "no-store" });
+      if (!res.ok) return;
+      const j = await res.json().catch(() => null as any);
+      const map = (j && typeof j === "object" && j.scope && typeof j.scope === "object") ? (j.scope as ScopeMap) : {};
+      setScope(map);
+      saveLS(K_SCOPE, map);
+      return map;
+    } catch {
+      // best-effort
+      return null;
+    }
+  }, []);
+
   const payload = useMemo(
     () => JSON.stringify({ outlets, products, expenses, codes, scope, pricebook }, null, 2),
     [outlets, products, expenses, codes, scope, pricebook]
@@ -229,6 +244,9 @@ export default function AdminPage() {
         setHydrated(true); // mark as loaded
         try {
           await refreshOutletsFromServer();
+        } catch {}
+        try {
+          await refreshScopeFromServer();
         } catch {}
       }
     })();
@@ -400,6 +418,7 @@ export default function AdminPage() {
         return next;
       });
       saveLS(K_CODES, normalized);
+      try { await refreshScopeFromServer(); } catch {}
       alert('People & Codes saved ✅');
     } catch (err) {
       console.error('save codes error', err);
@@ -426,6 +445,7 @@ export default function AdminPage() {
     // 2) Write-through to server AttendantAssignment
     try {
       const r = await pushAssignmentsToDB(scope);
+      try { await refreshScopeFromServer(); } catch {}
       alert(`Assignments saved to server ✅ (rows: ${r.count})`);
     } catch {
       alert("Saved locally, but failed to sync assignments to server.");

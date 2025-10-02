@@ -1,7 +1,12 @@
 name: Live Smokes (Production)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      attendantCode:
+        description: "Attendant login code to use (optional, falls back to secret or default)"
+        required: false
+        type: string
 
 jobs:
   login-page-live:
@@ -22,6 +27,16 @@ jobs:
 
       - name: Set BASE_URL default
         run: echo "BASE_URL=https://barakafresh.com" >> $GITHUB_ENV
+
+      - name: Set attendant code (optional)
+        env:
+          SMOKE_CODE_SECRET: ${{ secrets.SMOKE_ATTENDANT_CODE }}
+        run: |
+          if [ -n "${{ github.event.inputs.attendantCode }}" ]; then
+            echo "SMOKE_ATTENDANT_CODE=${{ github.event.inputs.attendantCode }}" >> $GITHUB_ENV
+          elif [ -n "$SMOKE_CODE_SECRET" ]; then
+            echo "SMOKE_ATTENDANT_CODE=$SMOKE_CODE_SECRET" >> $GITHUB_ENV
+          fi
 
       - name: Run login page live smoke
         run: npx vitest run tests/login_page_live.smoke.spec.ts --reporter=dot
@@ -45,6 +60,16 @@ jobs:
 
       - name: Set BASE_URL default
         run: echo "BASE_URL=https://barakafresh.com" >> $GITHUB_ENV
+
+      - name: Set attendant code (optional)
+        env:
+          SMOKE_CODE_SECRET: ${{ secrets.SMOKE_ATTENDANT_CODE }}
+        run: |
+          if [ -n "${{ github.event.inputs.attendantCode }}" ]; then
+            echo "SMOKE_ATTENDANT_CODE=${{ github.event.inputs.attendantCode }}" >> $GITHUB_ENV
+          elif [ -n "$SMOKE_CODE_SECRET" ]; then
+            echo "SMOKE_ATTENDANT_CODE=$SMOKE_CODE_SECRET" >> $GITHUB_ENV
+          fi
 
       - name: Run full E2E live smoke
         run: npx vitest run tests/e2e_live.smoke.spec.ts --reporter=dot

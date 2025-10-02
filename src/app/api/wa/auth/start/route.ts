@@ -84,19 +84,24 @@ async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string
 export async function POST(req: Request) {
   try {
     const { code, wa, nonce: n0 } = (await req.json().catch(() => ({}))) as { code?: string; wa?: string; nonce?: string };
-    const phoneE164 = normalizeToPlusE164(wa || "");
-    if (!phoneE164 || !/^\+\d{10,15}$/.test(phoneE164)) {
-      return NextResponse.json({ ok: false, error: "wa-required" }, { status: 400 });
-    }
+    const phoneE164Maybe = normalizeToPlusE164(wa || "");
+    const hasPhone = !!(phoneE164Maybe && /^\+\d{10,15}$/.test(phoneE164Maybe));
+    const phoneE164 = hasPhone ? phoneE164Maybe : undefined;
     const nonce = n0 || crypto.randomUUID();
 
     const match = await resolveCode(code || "");
     if (!match.ok) {
-      if (!(await waLogHasNonce(phoneE164, nonce))) {
-        await sendLoginFailDM({ to: phoneE164, reason: match.reason, nonce });
+      const res = NextResponse.json({ ok: true, reason: match.reason, nonce, status: "sent" });
+      if (hasPhone && phoneE164) {
+        if (!(await waLogHasNonce(phoneE164, nonce))) {
+          await sendLoginFailDM({ to: phoneE164, reason: match.reason, nonce });
+        }
+        // cache phone for 10 minutes
+        const graph = toGraphPhone(phoneE164);
+        res.cookies.set("wa_click_phone", phoneE164, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
+        res.cookies.set("wa_click_graph", graph, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
       }
-      // Always respond ok; the page will just say check WhatsApp
-      return NextResponse.json({ ok: true, reason: match.reason, nonce, status: "sent" });
+      return res;
     }
 
     const role = match.role;
@@ -104,25 +109,36 @@ export async function POST(req: Request) {
     const outlet = match.outlet || null;
     const name = match.name || codeFull.toUpperCase();
 
-    await (prisma as any).phoneMapping.upsert({
-      where: { code: codeFull },
-      update: { role, phoneE164, outlet },
-      create: { code: codeFull, role, phoneE164, outlet },
-    });
+    if (hasPhone && phoneE164) {
+      await (prisma as any).phoneMapping.upsert({
+        where: { code: codeFull },
+        update: { role, phoneE164, outlet },
+        create: { code: codeFull, role, phoneE164, outlet },
+      });
+    }
 
     const state = role === "attendant" ? "MENU" : "HOME";
     const cursor: any = { date: new Date().toISOString().slice(0, 10) };
-    await (prisma as any).waSession.upsert({
-      where: { phoneE164 },
-      update: { role, code: codeFull, outlet, state, cursor },
-      create: { phoneE164, role, code: codeFull, outlet, state, cursor },
-    });
-
-    if (!(await waLogHasNonce(phoneE164, nonce))) {
-      await sendLoginSuccessDM({ to: phoneE164, name, role, outlet, products: match.products || [], nonce });
+    if (hasPhone && phoneE164) {
+      await (prisma as any).waSession.upsert({
+        where: { phoneE164 },
+        update: { role, code: codeFull, outlet, state, cursor },
+        create: { phoneE164, role, code: codeFull, outlet, state, cursor },
+      });
     }
 
-    return NextResponse.json({ ok: true, nonce, status: "sent" });
+    if (hasPhone && phoneE164) {
+      if (!(await waLogHasNonce(phoneE164, nonce))) {
+        await sendLoginSuccessDM({ to: phoneE164, name, role, outlet, products: match.products || [], nonce });
+      }
+    }
+    const res = NextResponse.json({ ok: true, nonce, status: "sent" });
+    if (hasPhone && phoneE164) {
+      const graph = toGraphPhone(phoneE164);
+      res.cookies.set("wa_click_phone", phoneE164, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
+      res.cookies.set("wa_click_graph", graph, { httpOnly: true, sameSite: "lax", maxAge: 600, path: "/" });
+    }
+    return res;
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
   }

@@ -17,7 +17,8 @@ async function j(url: string, init?: RequestInit) {
 }
 
 describe("Live login page API flow", () => {
-  const code = process.env.SMOKE_ATTENDANT_CODE || "BR1234";
+  // Use a known valid attendant code by default; allow CI to override via SMOKE_ATTENDANT_CODE
+  const code = process.env.SMOKE_ATTENDANT_CODE || "MutiaA";
   const outlet = `VT_${Math.random().toString(36).slice(2,7)}`;
   const date = ymd();
 
