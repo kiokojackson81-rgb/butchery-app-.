@@ -188,19 +188,6 @@ export default function AttendantDashboardPage() {
       } catch { setOpeningRowsRaw([]); }
     })();
 
-  const byItem: Record<ItemKey, number> = {} as any;
-    (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
-      const key = r.itemKey as ItemKey;
-      byItem[key] = (byItem[key] || 0) + Number(r.qty || 0);
-    });
-    const built: Row[] = (Object.keys(byItem) as ItemKey[])
-      .filter(k => !!catalog[k])
-      .map(k => {
-        const key = k as ItemKey; const prod = catalog[key];
-        return { key, name: prod?.name || key.toUpperCase(), unit: prod?.unit || "kg", opening: byItem[key] || 0, closing: "", waste: "" };
-      });
-    setRows(built);
-
     // deposits from DB (no localStorage fallback)
     (async () => {
       try {
@@ -234,6 +221,31 @@ export default function AttendantDashboardPage() {
     refreshTill(outlet).catch(()=>{});
     setSubmitted(false);
   }, [dateStr, outlet, catalog]);
+
+  // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
+  useEffect(() => {
+    if (!outlet) return;
+    const byItem: Record<ItemKey, number> = {} as any;
+    (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
+      const key = r.itemKey as ItemKey;
+      byItem[key] = (byItem[key] || 0) + Number(r.qty || 0);
+    });
+    const built: Row[] = (Object.keys(byItem) as ItemKey[])
+      .filter((k) => !!catalog[k])
+      .map((k) => {
+        const key = k as ItemKey;
+        const prod = catalog[key];
+        return {
+          key,
+          name: prod?.name || key.toUpperCase(),
+          unit: prod?.unit || "kg",
+          opening: byItem[key] || 0,
+          closing: "",
+          waste: "",
+        };
+      });
+    setRows(built);
+  }, [openingRowsRaw, catalog, outlet]);
 
   /** ===== Client-side expected totals (unchanged) ===== */
   const sellPrice = (k: ItemKey) => Number(catalog[k]?.sellPrice || 0);
