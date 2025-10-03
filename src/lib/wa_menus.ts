@@ -28,12 +28,12 @@ export async function sendSupplierMenu(to: string) {
     type: "interactive",
     interactive: {
       type: "button",
-      body: { text: "Supplier — choose an action" },
+      body: { text: "BarakaOps — Supplier\nPick an action:" },
       action: {
         buttons: [
-          { type: "reply", reply: { id: "SPL_DELIVER", title: "Deliver" } },
-          { type: "reply", reply: { id: "SPL_TXNS", title: "TXNS" } },
-          { type: "reply", reply: { id: "SPL_LOGOUT", title: "Logout" } },
+          { type: "reply", reply: { id: "SPL_DELIVER", title: "Submit Delivery" } },
+          { type: "reply", reply: { id: "SPL_TRANSFER", title: "Record Transfer" } },
+          { type: "reply", reply: { id: "SPL_RECENT", title: "Recent Deliveries" } },
         ],
       },
     },

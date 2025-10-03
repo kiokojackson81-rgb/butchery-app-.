@@ -185,7 +185,9 @@ export function menuMain(to: string, outletName?: string) {
         rows: [
           { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: "Enter closing & waste" },
           { id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" },
-          { id: "MENU_TXNS", title: "View last 10 transactions", description: "Recent deposits" },
+          { id: "MENU_TXNS", title: "View till payments (10)", description: "Recent deposits" },
+          { id: "MENU_SUPPLY", title: "View today’s supply", description: "Opening stock by item" },
+          { id: "MENU_SUMMARY", title: "View summary", description: "Expected deposit & totals" },
         ],
       },
     ],

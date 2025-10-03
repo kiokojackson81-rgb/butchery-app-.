@@ -21,12 +21,14 @@ import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 import { handleSupplyDispute } from "@/server/supply_notify";
+// (sendText) already imported; (prisma) already imported at top
 
 type Cursor = {
   date: string;
   rows: Array<{ key: string; name: string; closing: number; waste: number }>;
   currentItem?: { key: string; name: string; closing?: number; waste?: number };
   expenseName?: string;
+  inactiveKeys?: string[]; // once submitted, consider item done for this session
 };
 
 type SessionPatch = Partial<Cursor & { state: string; role?: string; code?: string; outlet?: string }>;
@@ -66,6 +68,12 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function prevDateISO(d: string) {
+  const dt = new Date((d || today()) + "T00:00:00.000Z");
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
+}
+
 function inactiveExpired(updatedAt: Date) {
   return Date.now() - new Date(updatedAt).getTime() > 30 * 60 * 1000;
 }
@@ -86,6 +94,20 @@ function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number
 
 function looksLikeCode(t: string) {
   return /^[A-Za-z0-9]{3,10}$/.test(String(t || "").trim());
+}
+
+async function notifySupAdm(message: string) {
+  try {
+    const [sup, adm] = await Promise.all([
+      (prisma as any).phoneMapping.findMany({ where: { role: "supervisor", phoneE164: { not: null } }, select: { phoneE164: true } }),
+      (prisma as any).phoneMapping.findMany({ where: { role: "admin", phoneE164: { not: null } }, select: { phoneE164: true } }),
+    ]);
+    const list = [...sup, ...adm].map((r: any) => r.phoneE164).filter(Boolean) as string[];
+    if (!list.length) return;
+    await Promise.allSettled(list.map((to) => sendText(to, message)));
+  } catch (e) {
+    console.warn("notifySupAdm failed", e);
+  }
 }
 
 async function promptLogin(phone: string) {
@@ -349,6 +371,8 @@ export async function handleInboundText(phone: string, text: string) {
       return;
     }
     await (prisma as any).attendantExpense.create({ data: { date: cur.date, outletName: s.outlet, name: cur.expenseName || "Expense", amount } });
+    // Notify supervisors/admins
+    await notifySupAdm(`Expense recorded at ${s.outlet} (${cur.date}): ${cur.expenseName || "Expense"}  KSh ${amount}`);
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     await sendInteractive(expenseFollowupButtons(phone));
     return;
@@ -362,8 +386,25 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "No outlet bound. Ask supervisor.");
         return;
       }
-      await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
+  await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
+  await notifySupAdm(`Deposit recorded at ${s.outlet} (${cur.date}): KSh ${parsed.amount} (ref ${parsed.ref}).`);
       await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`);
+      await sendInteractive({
+        messaging_product: "whatsapp",
+        to: phone.replace(/^\+/, ""),
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Anything else?" },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "MENU_EXPENSE", title: "Add expense" } },
+              { type: "reply", reply: { id: "MENU_SUMMARY", title: "View summary" } },
+              { type: "reply", reply: { id: "MENU_TXNS", title: "View TXNS" } },
+            ],
+          },
+        },
+      } as any);
       return;
     }
     await sendText(phone, "Paste the original M-Pesa SMS (no edits).");
@@ -408,8 +449,47 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   }
   if (id === "MENU_TXNS" || id === "ATD_TXNS") {
     const rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
-    if (!rows.length) await sendText(phone, "No deposits yet today.");
+    if (!rows.length) await sendText(phone, "No till payments recorded yet today.");
     else await sendText(phone, rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"));
+    return;
+  }
+
+  if (id === "MENU_SUPPLY") {
+    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor."); return; }
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { itemKey: "asc" } });
+    if (!rows.length) {
+      // Fall back to yesterday's closing as opening baseline
+      const y = prevDateISO(cur.date);
+      const prev = await (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y }, orderBy: { itemKey: "asc" } });
+      if (!prev.length) { await sendText(phone, "No opening stock found yet."); return; }
+      const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r:any)=>r.itemKey) } } });
+      const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
+      const text = prev.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`).join("\n");
+      await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`);
+      return;
+    } else {
+      const plist = await (prisma as any).product.findMany({ where: { key: { in: rows.map((r:any)=>r.itemKey) } } });
+      const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
+      const text = rows.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.qty} ${r.unit}`).join("\n");
+      await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`);
+    }
+    return;
+  }
+
+  if (id === "MENU_SUMMARY") {
+    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor."); return; }
+    try {
+      const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+      const lines = [
+        `Summary for ${s.outlet} (${cur.date})`,
+        `Expected sales: Ksh ${totals.expectedSales}`,
+        `Expenses: Ksh ${totals.expenses}`,
+        `Expected deposit: Ksh ${totals.expectedDeposit}`,
+      ];
+      await sendText(phone, lines.join("\n"));
+    } catch (e) {
+      await sendText(phone, "Summary is unavailable right now. Try again later.");
+    }
     return;
   }
 
@@ -458,12 +538,29 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       outletName: s.outlet,
       rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
     });
-    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
-    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    await sendText(
-      phone,
-      `Thanks, ${s.code || "Attendant"} (${s.outlet}).\nExpected deposit today: Ksh ${totals.expectedDeposit}.\nPaste your M-Pesa message here when paid.`
-    );
+  const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+  await notifySupAdm(`Closing submitted for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
+    // Mark submitted items as inactive for this session
+    const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur, inactiveKeys: newInactive });
+    await sendText(phone, `Thanks, ${s.code || "Attendant"} (${s.outlet}).`);
+    await sendText(phone, `Expected deposit today: Ksh ${totals.expectedDeposit}. Paste your M-Pesa message here when paid.`);
+    await sendInteractive({
+      messaging_product: "whatsapp",
+      to: phone.replace(/^\+/, ""),
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: "Next action?" },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: "MENU_EXPENSE", title: "Add expense" } },
+            { type: "reply", reply: { id: "MENU_TXNS", title: "View TXNS" } },
+            { type: "reply", reply: { id: "MENU_SUMMARY", title: "View summary" } },
+          ],
+        },
+      },
+    } as any);
     return;
   }
   if (id === "SUMMARY_MODIFY") {
@@ -493,7 +590,8 @@ export async function handleInteractiveReply(phone: string, payload: any) {
 
 async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
   const prods = await getAssignedProducts(s.code || "");
-  const remaining = prods.filter((p) => !cur.rows.some((r) => r.key === p.key));
+  const inactive = new Set(cur.inactiveKeys || []);
+  const remaining = prods.filter((p) => !inactive.has(p.key) && !cur.rows.some((r) => r.key === p.key));
   if (!remaining.length) {
     await saveSession(phone, { state: "SUMMARY", ...cur });
     await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
