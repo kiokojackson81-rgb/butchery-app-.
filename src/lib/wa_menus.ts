@@ -1,24 +1,11 @@
 // lib/wa_menus.ts
 import { sendInteractive } from "@/lib/wa";
+import { menuMain } from "@/lib/wa_messages";
 
 export async function sendAttendantMenu(to: string, outlet: string) {
-  // Compact 3-button menu (WhatsApp allows max 3 buttons)
-  await sendInteractive({
-    messaging_product: "whatsapp",
-    to,
-    type: "interactive",
-    interactive: {
-      type: "button",
-      body: { text: `Managing ${outlet}. What would you like to do?` },
-      action: {
-        buttons: [
-          { type: "reply", reply: { id: "ATD_CLOSING", title: "Closing" } },
-          { type: "reply", reply: { id: "ATD_DEPOSIT", title: "Record Deposit" } },
-          { type: "reply", reply: { id: "MENU", title: "Menu" } },
-        ],
-      },
-    },
-  });
+  // Use the full list menu for a single, unified attendant menu
+  const payload = menuMain(to, outlet);
+  await sendInteractive(payload);
 }
 
 export async function sendSupplierMenu(to: string) {
