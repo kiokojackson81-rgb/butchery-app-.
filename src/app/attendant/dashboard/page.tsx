@@ -31,7 +31,10 @@ const PRICEBOOK_KEY = "admin_pricebook";
 
 /** ========= Helpers ========= */
 function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : v ? Number(v) : 0; }
-function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+function fmt(n: number | undefined | null) {
+  const num = typeof n === "number" && isFinite(n) ? n : 0;
+  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 function today() { return new Date().toISOString().split("T")[0]; }
 function id() { return Math.random().toString(36).slice(2); }
 // Note: We deliberately avoid reading non-bridged keys from localStorage.
@@ -354,17 +357,18 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
-      const h = await getJSON<{ ok: boolean; totals: { todayTillSales: number; verifiedDeposits: number; netTill: number; expenses: number; weightSales: number; todayTotalSales: number; amountToDeposit: number } }>(
+      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number } }>(
         `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`
       );
+      if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
       setKpi({
-        weightSales: h.totals.weightSales,
-        expenses: h.totals.expenses,
-        todayTotalSales: h.totals.todayTotalSales,
-        tillSalesNet: h.totals.netTill,
-        tillSalesGross: h.totals.todayTillSales,
-        verifiedDeposits: h.totals.verifiedDeposits,
-        amountToDeposit: h.totals.amountToDeposit,
+        weightSales: Number(h.totals.weightSales ?? 0),
+        expenses: Number(h.totals.expenses ?? 0),
+        todayTotalSales: Number(h.totals.todayTotalSales ?? 0),
+        tillSalesNet: Number(h.totals.netTill ?? 0),
+        tillSalesGross: Number(h.totals.todayTillSales ?? 0),
+        verifiedDeposits: Number(h.totals.verifiedDeposits ?? 0),
+        amountToDeposit: Number(h.totals.amountToDeposit ?? 0),
       });
     } catch {
       const todayTotal = computed.expectedKsh - computed.expensesKsh;
