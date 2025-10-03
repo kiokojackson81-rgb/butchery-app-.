@@ -13,7 +13,7 @@ export async function sendAttendantMenu(to: string, outlet: string) {
       action: {
         buttons: [
           { type: "reply", reply: { id: "ATD_CLOSING", title: "Closing" } },
-          { type: "reply", reply: { id: "ATD_EXPENSE", title: "Expense" } },
+          { type: "reply", reply: { id: "ATD_DEPOSIT", title: "Record Deposit" } },
           { type: "reply", reply: { id: "MENU", title: "Menu" } },
         ],
       },
@@ -27,13 +27,21 @@ export async function sendSupplierMenu(to: string) {
     to,
     type: "interactive",
     interactive: {
-      type: "button",
-      body: { text: "BarakaOps — Supplier\nPick an action:" },
+      type: "list",
+      header: { type: "text", text: "BarakaOps — Supplier" },
+      body: { text: "Pick an action:" },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "SPL_DELIVER", title: "Submit Delivery" } },
-          { type: "reply", reply: { id: "SPL_TRANSFER", title: "Record Transfer" } },
-          { type: "reply", reply: { id: "SPL_RECENT", title: "Recent Deliveries" } },
+        button: "Choose",
+        sections: [
+          {
+            title: "Menu",
+            rows: [
+              { id: "SPL_DELIVER", title: "Submit Supply", description: "Enter opening items" },
+              { id: "SPL_TRANSFER", title: "Record Transfer", description: "Move stock between outlets" },
+              { id: "SPL_RECENT", title: "Recent Supplies", description: "Today’s entries" },
+              { id: "SPL_DISPUTES", title: "View Disputes", description: "Open disputes" },
+            ],
+          },
         ],
       },
     },

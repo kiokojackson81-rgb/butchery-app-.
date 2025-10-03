@@ -12,6 +12,7 @@ import {
   buildDepositModerationButtons,
   buildSummaryChoiceButtons,
 } from "@/server/wa/wa_messages";
+import { notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor.notifications";
 
 export type SupervisorState =
   | "SUP_MENU"
@@ -191,6 +192,13 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
   if (replyId.startsWith("SUP_D_VALID:")) {
     const id = replyId.split(":")[1]!;
     await (prisma as any).attendantDeposit.update({ where: { id }, data: { status: "VALID" } });
+    try {
+      const dep = await (prisma as any).attendantDeposit.findUnique({ where: { id } });
+      if (dep) {
+        await notifyAttendants(dep.outletName, `Deposit VALID: KSh ${dep.amount} (${dep.note || "ref"})`);
+        await notifySupplier(dep.outletName, `Deposit VALID for ${dep.outletName}: KSh ${dep.amount}`);
+      }
+    } catch {}
     await sendText(gp, "Marked VALID ✅");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
     return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
@@ -228,6 +236,12 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
     const dep = await (prisma as any).attendantDeposit.findUnique({ where: { id: cur.depositId } });
     const newNote = `${dep?.note || ""}${reason ? ` | invalid: ${reason}` : ""}`.slice(0, 200);
     await (prisma as any).attendantDeposit.update({ where: { id: cur.depositId }, data: { status: "INVALID", note: newNote } });
+    try {
+      if (dep) {
+        await notifyAttendants(dep.outletName, `Deposit INVALID: KSh ${dep.amount} (${dep.note || "ref"}). Reason: ${reason}`);
+        await notifySupplier(dep.outletName, `Deposit INVALID for ${dep.outletName}: KSh ${dep.amount}. Reason: ${reason}`);
+      }
+    } catch {}
     await sendText(gp, "Marked INVALID ❌");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, depositId: undefined } });
     return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });

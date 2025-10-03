@@ -3,13 +3,21 @@
 
 export function buildSupplierMenu() {
   return {
-    type: "button",
-    body: { text: `BarakaOps — Supplier\nPick an action:` },
+    type: "list",
+    header: { type: "text", text: "BarakaOps — Supplier" },
+    body: { text: "Pick an action:" },
     action: {
-      buttons: [
-        { type: "reply", reply: { id: "SPL_DELIVER", title: "Submit Delivery" } },
-        { type: "reply", reply: { id: "SPL_TRANSFER", title: "Record Transfer" } },
-        { type: "reply", reply: { id: "SPL_RECENT", title: "Recent Deliveries" } },
+      button: "Choose",
+      sections: [
+        {
+          title: "Menu",
+          rows: [
+            { id: "SPL_DELIVER", title: "Submit Supply", description: "Enter opening items" },
+            { id: "SPL_TRANSFER", title: "Record Transfer", description: "Move stock between outlets" },
+            { id: "SPL_RECENT", title: "Recent Supplies", description: "Today’s entries" },
+            { id: "SPL_DISPUTES", title: "View Disputes", description: "Open disputes" },
+          ],
+        },
       ],
     },
   } as const;
@@ -95,6 +103,7 @@ export function buildReviewFilterButtons() {
         { type: "reply", reply: { id: "SUP_FILTER_ALL", title: "All" } },
         { type: "reply", reply: { id: "SUP_FILTER_WASTE", title: "Waste" } },
         { type: "reply", reply: { id: "SUP_FILTER_EXPENSE", title: "Expense" } },
+        { type: "reply", reply: { id: "SUP_FILTER_DISPUTE", title: "Disputes" } },
       ],
     },
   } as const;

@@ -124,6 +124,18 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       await sendText(gp, lines);
       return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
     }
+    case "SPL_DISPUTES": {
+      // show recent disputes (today or last 3 days) for visibility
+      const since = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+      const items = await (prisma as any).reviewItem.findMany({ where: { type: { in: ["dispute", "supply_dispute"] as any }, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10 });
+      if (!items.length) {
+        await sendText(gp, "No open disputes.");
+      } else {
+        const lines = items.map((i: any) => `• ${i.outlet} — ${new Date(i.date).toISOString().slice(0,10)} — ${(i.payload as any)?.reason || (i.payload as any)?.summary || ''}`.slice(0, 300)).join("\n");
+        await sendText(gp, lines);
+      }
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+    }
 
     case "SPL_BACK":
       return supplierGoBack(sess, gp);

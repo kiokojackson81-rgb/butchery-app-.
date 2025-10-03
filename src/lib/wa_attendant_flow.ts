@@ -453,6 +453,11 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await sendInteractive(listProducts(phone, prods, s.outlet));
     return;
   }
+  if (id === "ATD_DEPOSIT" || id === "MENU_DEPOSIT") {
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits). We will extract the amount and reference.");
+    return;
+  }
   if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
     await sendInteractive(expenseNamePrompt(phone));
