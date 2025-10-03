@@ -269,6 +269,40 @@ export default function AttendantDashboardPage() {
     })();
   }, [rows.length, outlet, dateStr]);
 
+  // Background poll: keep closing rows in sync with bot submissions (every ~12s when on Stock tab & page visible)
+  useEffect(() => {
+    if (!outlet) return;
+    let timer: any;
+    let stopped = false;
+    const fetchOnce = async () => {
+      if (stopped || document.hidden) return;
+      try {
+        const j = await getJSON<{ ok: boolean; closingMap: Record<string, number>; wasteMap: Record<string, number> }>(
+          `/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`
+        );
+        const c = j?.closingMap || {};
+        const w = j?.wasteMap || {};
+        const toLock: Record<string, boolean> = {};
+        setRows((prev) => prev.map((r) => {
+          const has = Object.prototype.hasOwnProperty.call(c, r.key) || Object.prototype.hasOwnProperty.call(w, r.key);
+          if (has) toLock[r.key] = true;
+          return has ? { ...r, closing: Number(c[r.key] ?? r.closing ?? 0), waste: Number(w[r.key] ?? r.waste ?? 0) } : r;
+        }));
+        setLocked((p) => ({ ...p, ...toLock }));
+      } catch {}
+    };
+    const onVis = () => { if (!document.hidden) fetchOnce(); };
+    document.addEventListener("visibilitychange", onVis);
+    timer = setInterval(fetchOnce, 12000);
+    // initial sync
+    fetchOnce();
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVis);
+      if (timer) clearInterval(timer);
+    };
+  }, [outlet, dateStr]);
+
   /** ===== Client-side expected totals (unchanged) ===== */
   const sellPrice = (k: ItemKey) => Number(catalog[k]?.sellPrice || 0);
   const computed = useMemo(() => {
