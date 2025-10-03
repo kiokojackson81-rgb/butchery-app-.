@@ -14,7 +14,7 @@ export async function sendAttendantMenu(to: string, outlet: string) {
         buttons: [
           { type: "reply", reply: { id: "ATD_CLOSING", title: "Closing" } },
           { type: "reply", reply: { id: "ATD_EXPENSE", title: "Expense" } },
-          { type: "reply", reply: { id: "ATD_TXNS", title: "TXNS" } },
+          { type: "reply", reply: { id: "MENU", title: "Menu" } },
         ],
       },
     },

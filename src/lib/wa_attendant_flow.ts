@@ -423,6 +423,17 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   const lr = payload?.list_reply?.id as string | undefined;
   const br = payload?.button_reply?.id as string | undefined;
   const id = lr || br || "";
+  // Quick path: show the extended list menu
+  if (id === "MENU") {
+    if (!s.code || !s.outlet) {
+      await sendText(phone, "You're not logged in. Use the login link to continue.");
+      await promptLogin(phone);
+      return;
+    }
+    await saveSession(phone, { state: "MENU", ...cur });
+    await sendInteractive(menuMain(phone, s.outlet || undefined));
+    return;
+  }
 
   // Login link resend handler
   if (id === "SEND_LOGIN_LINK") {
