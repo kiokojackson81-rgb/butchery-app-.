@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { canonFull } from "@/server/canon";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
       outlet?: string | null;
     };
 
-    const c = String(code || "").trim();
+  const c = canonFull(String(code || ""));
     const r = String(role || "").trim();
     const p = String(phoneE164 || "").trim();
     const o = outlet ? String(outlet).trim() : null;

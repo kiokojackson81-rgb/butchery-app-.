@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 function run(cmd, allowFail = true) {
   try {
@@ -32,3 +34,14 @@ run('npx prisma migrate resolve --rolled-back 20251001_refresh_code_view');
 run('npx prisma migrate deploy', false);
 
 console.log('Prebuild complete.');
+
+// Proactive cache cleanup before running Next build to avoid stale chunk resolution issues
+try {
+  const nextDir = join(process.cwd(), '.next');
+  const turboDir = join(process.cwd(), '.turbo');
+  rmSync(nextDir, { recursive: true, force: true });
+  rmSync(turboDir, { recursive: true, force: true });
+  console.log('Cleaned .next and .turbo caches.');
+} catch (e) {
+  // non-fatal
+}

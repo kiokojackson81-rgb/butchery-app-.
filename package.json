@@ -21,6 +21,8 @@
     "db:seed:assignments": "npx tsx scripts/seedAssignments.ts",
     "seed:attendant:sample": "tsx scripts/seed-attendant-code.ts",
     "codes:normalize": "tsx scripts/normalize-codes.ts",
+    "db:reset:admin": "node scripts/db-reset-official.mjs --confirm WIPE",
+    "db:reset:all": "node scripts/db-reset-official.mjs --all --confirm WIPE",
     "postinstall": "prisma generate",
     "verify:all": "bash scripts/verify-all.sh"
   },

@@ -454,9 +454,10 @@ export default function AdminPage() {
 
   /** Phones mapping upsert (server write-through) */
   const savePhoneFor = async (code: string, role: PersonCode["role"], outletName?: string) => {
-    const phone = (phones[code] || "").trim();
+    const norm = canonFull(code || "");
+    const phone = (phones[norm] || "").trim();
     if (!code || !phone) { alert("Missing code or phone"); return; }
-    const payload = { code, role, phoneE164: phone, outlet: outletName };
+    const payload = { code: norm, role, phoneE164: phone, outlet: outletName };
   const r = await fetch("/api/admin/phones", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify(payload) });
     if (!r.ok) throw new Error(await r.text());
   };
@@ -466,14 +467,15 @@ export default function AdminPage() {
       // Resolve outlet for attendants via scope
       Object.keys(phones).forEach((code) => {
         const norm = canonFull(code);
-        codeToOutlet[code] = scope[norm]?.outlet;
+        codeToOutlet[norm] = scope[norm]?.outlet;
       });
       for (const c of codes) {
         const code = (c.code || "").trim();
         if (!code) continue;
-        const phone = (phones[code] || "").trim();
+        const norm = canonFull(code);
+        const phone = (phones[norm] || "").trim();
         if (!phone) continue;
-        await savePhoneFor(code, c.role, codeToOutlet[code]);
+        await savePhoneFor(norm, c.role, codeToOutlet[norm]);
       }
       alert("Phone mappings saved ✅");
     } catch {
@@ -951,8 +953,8 @@ export default function AdminPage() {
                           <input
                             className="input-mobile border rounded-xl p-2 w-52 font-mono"
                             placeholder="+2547…"
-                            value={phones[c.code] || ""}
-                            onChange={(e)=>setPhones(prev=>({ ...prev, [c.code]: e.target.value }))}
+                            value={phones[normCode(c.code)] || ""}
+                            onChange={(e)=>setPhones(prev=>({ ...prev, [normCode(c.code)]: e.target.value }))}
                           />
                           <button
                             className="btn-mobile text-xs border rounded-lg px-2 py-1"
