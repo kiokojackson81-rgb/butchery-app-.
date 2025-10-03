@@ -211,6 +211,19 @@ export default function SupplierDashboard(): JSX.Element {
 
     // Welcome
     setWelcomeName(sessionStorage.getItem("supplier_name") || "");
+
+    // Pin date to today within active period of first outlet (best effort)
+    (async () => {
+      try {
+        const first = o2.find(o => o.active);
+        const outletName = (first?.name || "").trim();
+        if (!outletName) return;
+        const r = await fetch(`/api/period/active?outlet=${encodeURIComponent(outletName)}`, { cache: "no-store" });
+        const j = await r.json().catch(()=>({ ok: true, active: null }));
+        // We keep date as today; active period is validated server-side in API routes.
+        setDateStr(ymd());
+      } catch {}
+    })();
   }, []);
 
   /* Initialize outlet selection to first active */
@@ -336,12 +349,9 @@ export default function SupplierDashboard(): JSX.Element {
   /* ===== Submit (lock) ===== */
   const submitDay = async (): Promise<void> => {
     if (!selectedOutletName) return;
-    // Save full + minimal + cost
+    // For supplier per requirements: do NOT lock because multiple suppliers may submit same item.
     await saveDraft();
-    // Lock
-    saveLS(supplierSubmittedKey(dateStr, selectedOutletName), true);
-    setSubmitted(true);
-    alert("Supply submitted and locked. Supervisor can edit later.");
+    alert("Submitted. Day remains open for additional supplies.");
   };
 
   /* ===== Request modification to Supervisor ===== */
@@ -368,6 +378,63 @@ export default function SupplierDashboard(): JSX.Element {
     setAmends(next.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
       ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName))));
     alert("Modification request sent to Supervisor.");
+  };
+
+  // Per-row submit (one item at a time) with duplicate prompt
+  const submitRow = async (r: SupplyRow) => {
+    if (!selectedOutletName) return;
+    const exists = rows.some((x) => x.itemKey === r.itemKey && x.id !== r.id);
+    let mode: "add" | "replace" = "add";
+    if (exists) {
+      const confirm = window.confirm(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
+      mode = confirm ? "add" : "replace";
+    }
+    try {
+      const res = await fetch("/api/supply/opening/item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName, itemKey: r.itemKey, qty: r.qty, buyPrice: r.buyPrice, unit: r.unit, mode }),
+      });
+      const j = await res.json().catch(()=>({ ok: false }));
+      if (!j?.ok) throw new Error(j?.error || "Failed");
+      // Mirror minimal + full locally
+      const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, selectedOutletName), []);
+      const idx = full.findIndex((x) => x.itemKey === r.itemKey);
+      let nextFull = full.slice();
+      if (idx === -1) nextFull.push({ ...r });
+      else nextFull[idx] = { ...r, qty: j.totalQty };
+      saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), nextFull);
+      const minimal = toMinimal(nextFull);
+      saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
+      setRows(nextFull);
+      alert(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
+    } catch (e: any) {
+      alert(e?.message || "Submit failed");
+    }
+  };
+
+  // Per-row: request modification (new weight + reason)
+  const requestRowModification = async (r: SupplyRow) => {
+    const newQtyStr = window.prompt(`Enter new weight/qty for ${r.itemKey}:`, String(r.qty));
+    if (!newQtyStr) return;
+    const newQty = Number(newQtyStr);
+    if (!(newQty > 0)) { alert("Invalid number"); return; }
+    const reason = window.prompt("Reason for adjustment:", "");
+    if (!reason) return;
+    try {
+      const res = await fetch("/api/supply/adjustment/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName, itemKey: r.itemKey, currentQty: r.qty, newQty, reason, requestedBy: sessionStorage.getItem("supplier_code") || "supplier" }),
+      });
+      const j = await res.json().catch(()=>({ ok: false }));
+      if (!j?.ok) throw new Error(j?.error || "Failed");
+      alert("Adjustment requested; pending supervisor approval.");
+    } catch (e: any) {
+      alert(e?.message || "Request failed");
+    }
   };
 
   /* ===== Add supplier comment on outlet-raised disputes ===== */
@@ -643,7 +710,8 @@ export default function SupplierDashboard(): JSX.Element {
             className="input-mobile border rounded-xl p-2 text-sm"
             type="date"
             value={dateStr}
-            onChange={(e) => setDateStr(e.target.value)}
+            readOnly
+            disabled
           />
           <select
             className="input-mobile border rounded-xl p-2 text-sm"
@@ -656,27 +724,7 @@ export default function SupplierDashboard(): JSX.Element {
               </option>
             ))}
           </select>
-          {/* Thin persistence controls */}
-          <button
-            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-            title="Reload Admin settings from DB"
-            onClick={async () => {
-              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
-              catch { alert("Failed to hydrate from DB."); }
-            }}
-          >
-            Refresh Admin
-          </button>
-          <button
-            className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-            title="Push Admin settings from this browser to DB"
-            onClick={async () => {
-              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
-              catch { alert("Failed to push to DB."); }
-            }}
-          >
-            Sync to DB
-          </button>
+          {/* Removed Refresh Admin/Sync to DB for simplified UX */}
           {/* NEW: Logout next to date/select */}
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
@@ -699,10 +747,10 @@ export default function SupplierDashboard(): JSX.Element {
             <button
               className="border rounded-xl px-3 py-1 text-xs bg-black text-white"
               onClick={submitDay}
-              disabled={!selectedOutletName || submitted}
-              title={submitted ? "Already submitted (locked)" : "Submit & Lock"}
+              disabled={!selectedOutletName}
+              title="Submit (keeps day open)"
             >
-              {submitted ? "Submitted (Locked)" : "Submit & Lock"}
+              Submit
             </button>
           </div>
         </div>
@@ -788,14 +836,28 @@ export default function SupplierDashboard(): JSX.Element {
                     </td>
                     <td className="font-medium">{fmt(line)}</td>
                     <td>
-                      {!submitted && (
+                      <div className="flex gap-2">
                         <button
                           className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                          onClick={() => removeRow(r.id)}
+                          onClick={() => submitRow(r)}
                         >
-                          ✕
+                          Submit
                         </button>
-                      )}
+                        <button
+                          className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                          onClick={() => requestRowModification(r)}
+                        >
+                          Request change
+                        </button>
+                        {!submitted && (
+                          <button
+                            className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                            onClick={() => removeRow(r.id)}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

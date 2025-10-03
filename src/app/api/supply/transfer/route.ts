@@ -3,6 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { sendText } from "@/lib/wa";
+import { toGraphPhone } from "@/lib/wa_phone";
 
 export async function GET(req: Request) {
   try {
@@ -64,6 +66,22 @@ export async function POST(req: Request) {
       update: { qty: toQty },
     });
   });
+  // WhatsApp notifications (best-effort)
+  try {
+    const attendantsFrom = await (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: fromOutletName } });
+    const attendantsTo = await (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: toOutletName } });
+    const supervisors = await (prisma as any).phoneMapping.findMany({ where: { role: "supervisor" } });
+    const item = itemKey.toUpperCase();
+    const qtyTxt = `${qtyNum}${unit}`;
+    const msgFrom = `Hello. ${item} ${qtyTxt} has been transferred from your outlet (${fromOutletName}) to ${toOutletName}. If any issue, raise a dispute with your supervisor.`;
+    const msgTo = `Hello. ${item} ${qtyTxt} has been transferred to your outlet (${toOutletName}) from ${fromOutletName}. If any issue, raise a dispute with your supervisor.`;
+    const msgSup = `Transfer recorded: ${item} ${qtyTxt} from ${fromOutletName} to ${toOutletName} (${date}).`;
+    await Promise.allSettled([
+      ...attendantsFrom.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgFrom)),
+      ...attendantsTo.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgTo)),
+      ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgSup)),
+    ]);
+  } catch {}
 
   return NextResponse.json({ ok: true });
 }

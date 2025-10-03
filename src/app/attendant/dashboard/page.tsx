@@ -70,10 +70,11 @@ export default function AttendantDashboardPage() {
   const [catalog, setCatalog] = useState<Record<ItemKey, AdminProduct>>({} as any);
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [locked, setLocked] = useState<Record<string, boolean>>({}); // per-item stock row saved flag
   const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: ItemKey; qty: number }>>([]);
 
   const [deposits, setDeposits] = useState<Deposit[]>([]);
-  const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | "" }>>([]);
+  const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | ""; saved?: boolean }>>([]);
   const [countedTill, setCountedTill] = useState<number | "">("");
 
   const [tab, setTab] = useState<"stock" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
@@ -183,7 +184,7 @@ export default function AttendantDashboardPage() {
     // Opening rows from DB
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/supply/opening?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
         setOpeningRowsRaw(r.rows || []);
       } catch { setOpeningRowsRaw([]); }
     })();
@@ -203,7 +204,7 @@ export default function AttendantDashboardPage() {
     (async () => {
       try {
         const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
-        const list = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any }));
+        const list = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any, saved: true }));
         setExpenses(list);
       } catch { setExpenses([]); }
     })();
@@ -247,6 +248,27 @@ export default function AttendantDashboardPage() {
     setRows(built);
   }, [openingRowsRaw, catalog, outlet]);
 
+  // Overlay already saved closing/waste from DB and lock those rows
+  useEffect(() => {
+    if (!outlet || rows.length === 0) return;
+    (async () => {
+      try {
+        const j = await getJSON<{ ok: boolean; closingMap: Record<string, number>; wasteMap: Record<string, number> }>(
+          `/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`
+        );
+        const c = j?.closingMap || {};
+        const w = j?.wasteMap || {};
+        const toLock: Record<string, boolean> = {};
+        setRows((prev) => prev.map((r) => {
+          const has = Object.prototype.hasOwnProperty.call(c, r.key) || Object.prototype.hasOwnProperty.call(w, r.key);
+          if (has) toLock[r.key] = true;
+          return has ? { ...r, closing: Number(c[r.key] ?? r.closing ?? 0), waste: Number(w[r.key] ?? r.waste ?? 0) } : r;
+        }));
+        setLocked((p) => ({ ...p, ...toLock }));
+      } catch {}
+    })();
+  }, [rows.length, outlet, dateStr]);
+
   /** ===== Client-side expected totals (unchanged) ===== */
   const sellPrice = (k: ItemKey) => Number(catalog[k]?.sellPrice || 0);
   const computed = useMemo(() => {
@@ -276,7 +298,23 @@ export default function AttendantDashboardPage() {
   const addDeposit = () => setDeposits(prev => [...prev, { id: id(), code: "", amount: "", note: "" }]);
   const rmDeposit  = (did: string) => setDeposits(prev => prev.filter(d => d.id !== did));
   const upDeposit  = (did: string, patch: Partial<Deposit>) =>
-    setDeposits(prev => prev.map(d => d.id === did ? { ...d, ...patch } : d));
+    setDeposits(prev => prev.map(d => {
+      const next = d.id === did ? { ...d, ...patch } : d;
+      // When a full M-Pesa SMS is pasted into note, try to extract amount and code
+      if (d.id === did && patch.note && /M-?Pesa|Ksh|KES|Confirmed/i.test(patch.note)) {
+        try {
+          const m = /Ksh\s*([0-9,]+)\b.*?([A-Z0-9]{10,})/i.exec(patch.note);
+          if (m) {
+            const amt = Number(m[1].replace(/,/g, ""));
+            const ref = m[2];
+            const amtEmpty = typeof next.amount !== "number" || !isFinite(next.amount);
+            if (amtEmpty) (next as any).amount = amt;
+            if (!next.code) (next as any).code = ref;
+          }
+        } catch {}
+      }
+      return next;
+    }));
 
   // expenses
   const addExpense = () => setExpenses(prev => [...prev, { id: id(), name: "", amount: "" }]);
@@ -284,7 +322,15 @@ export default function AttendantDashboardPage() {
   const upExpense  = (eid: string, patch: Partial<{name: string; amount: number | ""}>) =>
     setExpenses(prev => prev.map(e => e.id === eid ? { ...e, ...patch } : e));
 
-  // stock submit: save + rotate period
+  // stock submit: submit a single row, then rotate later when ready
+  async function submitRow(r: Row) {
+    if (!outlet) return;
+    try {
+      await postJSON("/api/attendant/closing/item", { itemKey: r.key, closingQty: toNum(r.closing), wasteQty: toNum(r.waste) });
+      setLocked(prev => ({ ...prev, [r.key]: true }));
+    } catch {}
+  }
+
   const submitStock = async () => {
     if (!outlet) return;
 
@@ -292,7 +338,7 @@ export default function AttendantDashboardPage() {
     const wasteMap: Record<string, number> = {};
     rows.forEach(r => { closingMap[r.key] = toNum(r.closing); wasteMap[r.key] = toNum(r.waste); });
 
-    // Persist closing/waste to server
+    // Persist remaining unsaved rows in one shot for convenience
     try {
       await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
     } catch {}
@@ -350,17 +396,26 @@ export default function AttendantDashboardPage() {
 
   const submitExpenses = async () => {
     if (!outlet) return;
-    try {
-      await postJSON("/api/expenses", {
-        outlet,
-        items: expenses.filter(e => (e.name || "").trim() !== "" && toNum(e.amount) > 0)
-          .map(e => ({ name: e.name.trim(), amount: toNum(e.amount) })),
-      });
-    } catch {}
-    await refreshPeriodAndHeader(outlet);
-    // refresh from DB
-    try { await getJSON(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
+    // Submit all unsubmitted expenses one-by-one to avoid wiping submitted ones
+    const unsaved = expenses.filter(e => !e.saved && (e.name || "").trim() !== "" && toNum(e.amount) > 0);
+    for (const e of unsaved) {
+      try {
+        await postJSON("/api/expenses/item", { name: e.name.trim(), amount: toNum(e.amount) });
+        setExpenses(prev => prev.map(x => x.id === e.id ? { ...x, saved: true } : x));
+      } catch {}
+    }
+    if (outlet) await refreshPeriodAndHeader(outlet);
   };
+
+  async function submitExpenseRow(eid: string) {
+    const e = expenses.find(x => x.id === eid);
+    if (!e || !outlet) return;
+    try {
+      await postJSON("/api/expenses/item", { name: (e.name || "").trim(), amount: toNum(e.amount) });
+      setExpenses(prev => prev.map(x => x.id === eid ? { ...x, saved: true } : x));
+      await refreshPeriodAndHeader(outlet);
+    } catch {}
+  }
 
   async function refreshPeriodAndHeader(outletName: string) {
     try {
@@ -459,16 +514,7 @@ export default function AttendantDashboardPage() {
             value={dateStr}
             disabled   // <-- locked to today
           />
-          <button
-            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
-            title="Reload Admin settings from DB"
-            onClick={async () => {
-              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
-              catch { alert("Failed to hydrate from DB."); }
-            }}
-          >
-            Refresh Admin
-          </button>
+          {/* Simplified: removed Refresh Admin */}
           <button
             onClick={logout}
             className="btn-mobile px-3 py-2 rounded-xl border text-sm"
@@ -504,11 +550,12 @@ export default function AttendantDashboardPage() {
                     <th>Waste</th>
                     <th>Sold</th>
                     <th>Expected (Ksh)</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <tr><td className="py-2 text-gray-500" colSpan={6}>No opening stock found from Supplier for this outlet/day.</td></tr>
+                    <tr><td className="py-2 text-gray-500" colSpan={7}>No opening stock found from Supplier for this outlet/day.</td></tr>
                   )}
                   {rows.map(r => (
                     <tr key={r.key} className="border-b">
@@ -523,6 +570,7 @@ export default function AttendantDashboardPage() {
                           value={r.closing}
                           onChange={(e)=>setClosing(r.key, e.target.value===""?"":Number(e.target.value))}
                           placeholder={`0 ${r.unit}`}
+                          disabled={!!locked[r.key]}
                         />
                       </td>
                       <td>
@@ -539,11 +587,12 @@ export default function AttendantDashboardPage() {
                               const v = askWaste(r.unit, r.waste);
                               if (v !== null) setWaste(r.key, v);
                             }}
+                            disabled={!!locked[r.key]}
                           >
                             {toNum(r.waste) > 0 ? "Edit" : "+ Add Waste"}
                           </button>
                           {toNum(r.waste) > 0 && (
-                            <button className="btn-mobile text-xs border rounded-xl px-2 py-1" onClick={()=>setWaste(r.key, "")}>Clear</button>
+                            <button className="btn-mobile text-xs border rounded-xl px-2 py-1" onClick={()=>setWaste(r.key, "")} disabled={!!locked[r.key]}>Clear</button>
                           )}
                         </div>
                       </td>
@@ -553,12 +602,19 @@ export default function AttendantDashboardPage() {
                       <td className="font-medium">
                         Ksh {fmt(Math.max(0, r.opening - toNum(r.closing) - toNum(r.waste)) * (catalog[r.key]?.sellPrice ?? 0))}
                       </td>
+                      <td>
+                        {locked[r.key] ? (
+                          <span className="text-green-700 text-xs">Submitted</span>
+                        ) : (
+                          <button className="btn-mobile text-xs border rounded-xl px-2 py-1" onClick={()=>submitRow(r)}>Submit</button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td className="py-2 font-semibold" colSpan={5}>Total Expected</td>
+                    <td className="py-2 font-semibold" colSpan={6}>Total Expected</td>
                     <td className="font-semibold">Ksh {fmt(computed.expectedKsh)}</td>
                   </tr>
                 </tfoot>
@@ -572,7 +628,7 @@ export default function AttendantDashboardPage() {
               Submit & Start New Period
             </button>
             {submitted && (
-              <span className="ml-3 text-green-700 text-sm align-middle">Saved. New trading period started.</span>
+              <span className="ml-3 text-green-700 text-sm align-middle">Submitted. New trading period started.</span>
             )}
           </div>
         </>
@@ -701,7 +757,16 @@ export default function AttendantDashboardPage() {
                       <input className="input-mobile border rounded-xl p-2 w-32" type="number" min={0} step={1} placeholder="Ksh"
                         value={e.amount} onChange={(ev)=>upExpense(e.id,{amount:ev.target.value===""?"":Number(ev.target.value)})}/>
                     </td>
-                    <td><button className="text-xs border rounded-lg px-2 py-1" onClick={()=>rmExpense(e.id)}>✕</button></td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        {e.saved ? (
+                          <span className="text-green-700 text-xs">Submitted</span>
+                        ) : (
+                          <button className="text-xs border rounded-lg px-2 py-1" onClick={()=>submitExpenseRow(e.id)}>Submit</button>
+                        )}
+                        <button className="text-xs border rounded-lg px-2 py-1" onClick={()=>rmExpense(e.id)}>✕</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

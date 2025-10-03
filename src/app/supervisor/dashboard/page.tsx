@@ -579,6 +579,20 @@ export default function SupervisorDashboard() {
           ) : (
             <SupplyTable date={date} outlet={selectedOutlet} />
           )}
+
+          {/* Transfers list for the selected scope */}
+          <div className="mt-6">
+            <h3 className="font-medium mb-2">Transfers — {date}</h3>
+            <TransfersTable date={date} outlet={selectedOutlet === "__ALL__" ? "" : selectedOutlet} />
+          </div>
+
+          {/* Quick Closing Update */}
+          {selectedOutlet !== "__ALL__" && (
+            <div className="mt-6">
+              <h3 className="font-medium mb-2">Quick Closing Update — {selectedOutlet}</h3>
+              <QuickClosingUpdate date={date} outlet={selectedOutlet} />
+            </div>
+          )}
         </section>
       )}
     </main>
@@ -629,6 +643,92 @@ function SupplyTable({ date, outlet }: { date: string; outlet: string }) {
           </tfoot>
         </table>
       </div>
+    </div>
+  );
+}
+
+/* ===== Transfers table (reads /api/supply/transfer) ===== */
+function TransfersTable({ date, outlet }: { date: string; outlet: string }) {
+  const [rows, setRows] = useState<Array<{ id: string; date: string; fromOutletName: string; toOutletName: string; itemKey: string; qty: number; unit: string }>>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const sp = new URLSearchParams({ date });
+        if (outlet) sp.set("outlet", outlet);
+        const r = await fetch(`/api/supply/transfer?${sp.toString()}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          setRows(j?.rows || []);
+        } else setRows([]);
+      } catch { setRows([]); }
+    })();
+  }, [date, outlet]);
+  return (
+    <div className="table-wrap">
+      <table className="w-full text-sm border">
+        <thead>
+          <tr className="text-left border-b">
+            <th className="p-2">Date</th>
+            <th className="p-2">From</th>
+            <th className="p-2">To</th>
+            <th className="p-2">Item</th>
+            <th className="p-2">Qty</th>
+            <th className="p-2">Unit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td className="p-2 text-gray-500" colSpan={6}>No transfers.</td>
+            </tr>
+          ) : (
+            rows.map((t) => (
+              <tr key={t.id} className="border-b">
+                <td className="p-2">{t.date}</td>
+                <td className="p-2">{t.fromOutletName}</td>
+                <td className="p-2">{t.toOutletName}</td>
+                <td className="p-2">{t.itemKey}</td>
+                <td className="p-2">{fmt(Number(t.qty) || 0)}</td>
+                <td className="p-2">{t.unit}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ===== Quick closing update form (supervisor) ===== */
+function QuickClosingUpdate({ date, outlet }: { date: string; outlet: string }) {
+  const [itemKey, setItemKey] = useState("");
+  const [closing, setClosing] = useState<string>("");
+  const [waste, setWaste] = useState<string>("");
+  const [reason, setReason] = useState("");
+  const submit = async () => {
+    if (!itemKey) { alert("Pick item key (e.g., beef)"); return; }
+    try {
+      const res = await fetch("/api/supervisor/closing/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ date, outlet, itemKey, closingQty: closing === "" ? undefined : Number(closing), wasteQty: waste === "" ? undefined : Number(waste), reason }),
+      });
+      const j = await res.json().catch(()=>({ ok: false }));
+      if (!j?.ok) throw new Error(j?.error || "Failed");
+      alert("Updated.");
+      setItemKey(""); setClosing(""); setWaste(""); setReason("");
+    } catch (e: any) {
+      alert(e?.message || "Update failed");
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 mobile-scroll-x">
+      <input className="input-mobile border rounded-xl p-2 text-sm w-40" placeholder="item key (e.g., beef)" value={itemKey} onChange={(e)=>setItemKey(e.target.value)} />
+      <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="closing" value={closing} onChange={(e)=>setClosing(e.target.value)} />
+      <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="waste" value={waste} onChange={(e)=>setWaste(e.target.value)} />
+      <input className="input-mobile border rounded-xl p-2 text-sm w-72" placeholder="reason (optional)" value={reason} onChange={(e)=>setReason(e.target.value)} />
+      <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={submit}>Save</button>
     </div>
   );
 }

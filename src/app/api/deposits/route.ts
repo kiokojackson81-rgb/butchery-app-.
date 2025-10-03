@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { parseMpesaText } from "@/server/deposits";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
   try {
     const { outlet, entries } = (await req.json()) as {
       outlet: string;
-      entries: Array<{ code?: string; amount?: number; note?: string; status?: "VALID" | "PENDING" | "INVALID" }>;
+      entries: Array<{ code?: string; amount?: number; note?: string; rawMessage?: string; status?: "VALID" | "PENDING" | "INVALID" }>;
     };
     const outletName = (outlet || "").trim();
     if (!outletName) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
@@ -39,8 +40,16 @@ export async function POST(req: Request) {
       await tx.attendantDeposit.deleteMany({ where: { date, outletName } });
       const data = (entries || [])
         .map((e) => {
-          const code = (e.code ?? "").trim();
-          const amountRaw = Number(e.amount ?? 0);
+          // Auto-extract from pasted M-Pesa SMS if code/amount missing
+          let code = (e.code ?? "").trim();
+          let amountRaw = Number(e.amount ?? NaN);
+          if ((!code || !Number.isFinite(amountRaw)) && (e.rawMessage || e.note)) {
+            const parsed = parseMpesaText(String(e.rawMessage || e.note || ""));
+            if (parsed) {
+              if (!code) code = parsed.ref;
+              if (!Number.isFinite(amountRaw)) amountRaw = parsed.amount;
+            }
+          }
           const amount = Number.isFinite(amountRaw) ? Math.max(0, amountRaw) : 0;
           const status = ((e.status as DepositStatus) || "PENDING") as DepositStatus;
           const note = (e.note ?? null) as string | null;
