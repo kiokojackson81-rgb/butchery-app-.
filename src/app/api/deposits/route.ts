@@ -36,6 +36,7 @@ export async function POST(req: Request) {
 
     const date = new Date().toISOString().slice(0, 10);
 
+    let savedCount = 0;
     await withRetry(() => prisma.$transaction(async (tx) => {
       await tx.attendantDeposit.deleteMany({ where: { date, outletName } });
       const data = (entries || [])
@@ -63,10 +64,23 @@ export async function POST(req: Request) {
           };
         })
         .filter((d) => d.amount > 0 || (d.code && d.code !== ""));
-      if (data.length) await tx.attendantDeposit.createMany({ data });
+      if (data.length) {
+        const res = await tx.attendantDeposit.createMany({ data });
+        savedCount = (res as any)?.count ?? data.length;
+      }
     }, { timeout: 15000, maxWait: 10000 }));
 
-    return NextResponse.json({ ok: true });
+    // Best-effort verification stub: mark as VALID if env flag is set
+    try {
+      if (String(process.env.DARAJA_VERIFY_STUB || "").toLowerCase() === "true") {
+        await (prisma as any).attendantDeposit.updateMany({
+          where: { date, outletName, status: "PENDING", amount: { gt: 0 }, code: { not: null } },
+          data: { status: "VALID" },
+        });
+      }
+    } catch {}
+
+    return NextResponse.json({ ok: true, savedCount });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }
@@ -81,7 +95,7 @@ export async function GET(req: Request) {
 
     const rows = await (prisma as any).attendantDeposit.findMany({
       where: { date, outletName: outlet },
-      select: { code: true, amount: true, note: true, status: true },
+      select: { code: true, amount: true, note: true, status: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     });
     return NextResponse.json({ ok: true, rows });

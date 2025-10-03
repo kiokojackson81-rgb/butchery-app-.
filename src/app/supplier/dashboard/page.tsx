@@ -951,9 +951,9 @@ export default function SupplierDashboard(): JSX.Element {
         </div>
 
         <div className="table-wrap">
-          <table className="w-full text-sm border">
+          <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-100 text-left">
+              <tr className="text-left border-b">
                 <th className="p-2">Date</th>
                 <th className="p-2">From</th>
                 <th className="p-2">To</th>
@@ -973,12 +973,12 @@ export default function SupplierDashboard(): JSX.Element {
                 transfers.map((t) => {
                   const name = productByKey[t.itemKey]?.name ?? t.itemKey;
                   return (
-                    <tr key={t.id} className="border-t">
+                    <tr key={t.id} className="border-b">
                       <td className="p-2">{t.date}</td>
                       <td className="p-2">{t.fromOutletName}</td>
                       <td className="p-2">{t.toOutletName}</td>
                       <td className="p-2">{name}</td>
-                      <td className="p-2">{fmt(t.qty)}</td>
+                      <td className="p-2 font-medium">{fmt(t.qty)}</td>
                       <td className="p-2">{t.unit}</td>
                     </tr>
                   );

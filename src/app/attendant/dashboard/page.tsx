@@ -14,7 +14,7 @@ type ItemKey =
 
 type Row = { key: ItemKey; name: string; unit: Unit; opening: number; closing: number | ""; waste: number | "" };
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
-type Deposit = { id: string; code: string; amount: number | ""; note?: string; status?: "VALID"|"PENDING"|"INVALID" };
+type Deposit = { id: string; code: string; amount: number | ""; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
 type AdminProduct = { key: ItemKey; name: string; unit: Unit; sellPrice: number; active: boolean; };
 type AdminOutlet = { name: string; code: string; active: boolean };
 type TillPaymentRow = { time: string; amount: number; code?: string | null; customer?: string; ref?: string };
@@ -74,6 +74,7 @@ export default function AttendantDashboardPage() {
   const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: ItemKey; qty: number }>>([]);
 
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [depositsFromServer, setDepositsFromServer] = useState<Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }>>([]);
   const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | ""; saved?: boolean }>>([]);
   const [countedTill, setCountedTill] = useState<number | "">("");
 
@@ -189,14 +190,13 @@ export default function AttendantDashboardPage() {
       } catch { setOpeningRowsRaw([]); }
     })();
 
-    // deposits from DB (no localStorage fallback)
+    // deposits from DB (server source of truth)
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID" }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
-        const list = (r.rows || []).map((d) => ({ id: id(), code: d.code || "", amount: d.amount, note: d.note || "", status: d.status as any }));
-        setDeposits(list);
+        const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        setDepositsFromServer(r.rows || []);
       } catch {
-        setDeposits([]);
+        setDepositsFromServer([]);
       }
     })();
 
@@ -280,13 +280,15 @@ export default function AttendantDashboardPage() {
       return { ...r, soldQty, expectedKsh };
     });
     const expectedKsh = perItem.reduce((a, r) => a + r.expectedKsh, 0);
-    const depositedKsh = deposits.reduce((a, d) => a + toNum(d.amount), 0);
+    const depositedKsh = depositsFromServer
+      .filter((d:any) => (d.status || "PENDING") === "VALID")
+      .reduce((a: number, d: any) => a + Number(d.amount || 0), 0);
     const expensesKsh = expenses.reduce((a, e) => a + toNum(e.amount), 0);
     const projectedTill = expectedKsh - depositedKsh - expensesKsh;
     const counted = toNum(countedTill);
     const varianceKsh = counted - projectedTill;
     return { perItem, expectedKsh, depositedKsh, expensesKsh, projectedTill, counted, varianceKsh };
-  }, [rows, deposits, expenses, countedTill, catalog]);
+  }, [rows, depositsFromServer, expenses, countedTill, catalog]);
 
   /** ===== Handlers ===== */
   const setClosing = (key: ItemKey, v: number | "") =>
@@ -390,8 +392,12 @@ export default function AttendantDashboardPage() {
       });
     } catch {}
     await refreshPeriodAndHeader(outlet);
-    // refresh from DB
-    try { await getJSON(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
+    // refresh from DB and clear input
+    try {
+      const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+      setDepositsFromServer(r.rows || []);
+    } catch {}
+    setDeposits([]);
   };
 
   const submitExpenses = async () => {
@@ -684,50 +690,62 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
-            <button className="border rounded-xl px-3 py-1 text-xs" onClick={addDeposit}>+ Add deposit</button>
+            <button className="border rounded-xl px-3 py-1 text-xs" onClick={()=>setDeposits([{ id: id(), code: "", amount: "", note: "" }])}>Paste SMS</button>
           </div>
           <div className="table-wrap mt-2">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left border-b">
-                  <th className="py-2">Code</th>
-                  <th>Amount (Ksh)</th>
-                  <th>Status</th>
-                  <th>Note / Paste SMS</th>
+                  <th className="py-2">Paste full M-Pesa SMS</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {deposits.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={5}>No deposits.</td></tr>}
+                {deposits.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={2}>Paste a full M-Pesa SMS to submit.</td></tr>}
                 {deposits.map((d)=>(
                   <tr key={d.id} className="border-b">
-                    <td className="py-2">
-                      <input className="input-mobile border rounded-xl p-2 w-40" placeholder="M-Pesa code" value={d.code}
-                        onChange={(e)=>upDeposit(d.id,{code:e.target.value})}/>
-                    </td>
-                    <td>
-                      <input className="input-mobile border rounded-xl p-2 w-28" type="number" min={0} step={1}
-                        placeholder="Ksh" value={d.amount}
-                        onChange={(e)=>upDeposit(d.id,{amount:e.target.value===""?"":Number(e.target.value)})}/>
-                    </td>
-                    <td><StatusPill status={d.status || "PENDING"} /></td>
-                    <td>
-                      <input className="input-mobile border rounded-xl p-2 w-60" placeholder="optional note or paste full SMS"
+                    <td className="py-2" colSpan={2}>
+                      <input className="input-mobile border rounded-xl p-2 w-full" placeholder="Paste full M-Pesa SMS"
                         value={d.note || ""} onChange={(e)=>upDeposit(d.id,{note:e.target.value})}/>
                     </td>
-                    <td><button className="text-xs border rounded-lg px-2 py-1" onClick={()=>rmDeposit(d.id)}>✕</button></td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td className="py-2 font-semibold">Total</td>
-                  <td className="font-semibold">Ksh {fmt(deposits.reduce((a,d)=>a+toNum(d.amount),0))}</td>
-                  <td colSpan={3} className="text-right">
-                    <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={submitDeposits}>Submit Deposits</button>
+                  <td className="py-2 font-semibold"></td>
+                  <td className="text-right">
+                    <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={submitDeposits}>Submit</button>
                   </td>
                 </tr>
               </tfoot>
+            </table>
+          </div>
+
+          {/* Server-verified deposits for today */}
+          <div className="table-wrap mt-4">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Time</th>
+                  <th>Amount</th>
+                  <th>Code</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {depositsFromServer.length === 0 && (
+                  <tr><td className="py-2 text-gray-500" colSpan={4}>No deposits recorded yet today.</td></tr>
+                )}
+                {depositsFromServer.map((d, i)=>(
+                  <tr key={i} className="border-b">
+                    <td className="py-2">{d.createdAt ? new Date(d.createdAt).toLocaleTimeString() : "—"}</td>
+                    <td>Ksh {fmt(Number(d.amount) || 0)}</td>
+                    <td>{d.code || "—"}</td>
+                    <td><StatusPill status={(d.status as any) || "PENDING"} /></td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </section>
