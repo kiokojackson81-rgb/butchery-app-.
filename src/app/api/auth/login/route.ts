@@ -14,19 +14,24 @@ async function ensureLoginProvision(loginCode: string) {
   const existing = await (prisma as any).loginCode.findUnique({ where: { code } }).catch(() => null);
   if (existing) return existing;
 
-  const assignment = await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null);
-  if (!assignment) return null;
+  // Try both normalized scope and legacy assignment
+  const [assignment, scope] = await Promise.all([
+    (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null),
+    (prisma as any).attendantScope.findFirst({ where: { codeNorm: code } }).catch(() => null),
+  ]);
+  if (!assignment && !scope) return null;
 
   const person = await (prisma as any).personCode.findUnique({ where: { code } }).catch(() => null);
   let outletRow = null;
-  if (assignment.outlet) {
+  const outletName: string | null = (assignment as any)?.outlet || (scope as any)?.outletName || null;
+  if (outletName) {
     outletRow = await (prisma as any).outlet.findFirst({
-      where: { name: { equals: assignment.outlet, mode: "insensitive" } },
+      where: { name: { equals: outletName, mode: "insensitive" } },
     }).catch(() => null);
     if (!outletRow) {
       try {
         outletRow = await (prisma as any).outlet.create({
-          data: { name: assignment.outlet, code: canonFull(assignment.outlet), active: true },
+          data: { name: outletName, code: canonFull(outletName), active: true },
         });
       } catch {}
     }
@@ -46,7 +51,7 @@ async function ensureLoginProvision(loginCode: string) {
   } else {
     attendant = await (prisma as any).attendant.create({
       data: {
-        name: person?.name || assignment.outlet || code,
+        name: person?.name || outletName || code,
         loginCode: code,
         outletId: outletRow?.id ?? null,
       },
