@@ -12,14 +12,13 @@ async function ensureLoginProvision(loginCode: string) {
   if (!code) return null;
 
   const existing = await (prisma as any).loginCode.findUnique({ where: { code } }).catch(() => null);
-  if (existing) return existing;
 
   // Try both normalized scope and legacy assignment
   const [assignment, scope] = await Promise.all([
     (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null),
     (prisma as any).attendantScope.findFirst({ where: { codeNorm: code } }).catch(() => null),
   ]);
-  if (!assignment && !scope) return null;
+  if (!assignment && !scope && !existing) return null;
 
   const person = await (prisma as any).personCode.findUnique({ where: { code } }).catch(() => null);
   let outletRow = null;
@@ -59,7 +58,7 @@ async function ensureLoginProvision(loginCode: string) {
   }
 
   const attendantId = attendant?.id;
-  if (!attendantId) return null;
+  if (!attendantId) return existing;
 
   if (!person) {
     await (prisma as any).personCode.create({
@@ -123,11 +122,18 @@ export async function POST(req: Request) {
     if (!row) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
 
     // Lookup attendant → outlet by row.code
-    const att: any = await (prisma as any).attendant.findFirst({
+    let att: any = await (prisma as any).attendant.findFirst({
       where: { loginCode: { equals: row.code, mode: "insensitive" } },
     });
     if (!att?.outletId) {
-      return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
+      // Try to auto-heal binding now (e.g., existing LoginCode but no outlet)
+      await ensureLoginProvision(row.code);
+      att = await (prisma as any).attendant.findFirst({
+        where: { loginCode: { equals: row.code, mode: "insensitive" } },
+      });
+      if (!att?.outletId) {
+        return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
+      }
     }
 
     // Create DB-backed session and set bk_sess cookie (attendant)
