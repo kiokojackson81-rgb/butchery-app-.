@@ -16,6 +16,8 @@ function run(cmd, allowFail = true) {
   }
 }
 
+const isVercel = !!process.env.VERCEL;
+
 // Ensure Prisma client is generated before build.
 // On Windows, antivirus or a running dev server can lock the DLL during rename.
 // If on win32, skip generate entirely and rely on postinstall/dev having created the client already.
@@ -25,13 +27,17 @@ if (process.platform !== 'win32') {
   console.log('Skipping prisma generate on Windows to avoid DLL lock.');
 }
 
-// Reconcile migration state if needed (ignore if IDs don't exist)
-run('npx prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id');
-run('npx prisma migrate resolve --applied 20251001_change_attendantassignment_id_v2');
-run('npx prisma migrate resolve --rolled-back 20251001_refresh_code_view');
+if (isVercel) {
+  console.log('Detected Vercel build environment. Skipping Prisma migrate steps to avoid advisory lock timeouts.');
+} else {
+  // Reconcile migration state if needed (ignore if IDs don't exist)
+  run('npx prisma migrate resolve --rolled-back 20251001_change_attendantassignment_id');
+  run('npx prisma migrate resolve --applied 20251001_change_attendantassignment_id_v2');
+  run('npx prisma migrate resolve --rolled-back 20251001_refresh_code_view');
 
-// Apply any pending migrations (fail hard if this fails)
-run('npx prisma migrate deploy', false);
+  // Apply any pending migrations (fail hard if this fails)
+  run('npx prisma migrate deploy', false);
+}
 
 console.log('Prebuild complete.');
 
