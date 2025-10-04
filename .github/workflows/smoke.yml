@@ -43,6 +43,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: DB connectivity check
+        run: |
+          node scripts/checkDb.mjs | tee db-check.json
+        env:
+          # ensure Prisma can read DB envs
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          DATABASE_URL_UNPOOLED: ${{ env.DATABASE_URL_UNPOOLED }}
+
+      - name: Upload DB check
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-check
+          path: db-check.json
+
       - name: Build app
         run: npm run build
 
