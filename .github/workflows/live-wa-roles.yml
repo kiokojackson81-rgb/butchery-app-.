@@ -1,0 +1,50 @@
+name: Live WA Roles (on-demand)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Base URL to test against
+        required: true
+        default: https://barakafresh.com
+      test_wa_e164:
+        description: Test WhatsApp phone in +E164 format
+        required: true
+      attendant_code:
+        description: Attendant code to use
+        required: true
+      supervisor_code:
+        description: Supervisor code to use
+        required: true
+      supplier_code:
+        description: Supplier code to use
+        required: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Run live WA roles smoke
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url }}
+          TEST_WA_E164: ${{ github.event.inputs.test_wa_e164 }}
+          ATTENDANT_CODE: ${{ github.event.inputs.attendant_code }}
+          SUPERVISOR_CODE: ${{ github.event.inputs.supervisor_code }}
+          SUPPLIER_CODE: ${{ github.event.inputs.supplier_code }}
+          WA_DRY_RUN: "false"
+          # Real Graph envs must be set as repo/environment secrets
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+        run: npx vitest run tests/wa_roles_live.smoke.spec.ts --reporter=dot
