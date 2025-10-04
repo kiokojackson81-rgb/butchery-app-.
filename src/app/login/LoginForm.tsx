@@ -1,111 +1,97 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }
-function looksLikeCode(v: string) {
-  return /^[A-Za-z0-9]{3,10}$/.test(v);
+function normalizeCode(v: string) {
+  return String(v || "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
 export default function LoginForm() {
+  const router = useRouter();
   const [code, setCode] = useState("");
-  const [msg, setMsg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-  const waBusinessPublic = useMemo(() => process.env.NEXT_PUBLIC_WA_BUSINESS || "", []);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     (document.getElementById("code-input") as HTMLInputElement | null)?.focus();
   }, []);
 
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const raw = (document.getElementById("code-input") as HTMLInputElement | null)?.value || code;
+    const loginCode = normalizeCode(raw);
+    if (!loginCode) {
+      setError("Enter your attendant code.");
+      return;
+    }
+    setPending(true);
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+        body: JSON.stringify({ loginCode }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || "Login failed. Please check your code.");
+      }
+      try {
+        sessionStorage.setItem("attendant_code", loginCode);
+      } catch (err) {
+        console.warn("Failed to persist attendant_code", err);
+      }
+      router.push("/attendant/dashboard");
+    } catch (err: any) {
+      setError(String(err?.message || "Login failed. Please try again."));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const disabled = useMemo(() => pending || normalizeCode(code).length === 0, [pending, code]);
+
   return (
     <div className="mt-6 rounded-3xl bg-white/10 p-4 ring-1 ring-white/15 backdrop-blur">
-      <form
-        action={() => {
-          start(async () => {
-            setError(null);
-            const v = (document.getElementById("code-input") as HTMLInputElement | null)?.value || "";
-            if (!looksLikeCode(v)) { setError("Invalid code format"); return; }
-            const url = new URL(window.location.href);
-            const wa = url.searchParams.get("wa") || "";
-            if (!wa) {
-              setError("Missing phone (?wa=+2547...) — open the login link from WhatsApp");
-              return;
-            }
-            try {
-              const r = await fetch("/api/wa/auth/start", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                cache: "no-store",
-                body: JSON.stringify({ code: v, wa }),
-              });
-              const j = await r.json().catch(() => ({}));
-              if (r.ok && j?.ok) {
-                setMsg("✅ Check WhatsApp for a message from BarakaOps.");
-              } else {
-                setMsg("ℹ️ Check WhatsApp: we sent you a login help message.");
-              }
-              // If server couldn't send (e.g., outside 24h window), open WA with a prefilled message
-              const sent = !!j?.sent;
-              if (!sent) {
-                try {
-                  const r2 = await fetch("/api/flow/login-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: v }) });
-                  const j2 = await r2.json().catch(() => ({}));
-                  const link = j2?.links?.waMe as string | undefined;
-                  if (link) {
-                    window.location.assign(link);
-                    return;
-                  }
-                } catch {}
-              }
-              // Fallback: open chat without text
-              {
-                const to = String(process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || "").replace(/\D/g, "");
-                if (to) window.location.assign(`https://wa.me/${to}`);
-              }
-            } catch (e: any) {
-              setError(String(e?.message || "Failed"));
-            }
-          });
-        }}
-        className="space-y-4"
-      >
+      <form onSubmit={onSubmit} className="space-y-4">
         <label htmlFor="code-input" className="block text-sm text-white/80">Your login code</label>
         <input
           id="code-input"
           inputMode="text"
           autoCapitalize="characters"
           autoCorrect="off"
-          maxLength={10}
+          maxLength={24}
           className={cx(
             "w-full rounded-2xl border-0 px-4 py-3 text-base text-white",
             "bg-white/10 ring-1 ring-inset ring-white/20 placeholder:text-white/40",
             "focus:outline-none focus:ring-2 focus:ring-emerald-300"
           )}
-          placeholder="e.g. br1234"
+          placeholder="e.g. BRIGHT-01"
           value={code}
           onChange={(e) => setCode(e.target.value)}
         />
         <button
           type="submit"
-          disabled={pending}
+          disabled={disabled}
           className={cx(
             "w-full rounded-2xl px-4 py-3 text-base font-semibold",
-            "bg-white text-emerald-700 active:scale-[.995] transition",
-            pending && "opacity-70"
+            disabled ? "bg-white/70 text-emerald-700/70" : "bg-white text-emerald-700",
+            "active:scale-[.995] transition"
           )}
         >
-          {pending ? "Submitting…" : "Submit code"}
+          {pending ? "Signing in…" : "Continue to Dashboard"}
         </button>
       </form>
 
       {error && (
         <div className="mt-4 rounded-xl bg-red-400/15 px-4 py-3 text-sm ring-1 ring-red-300/30">{error}</div>
-      )}
-      {msg && (
-        <div className="mt-4 rounded-xl bg-emerald-400/15 px-4 py-3 text-sm ring-1 ring-emerald-300/30">{msg}</div>
       )}
     </div>
   );
