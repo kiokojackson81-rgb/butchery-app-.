@@ -91,8 +91,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
     }
 
-    // 1) Try full canonical match in LoginCode
-    let row: any = await (prisma as any).loginCode.findFirst({ where: { code: full } });
+  // 1) Try full canonical match in LoginCode (normalized)
+  let row: any = await (prisma as any).loginCode.findFirst({ where: { code: full } });
 
     if (!row && full) {
       row = await ensureLoginProvision(full);
@@ -116,6 +116,23 @@ export async function POST(req: Request) {
         } else if (assignments.length > 1) {
           return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
         }
+      }
+    }
+
+    // 3) As a last resort, check admin_codes for an active attendant with an outlet and provision
+    if (!row) {
+      const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+      const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
+      const attendants = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
+      const matchFull = attendants.find((p: any) => normalizeCode(p?.code || '') === full);
+      let selected = matchFull;
+      if (!selected && num) {
+        const matches = attendants.filter((p: any) => canonNum(p?.code || '') === num);
+        if (matches.length === 1) selected = matches[0];
+        else if (matches.length > 1) return NextResponse.json({ ok: false, error: 'AMBIGUOUS_CODE' }, { status: 409 });
+      }
+      if (selected?.code) {
+        row = await ensureLoginProvision(selected.code);
       }
     }
 
