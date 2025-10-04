@@ -33,6 +33,13 @@ jobs:
             fi
           fi
 
+      - name: Verify database env
+        run: |
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "ERROR: DATABASE_URL secret is not set. Add it under Settings > Secrets and variables > Actions." >&2
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm ci
 
