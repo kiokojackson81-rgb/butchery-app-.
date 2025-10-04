@@ -65,11 +65,18 @@ export async function getAssignmentSnapshot(codeRaw: string): Promise<Assignment
 async function resolveOutletName(outletRaw: string): Promise<string> {
   const name = (outletRaw || "").trim();
   if (!name) return "";
-  const row = await prisma.outlet.findFirst({
+  // Try to find by case-insensitive name first
+  const existing = await prisma.outlet.findFirst({
     where: { name: { equals: name, mode: "insensitive" } },
+    select: { id: true, name: true },
+  }).catch(() => null);
+  if (existing?.name) return existing.name;
+  // Create an Outlet row to ensure downstream login can resolve outletId
+  const created = await prisma.outlet.create({
+    data: { name, code: canonFull(name), active: true },
     select: { name: true },
   }).catch(() => null);
-  return row?.name || name;
+  return created?.name || name;
 }
 
 async function formatProductList(keys: string[]): Promise<string> {

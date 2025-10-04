@@ -23,6 +23,13 @@ async function ensureLoginProvision(loginCode: string) {
     outletRow = await (prisma as any).outlet.findFirst({
       where: { name: { equals: assignment.outlet, mode: "insensitive" } },
     }).catch(() => null);
+    if (!outletRow) {
+      try {
+        outletRow = await (prisma as any).outlet.create({
+          data: { name: assignment.outlet, code: canonFull(assignment.outlet), active: true },
+        });
+      } catch {}
+    }
   }
 
   let attendant = await (prisma as any).attendant.findFirst({
