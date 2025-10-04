@@ -84,6 +84,12 @@ jobs:
           BASE_URL: http://localhost:3000
           NEXT_TELEMETRY_DISABLED: 1
 
+      - name: Run dynamic staff login smoke
+        run: npx vitest run tests/attendant_staff_login.smoke.spec.ts --reporter=dot --passWithNoTests
+        env:
+          BASE_URL: http://localhost:3000
+          NEXT_TELEMETRY_DISABLED: 1
+
       - name: Show last 200 lines of server log
         if: always()
         run: |
