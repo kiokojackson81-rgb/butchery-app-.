@@ -6,6 +6,10 @@ on:
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    environment: "Production – butchery-app"
+    env:
+      UNPOOLED_SECRET: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      UNPOOLED_VAR: ${{ vars.DATABASE_URL_UNPOOLED }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,7 +23,16 @@ jobs:
       - name: Install deps
         run: npm ci --no-audit --no-fund
 
+      - name: Set DATABASE_URL for migrate
+        run: |
+          if [ -n "${UNPOOLED_SECRET}" ]; then
+            echo "DATABASE_URL=${UNPOOLED_SECRET}" >> $GITHUB_ENV
+          elif [ -n "${UNPOOLED_VAR}" ]; then
+            echo "DATABASE_URL=${UNPOOLED_VAR}" >> $GITHUB_ENV
+          else
+            echo "ERROR: DATABASE_URL_UNPOOLED not configured (Secret or Variable)." >&2
+            exit 1
+          fi
+
       - name: Run prisma migrate deploy (direct URL)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
         run: npx prisma migrate deploy
