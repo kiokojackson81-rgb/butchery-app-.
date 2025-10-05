@@ -3,6 +3,10 @@
 
 import { prisma } from "@/lib/prisma";
 
+// Treat any non-production environment as dry-run by default to simplify local dev.
+// Still allow explicit WA_DRY_RUN=true in production-like envs for safety tests.
+const DRY = (process.env.WA_DRY_RUN === "true") || (process.env.NODE_ENV !== "production");
+
 const GRAPH_BASE = "https://graph.facebook.com/v20.0";
 
 function requiredEnv(name: string): string {
@@ -24,7 +28,7 @@ export async function sendTemplate(opts: {
   params?: string[];
   langCode?: string;
 }) {
-  if (process.env.WA_DRY_RUN === "true") {
+  if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     await logOutbound({ direction: "out", templateName: opts.template, payload: { request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
@@ -73,7 +77,7 @@ export async function sendTemplate(opts: {
  * Send plain text over WhatsApp.
  */
 export async function sendText(to: string, text: string): Promise<SendResult> {
-  if (process.env.WA_DRY_RUN === "true") {
+  if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", text }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
@@ -107,7 +111,7 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
 
 /** Send a generic interactive message body (list/buttons) */
 export async function sendInteractive(body: any): Promise<SendResult> {
-  if (process.env.WA_DRY_RUN === "true") {
+  if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", body }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;

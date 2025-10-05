@@ -254,6 +254,7 @@ export function summarySubmitModify(
       action: {
         buttons: [
           { type: "reply", reply: { id: "SUMMARY_SUBMIT", title: "Submit" } },
+          { type: "reply", reply: { id: "SUMMARY_LOCK", title: "Submit & Lock" } },
           { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Modify" } },
         ],
       },

@@ -58,7 +58,8 @@ export async function POST(req: Request) {
     // 4) If phone bound => create/update WaSession & send menu immediately
     if (mapping?.phoneE164) {
       const phonePlus = mapping.phoneE164; // +E.164 in DB
-      const phoneGraph = toGraphPhone(phonePlus); // strips '+' for Graph
+      // For non-production or dry-run, our WA transport won't hit Graph, but we still normalize to graph format safely.
+      const phoneGraph = phonePlus.replace(/^\+/, "");
 
       await (prisma as any).waSession.upsert({
         where: { phoneE164: phonePlus },
@@ -66,9 +67,9 @@ export async function POST(req: Request) {
         create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
       });
 
-      if (role === "attendant") await sendAttendantMenu(phoneGraph, outlet || "your outlet");
-      else if (role === "supplier") await sendSupplierMenu(phoneGraph);
-      else await sendSupervisorMenu(phoneGraph);
+  if (role === "attendant") await sendAttendantMenu(phoneGraph, outlet || "your outlet");
+  else if (role === "supplier") await sendSupplierMenu(phoneGraph);
+  else await sendSupervisorMenu(phoneGraph);
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
     }

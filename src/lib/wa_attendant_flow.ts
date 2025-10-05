@@ -92,6 +92,26 @@ function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number
   Object.assign(r, patch);
 }
 
+// ===== Attendant day lock helpers (soft lock in Setting) =====
+const dayLockKey = (date: string, outlet: string) => `lock:attendant:${date}:${outlet}`;
+
+async function isDayLocked(date: string, outlet: string): Promise<boolean> {
+  const lock = await (prisma as any).setting.findUnique({ where: { key: dayLockKey(date, outlet) } }).catch(() => null);
+  return Boolean(lock?.value?.locked);
+}
+
+async function lockDay(date: string, outlet: string, actorCode?: string) {
+  const key = dayLockKey(date, outlet);
+  const value = { locked: true, lockedAt: new Date().toISOString(), by: actorCode || "wa" };
+  await (prisma as any).setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+// Fetch items already closed for this date/outlet
+async function getClosedKeys(date: string, outlet: string): Promise<Set<string>> {
+  const rows = await (prisma as any).attendantClosing.findMany({ where: { date, outletName: outlet }, select: { itemKey: true } });
+  return new Set<string>((rows || []).map((r: any) => r.itemKey));
+}
+
 function looksLikeCode(t: string) {
   return /^[A-Za-z0-9]{3,10}$/.test(String(t || "").trim());
 }
@@ -325,6 +345,25 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.");
         return;
       }
+      // Guard: day-level lock
+      if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+        await saveSession(phone, { state: "MENU", ...cur });
+        await sendInteractive(menuMain(phone, s.outlet || undefined));
+        return;
+      }
+      // Guard: product already closed today
+      if (s.outlet) {
+        const closed = await getClosedKeys(cur.date, s.outlet);
+        if (closed.has(item.key)) {
+          await sendText(phone, `${item.name} is already closed for today. Pick another product.`);
+          await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+          const prods = await getAssignedProducts(s.code || "");
+          const remaining = prods.filter((p) => !closed.has(p.key));
+          await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+          return;
+        }
+      }
       item.closing = val;
       await saveSession(phone, { state: "CLOSING_QTY", ...cur });
       await sendInteractive(buttonsWasteOrSkip(phone, item.name));
@@ -343,7 +382,22 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.");
         return;
       }
+      // Guard: day-level lock
+      if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+        await saveSession(phone, { state: "MENU", ...cur });
+        await sendInteractive(menuMain(phone, s.outlet || undefined));
+        return;
+      }
       item.waste = val;
+      // Immediately persist single row and lock this product for the day
+      if (s.outlet) {
+        await saveClosings({
+          date: cur.date,
+          outletName: s.outlet,
+          rows: [{ productKey: item.key, closingQty: item.closing || 0, wasteQty: item.waste || 0 }],
+        });
+      }
       upsertRow(cur, item.key, { name: item.name, closing: item.closing || 0, waste: item.waste || 0 });
       delete cur.currentItem;
       await nextPickOrSummary(phone, s, cur);
@@ -448,7 +502,21 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       await sendText(phone, "Login first (send your code).");
       return;
     }
-    const prods = await getAssignedProducts(s.code);
+    // Guard: day-level lock
+    if (await isDayLocked(cur.date, s.outlet)) {
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      return;
+    }
+    // Filter already closed products
+    const prodsAll = await getAssignedProducts(s.code);
+    const closed = await getClosedKeys(cur.date, s.outlet);
+    const prods = prodsAll.filter((p) => !closed.has(p.key));
+    if (!prods.length) {
+      await sendText(phone, "All products are already closed for today.");
+      await saveSession(phone, { state: "SUMMARY", ...cur });
+      await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
+      return;
+    }
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
     await sendInteractive(listProducts(phone, prods, s.outlet));
     return;
@@ -512,8 +580,26 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   // List product selection
   if (id.startsWith("PROD_")) {
     const key = id.replace(/^PROD_/, "");
+    // Guard: day-level lock
+    if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendInteractive(menuMain(phone, s.outlet || undefined));
+      return;
+    }
     const prods = await getAssignedProducts(s.code || "");
     const name = prods.find((p) => p.key === key)?.name || key;
+    // Guard: already closed product
+    if (s.outlet) {
+      const closed = await getClosedKeys(cur.date, s.outlet);
+      if (closed.has(key)) {
+        await sendText(phone, `${name} is already closed for today. Pick another product.`);
+        const remaining = prods.filter((p) => !closed.has(p.key));
+        await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+        await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+        return;
+      }
+    }
     cur.currentItem = { key, name };
     await saveSession(phone, { state: "CLOSING_QTY", ...cur });
     await sendInteractive(promptQty(phone, name));
@@ -548,6 +634,10 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       await sendText(phone, "No outlet bound. Ask supervisor.");
       return;
     }
+    if (await isDayLocked(cur.date, s.outlet)) {
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      return;
+    }
     // Guard against duplicates is handled by DB unique constraint
     await saveClosings({
       date: cur.date,
@@ -579,6 +669,30 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     } as any);
     return;
   }
+  if (id === "SUMMARY_LOCK") {
+    if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.");
+      return;
+    }
+    if (await isDayLocked(cur.date, s.outlet)) {
+      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`);
+      return;
+    }
+    // Save any staged rows then lock the day
+    if (cur.rows.length) {
+      await saveClosings({
+        date: cur.date,
+        outletName: s.outlet,
+        rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
+      });
+    }
+    await lockDay(cur.date, s.outlet, s.code || undefined);
+    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+    await notifySupAdm(`Attendant day locked for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
+    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`);
+    return;
+  }
   if (id === "SUMMARY_MODIFY") {
     if (!cur.rows.length) {
       await sendText(phone, "No rows yet. Pick a product first.");
@@ -607,7 +721,12 @@ export async function handleInteractiveReply(phone: string, payload: any) {
 async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
   const prods = await getAssignedProducts(s.code || "");
   const inactive = new Set(cur.inactiveKeys || []);
-  const remaining = prods.filter((p) => !inactive.has(p.key) && !cur.rows.some((r) => r.key === p.key));
+  let remaining = prods.filter((p) => !inactive.has(p.key) && !cur.rows.some((r) => r.key === p.key));
+  // Also exclude products already closed in DB
+  if (s.outlet) {
+    const closed = await getClosedKeys(cur.date, s.outlet);
+    remaining = remaining.filter((p) => !closed.has(p.key));
+  }
   if (!remaining.length) {
     await saveSession(phone, { state: "SUMMARY", ...cur });
     await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
