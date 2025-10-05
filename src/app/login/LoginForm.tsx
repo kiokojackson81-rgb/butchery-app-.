@@ -15,7 +15,7 @@ export default function LoginForm() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [linkReady, setLinkReady] = useState<null | { waMe: string; ios: string; token?: string; hint?: string; waBusiness?: string | null }>(null);
+  const [deepLink, setDeepLink] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,32 +37,24 @@ export default function LoginForm() {
     }
     setPending(true);
     setInfo(null);
-    setLinkReady(null);
+  setDeepLink(null);
     try {
-      // Request a WhatsApp deep link. User will send LINK <nonce> to our WA.
-      const r = await fetch("/api/flow/login-link", {
+      // Validate code, resolve role/outlet, and get WA deep link (no prefill)
+      const r = await fetch("/api/auth/code-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: loginCode })
       });
       const j = await r.json().catch(() => ({} as any));
       if (!r.ok || !j?.ok) {
-        throw new Error(j?.error || "Could not prepare WhatsApp login.");
+        throw new Error(j?.error || "Invalid or ambiguous code.");
       }
-      const links = j?.links || {};
-      const tokenText: string | undefined = j?.waText; // e.g. "LINK ABC123"
-      setLinkReady({ waMe: String(links.waMe || ""), ios: String(links.ios || ""), token: tokenText, hint: j?.hint, waBusiness: j?.waBusiness || null });
+      const link: string = j?.waDeepLink || "";
+      setDeepLink(link);
       try { sessionStorage.setItem("last_login_code", loginCode); } catch {}
 
-      // Try an automatic redirect to WhatsApp; still render links as fallback.
-      const ua = (typeof navigator !== "undefined" ? navigator.userAgent : "");
-      const isIOS = /iPad|iPhone|iPod/.test(ua);
-      const target = isIOS ? (links.ios as string) : (links.waMe as string);
-      if (target && typeof window !== "undefined") {
-        // A tiny delay to ensure state renders; many browsers allow location changes from user gesture.
-        setTimeout(() => { try { window.location.href = target; } catch {} }, 150);
-      }
-      setInfo("If WhatsApp did not open automatically, use the buttons below.");
+      // Replace form with success message per spec; do not auto-redirect.
+      setInfo("Login successful! Click below to continue on WhatsApp.");
     } catch (err: any) {
       setError(String(err?.message || "WhatsApp login is temporarily unavailable."));
     } finally {
@@ -112,18 +104,9 @@ export default function LoginForm() {
         <div className="mt-3 rounded-xl bg-emerald-400/15 px-4 py-3 text-sm ring-1 ring-emerald-300/30">{info}</div>
       )}
 
-      {linkReady && (
-        <div className="mt-4 space-y-3">
-          <div className="text-sm text-white/80">If WhatsApp didn’t open, use one of these:</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <a href={linkReady.waMe} className="block text-center rounded-2xl bg-white text-emerald-700 px-4 py-3 font-semibold" target="_blank" rel="noopener noreferrer">Open WhatsApp (wa.me)</a>
-            <a href={linkReady.ios} className="block text-center rounded-2xl bg-white text-emerald-700 px-4 py-3 font-semibold" target="_blank" rel="noopener noreferrer">Open WhatsApp (iOS)</a>
-          </div>
-          {linkReady.token && (
-            <div className="text-xs text-white/70">
-              Send this in WhatsApp if prompted: <span className="font-mono bg-black/20 px-2 py-1 rounded">{linkReady.token}</span>
-            </div>
-          )}
+      {deepLink && (
+        <div className="mt-4">
+          <a href={deepLink} className="block text-center rounded-2xl bg-white text-emerald-700 px-4 py-3 font-semibold" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>
         </div>
       )}
 

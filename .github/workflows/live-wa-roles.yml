@@ -48,7 +48,10 @@ jobs:
           # Real Graph envs must be set as repo/environment secrets
           WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
           WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
-        run: npx vitest run tests/wa_roles_live.smoke.spec.ts --reporter=dot
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+        run: |
+          npx vitest run tests/wa_roles_live.smoke.spec.ts --reporter=dot
+          npx vitest run tests/wa_supplier_reflect.smoke.spec.ts --reporter=dot
 
       - name: Collect recent WA logs
         if: always()
