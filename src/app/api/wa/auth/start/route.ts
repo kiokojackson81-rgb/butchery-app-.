@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { normalizeToPlusE164, toGraphPhone } from "@/lib/wa_phone";
-import { sendText, logOutbound } from "@/lib/wa";
+import { sendText, logOutbound, warmUpSession } from "@/lib/wa";
 import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
 
 export const runtime = "nodejs";
@@ -81,6 +81,7 @@ async function sendLoginSuccessDM(opts: { to: string; name: string; role: string
     lines.push(`Products: ${opts.products.join(", ")}.`);
   }
   const toGraph = toGraphPhone(opts.to);
+  try { await warmUpSession(toGraph); } catch {}
   const res = await sendText(toGraph, lines.join("\n"));
   // Immediately send role-specific interactive menu
   if (opts.role === "attendant") await sendAttendantMenu(toGraph, opts.outlet || "your outlet");

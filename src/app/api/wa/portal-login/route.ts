@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
+import { warmUpSession, sendText } from "@/lib/wa";
 import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
 
 export const runtime = "nodejs";
@@ -67,6 +68,8 @@ export async function POST(req: Request) {
         create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
       });
 
+  try { await warmUpSession(phoneGraph); } catch {}
+  await sendText(phoneGraph, "Welcome — you’re logged in. Open the menu to continue.");
   if (role === "attendant") await sendAttendantMenu(phoneGraph, outlet || "your outlet");
   else if (role === "supplier") await sendSupplierMenu(phoneGraph);
   else await sendSupervisorMenu(phoneGraph);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
-import { sendText } from "@/lib/wa";
+import { sendText, warmUpSession } from "@/lib/wa";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
 function msSince(iso?: string) {
@@ -72,8 +72,10 @@ export async function POST(req: Request) {
       },
     });
 
-    const to = String(phoneDB || '').replace(/^\+/, "");
-    await sendText(to, "Login successful. What would you like to do?");
+  const to = String(phoneDB || '').replace(/^\+/, "");
+  // Warm up the WA session (best-effort), then send welcome and menu
+  try { await warmUpSession(to); } catch {}
+  await sendText(to, "Login successful. What would you like to do?");
   if (role === "attendant") await sendAttendantMenu(to, outletFinal || "your outlet");
     else if (role === "supervisor") await sendSupervisorMenu(to);
     else await sendSupplierMenu(to);

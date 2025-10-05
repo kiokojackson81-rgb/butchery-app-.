@@ -74,6 +74,21 @@ export async function sendTemplate(opts: {
 }
 
 /**
+ * Attempt to warm up a business-initiated session by sending a lightweight template.
+ * If DRY, no-op. Best effort: swallow errors so callers can proceed to send menus.
+ */
+export async function warmUpSession(to: string): Promise<boolean> {
+  try {
+    if (DRY) return true;
+    // Common default template name; adjust if your business has a different approved template
+    const res = await sendTemplate({ to, template: "hello_world" });
+    return (res as any)?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Send plain text over WhatsApp.
  */
 export async function sendText(to: string, text: string): Promise<SendResult> {
