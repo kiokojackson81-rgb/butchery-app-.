@@ -12,9 +12,9 @@ type ItemKey =
   | "beef" | "goat" | "liver" | "kuku" | "matumbo"
   | "potatoes" | "samosas" | "mutura";
 
-type Row = { key: ItemKey; name: string; unit: Unit; opening: number; closing: number | ""; waste: number | "" };
+type Row = { key: ItemKey; name: string; unit: Unit; opening: number; closing: number | string | ""; waste: number | string | "" };
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
-type Deposit = { id: string; code: string; amount: number | ""; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
+type Deposit = { id: string; code: string; amount: number | string | ""; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
 type AdminProduct = { key: ItemKey; name: string; unit: Unit; sellPrice: number; active: boolean; };
 type AdminOutlet = { name: string; code: string; active: boolean };
 type TillPaymentRow = { time: string; amount: number; code?: string | null; customer?: string; ref?: string };
@@ -30,7 +30,7 @@ const SCOPE_KEY = "attendant_scope";
 const PRICEBOOK_KEY = "admin_pricebook";
 
 /** ========= Helpers ========= */
-function toNum(v: number | "" | undefined) { return typeof v === "number" ? v : v ? Number(v) : 0; }
+function toNum(v: number | string | "" | undefined) { return typeof v === "number" ? v : (v === "" || v == null) ? 0 : Number(v); }
 function fmt(n: number | undefined | null) {
   const num = typeof n === "number" && isFinite(n) ? n : 0;
   return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -41,7 +41,7 @@ function id() { return Math.random().toString(36).slice(2); }
 // writeJSON removed; we no longer persist to localStorage as primary store
 
 /** ========= Waste helper ========= */
-function askWaste(unit: Unit, current: number | ""): number | null {
+function askWaste(unit: Unit, current: number | string | ""): number | null {
   const init = current === "" ? "" : String(current);
   const raw = window.prompt(`Enter waste in ${unit}`, init) ?? "";
   if (raw.trim() === "") return null;
@@ -75,7 +75,7 @@ export default function AttendantDashboardPage() {
 
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [depositsFromServer, setDepositsFromServer] = useState<Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }>>([]);
-  const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | ""; saved?: boolean }>>([]);
+  const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | string | ""; saved?: boolean }>>([]);
   const [countedTill, setCountedTill] = useState<number | "">("");
 
   const [tab, setTab] = useState<"stock" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
@@ -292,9 +292,9 @@ export default function AttendantDashboardPage() {
   }, [rows, depositsFromServer, expenses, countedTill, catalog]);
 
   /** ===== Handlers ===== */
-  const setClosing = (key: ItemKey, v: number | "") =>
+  const setClosing = (key: ItemKey, v: number | string | "") =>
     setRows(prev => prev.map(r => r.key === key ? { ...r, closing: v } : r));
-  const setWaste   = (key: ItemKey, v: number | "") =>
+  const setWaste   = (key: ItemKey, v: number | string | "") =>
     setRows(prev => prev.map(r => r.key === key ? { ...r, waste: v } : r));
 
   // deposits
@@ -322,7 +322,7 @@ export default function AttendantDashboardPage() {
   // expenses
   const addExpense = () => setExpenses(prev => [...prev, { id: id(), name: "", amount: "" }]);
   const rmExpense  = (eid: string) => setExpenses(prev => prev.filter(e => e.id !== eid));
-  const upExpense  = (eid: string, patch: Partial<{name: string; amount: number | ""}>) =>
+  const upExpense  = (eid: string, patch: Partial<{name: string; amount: number | string | ""}>) =>
     setExpenses(prev => prev.map(e => e.id === eid ? { ...e, ...patch } : e));
 
   // stock submit: submit a single row, then rotate later when ready
@@ -575,7 +575,7 @@ export default function AttendantDashboardPage() {
                           min={0}
                           step={r.unit === "kg" ? 0.01 : 1}
                           value={r.closing}
-                          onChange={(e)=>setClosing(r.key, e.target.value===""?"":Number(e.target.value))}
+                          onChange={(e)=>setClosing(r.key, e.target.value)}
                           placeholder={`0 ${r.unit}`}
                           disabled={!!locked[r.key]}
                         />
@@ -784,7 +784,7 @@ export default function AttendantDashboardPage() {
                     </td>
                     <td>
                       <input className="input-mobile border rounded-xl p-2 w-32" type="number" min={0} step={1} placeholder="Ksh"
-                        value={e.amount} onChange={(ev)=>upExpense(e.id,{amount:ev.target.value===""?"":Number(ev.target.value)})}/>
+                        value={e.amount} onChange={(ev)=>upExpense(e.id,{amount:ev.target.value})}/>
                     </td>
                     <td>
                       <div className="flex items-center gap-2">
