@@ -1,8 +1,9 @@
 // lib/wa_menus.ts
 import { sendInteractive } from "@/lib/wa";
 import { getSupervisorConfig, getSupplierConfig } from "@/lib/wa_config";
-import { menuMain } from "@/lib/wa_messages";
+import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { getPeriodState } from "@/server/trading_period";
+import { getAttendantConfig } from "@/lib/wa_config";
 
 export async function sendAttendantMenu(to: string, outlet: string) {
   // State-aware: if LOCKED, show read-only items
@@ -29,56 +30,56 @@ export async function sendAttendantMenu(to: string, outlet: string) {
       return;
     }
   } catch {}
-  // Use the full list menu for a single, unified attendant menu
-  const payload = await menuMain(to, outlet);
+  const cfg = await getAttendantConfig();
+  const rows: any[] = [];
+  // Order per spec
+  rows.push({ id: "ATT_CLOSING", title: "Enter closing", description: "Open product list" });
+  if (cfg.enableDeposit) rows.push({ id: "ATT_DEPOSIT", title: "Submit deposit", description: "Record till deposit" });
+  if (cfg.enableExpense) rows.push({ id: "ATT_EXPENSE", title: "Add expense", description: "Name and amount" });
+  if (cfg.enableTillCount) rows.push({ id: "ATT_TILL", title: "Till count", description: "Manual cash count" });
+  if (cfg.enableSupplyView) rows.push({ id: "ATT_OPENING", title: "View opening", description: "Today’s opening stock" });
+  if (cfg.enableSubmitAndLock) rows.push({ id: "ATT_LOCK", title: "Submit & lock", description: "Finalize today" });
+  rows.push({ id: "ATT_HELP", title: "Help / Logout", description: "Get help or exit" });
+
+  const payload = buildInteractiveListPayload({
+    to,
+    bodyText: `Welcome — you’re logged in as Attendant for ${outlet} (${new Date().toISOString().slice(0,10)}). Choose an option:`,
+    footerText: "BarakaOps",
+    buttonLabel: "Choose",
+    sections: [{ title: "Menu", rows }],
+  });
   await sendInteractive(payload);
 }
 
 export async function sendSupplierMenu(to: string) {
-  const cfg = await getSupplierConfig();
   const rows: any[] = [
-    { id: "SPL_DELIVER", title: "Submit Supply", description: "Enter opening items" },
+    { id: "SUPL_DELIVERY", title: "Submit delivery", description: "Record today’s opening" },
+    { id: "SUPL_VIEW_OPENING", title: "View today’s opening", description: "See entered items" },
+    { id: "SUPL_DISPUTES", title: "Resolve disputes", description: "View/resolve items" },
+    { id: "SUPL_HELP", title: "Help / Logout", description: "Get help or exit" },
   ];
-  if (cfg.enableTransfer) rows.push({ id: "SPL_TRANSFER", title: "Record Transfer", description: "Move stock between outlets" });
-  if (cfg.enableRecent) rows.push({ id: "SPL_RECENT", title: "Recent Supplies", description: "Today’s entries" });
-  if (cfg.enableDisputes) rows.push({ id: "SPL_DISPUTES", title: "View Disputes", description: "Open disputes" });
-  await sendInteractive({
-    messaging_product: "whatsapp",
+  const payload = buildInteractiveListPayload({
     to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      header: { type: "text", text: "BarakaOps — Supplier" },
-      body: { text: "Pick an action:" },
-      action: {
-        button: "Choose",
-        sections: [
-          {
-            title: "Menu",
-            rows,
-          },
-        ],
-      },
-    },
+    bodyText: `Welcome — you’re logged in as Supplier (${new Date().toISOString().slice(0,10)}).`,
+    footerText: "BarakaOps",
+    sections: [{ title: "Menu", rows }],
   });
+  await sendInteractive(payload);
 }
 
 export async function sendSupervisorMenu(to: string) {
-  const cfg = await getSupervisorConfig();
-  const buttons: any[] = [];
-  if (cfg.showReview) buttons.push({ type: "reply", reply: { id: "SUP_REVIEW", title: "Review" } });
-  if (cfg.showTxns) buttons.push({ type: "reply", reply: { id: "SUP_TXNS", title: "TXNS" } });
-  if (cfg.showLogout) buttons.push({ type: "reply", reply: { id: "SUP_LOGOUT", title: "Logout" } });
-  await sendInteractive({
-    messaging_product: "whatsapp",
+  const rows: any[] = [
+    { id: "SV_REVIEW_CLOSINGS", title: "Review closings" },
+    { id: "SV_REVIEW_DEPOSITS", title: "Review deposits" },
+    { id: "SV_REVIEW_EXPENSES", title: "Review expenses" },
+    { id: "SV_APPROVE_UNLOCK", title: "Approve / unlock day" },
+    { id: "SV_HELP", title: "Help / Logout" },
+  ];
+  const payload = buildInteractiveListPayload({
     to,
-    type: "interactive",
-    interactive: {
-      type: "button",
-      body: { text: "Supervisor — choose a task" },
-      action: {
-        buttons,
-      },
-    },
+    bodyText: `Welcome — Supervisor (${new Date().toISOString().slice(0,10)}).`,
+    footerText: "BarakaOps",
+    sections: [{ title: "Menu", rows }],
   });
+  await sendInteractive(payload);
 }

@@ -9,6 +9,7 @@ export const WA_TEMPLATES = {
   supervisorReviewReminder: 'barakaops_supervisor_review_reminder_v1',
   supplierOpeningReminder: 'barakaops_supplier_opening_reminder_v1',
   roleRemoved: 'barakaops_role_removed_v1',
+  loginFailure: 'barakaops_login_failure_v1',
 } as const;
 
 export type WATemplateKey = keyof typeof WA_TEMPLATES;
@@ -41,4 +42,7 @@ This is an automated daily reminder from BarakaOps.`,
   barakaops_role_removed_v1: `System update: Your {{role}} assignment for {{outlet}} has been removed.
 If you believe this is an error, contact Admin.
 This is an automated update from BarakaOps.`,
+  barakaops_login_failure_v1: `Login unsuccessful for {{outlet}}.
+Check your code or contact Admin.
+Try again: {{link}}`,
 } as const;

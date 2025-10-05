@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 export type AttendantFlowConfig = {
   enableExpense: boolean;
   enableDeposit: boolean;
+  enableTillCount: boolean;
   enableTxns: boolean;
   enableSupplyView: boolean;
   enableSummary: boolean;
@@ -27,6 +28,7 @@ export type SupervisorFlowConfig = {
 const DEFAULT_ATTENDANT: AttendantFlowConfig = {
   enableExpense: true,
   enableDeposit: true,
+  enableTillCount: true,
   enableTxns: true,
   enableSupplyView: true,
   enableSummary: true,

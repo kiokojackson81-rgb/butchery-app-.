@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import crypto from "crypto";
+import { finalizeLoginDirect } from "@/app/api/wa/auth/finalize/route";
+import { findPersonCodeTolerant } from "@/server/db_person";
+import { canonFull } from "@/server/canon";
+import { sendTemplate } from "@/lib/wa";
+import { WA_TEMPLATES } from "@/server/wa/templates";
 
 // Expose the public, dialable WA number we send users to.
 const WA_PUBLIC_E164 = process.env.NEXT_PUBLIC_WA_PUBLIC_E164?.replace(/^\+/, ""); // e.g. 254107651410
 
-// Build a best-effort deep link for both mobile & desktop.
-function buildWaLink(text: string) {
-  const encoded = encodeURIComponent(text);
-  // Desktop/web WhatsApp and Android often handle wa.me well
-  const waMe = `https://wa.me/${WA_PUBLIC_E164}?text=${encoded}`;
-  // iOS prefers the custom scheme; we’ll return both to the client
-  const ios = `whatsapp://send?phone=${WA_PUBLIC_E164}&text=${encoded}`;
+// Return business chat target (no prefilled text as per spec)
+function businessChatTargets() {
+  const waMe = `https://wa.me/${WA_PUBLIC_E164}`;
+  const ios = `whatsapp://send?phone=${WA_PUBLIC_E164}`;
   return { waMe, ios };
 }
 
@@ -25,56 +26,71 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing NEXT_PUBLIC_WA_PUBLIC_E164" }, { status: 500 });
     }
 
-    const { code } = (await req.json()) as { code?: string };
+    const { code, waPhone } = (await req.json()) as { code?: string; waPhone?: string };
     const raw = String(code || "").trim();
-    const norm = raw.toUpperCase();
+    const full = canonFull(raw);
 
-    // 1) quick validation: 3–10 alphanum
-    if (!/^[A-Z0-9]{3,10}$/.test(norm)) {
-      return NextResponse.json({ ok: false, error: "Invalid code format" }, { status: 400 });
+    // Resolve person tolerantly and classify errors
+    let pc: any = null;
+    try {
+      pc = await findPersonCodeTolerant(full);
+    } catch (err: any) {
+      // ambiguous
+      const targets = businessChatTargets();
+      const app = process.env.APP_ORIGIN || "";
+      // Best-effort failure notify
+      const to = waPhone || null;
+      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+      return NextResponse.json({ ok: false, code: "AMBIGUOUS_CODE", targets }, { status: 409 });
     }
 
-    // 2) check PersonCode and status (attendant | supervisor | supplier)
-    const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: norm, mode: "insensitive" }, active: true } });
     if (!pc) {
-      return NextResponse.json({ ok: false, error: "Code not found or inactive" }, { status: 404 });
+      const targets = businessChatTargets();
+      const app = process.env.APP_ORIGIN || "";
+      const to = waPhone || null;
+      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+      return NextResponse.json({ ok: false, code: "INVALID_CODE", targets }, { status: 404 });
     }
 
-    // 3) mint a short-lived nonce to allow login without retyping the code in WA
-    const nonce = crypto.randomBytes(3).toString("hex").toUpperCase(); // e.g. "A1B2C3"
+    if (pc.active === false) {
+      const targets = businessChatTargets();
+      const app = process.env.APP_ORIGIN || "";
+      const to = waPhone || null;
+      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+      return NextResponse.json({ ok: false, code: "INACTIVE", targets }, { status: 403 });
+    }
 
-    // Upsert a small “link intent” into WaSession keyed by a special phoneE164 (non-real phone)
-    // We store minimal info; actual phone binding happens when the inbound WA hits.
-    const linkPhone = `+LINK:${nonce}`;
-    await (prisma as any).waSession.upsert({
-      where: { phoneE164: linkPhone },
-      create: {
-        phoneE164: linkPhone,
-        role: pc.role,
-        code: pc.code,
-        outlet: null,
-        state: "LOGIN_PENDING",
-        cursor: { code: pc.code, role: pc.role, nonce, createdAt: new Date().toISOString() } as any,
-      },
-      update: {
-        role: pc.role,
-        code: pc.code,
-        state: "LOGIN_PENDING",
-        cursor: { code: pc.code, role: pc.role, nonce, updatedAt: new Date().toISOString() } as any,
-      },
-    });
+    // Compute outlet if attendant (to validate assignment)
+    let outletFinal: string | null = null;
+    if (String(pc.role) === "attendant") {
+      const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } });
+      outletFinal = scope?.outletName ?? null;
+      if (!outletFinal) {
+        const targets = businessChatTargets();
+        const app = process.env.APP_ORIGIN || "";
+        const to = waPhone || null;
+        if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+        return NextResponse.json({ ok: false, code: "CODE_NOT_ASSIGNED", targets }, { status: 422 });
+      }
+    }
 
-    // 4) Build the WA message users will send. Prefer a short, unique token:
-    // The WA handler will accept either "LOGIN <CODE>" or "LINK <NONCE>"
-    const text = `LINK ${nonce}`;
+    // Determine phone to bind: prefer waPhone, else existing mapping
+    let phoneToBind: string | null = waPhone || null;
+    if (!phoneToBind) {
+      const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } }).catch(() => null);
+      phoneToBind = pm?.phoneE164 || null;
+    }
 
-    const links = buildWaLink(text);
-    return NextResponse.json({
-      ok: true,
-      waText: text,
-      links,
-      hint: `Send "${text}" in WhatsApp to complete login.`,
-    });
+    if (!phoneToBind) {
+      // Still proceed; finalize will create session without sending failure
+      const targets = businessChatTargets();
+      return NextResponse.json({ ok: true, role: pc.role, outlet: outletFinal, toE164: WA_PUBLIC_E164, targets }, { status: 200 });
+    }
+
+    const fin = await finalizeLoginDirect(phoneToBind, pc.code);
+    const targets = businessChatTargets();
+    const status = (fin as any)?.ok ? 200 : 400;
+    return NextResponse.json({ ...(fin as any), toE164: WA_PUBLIC_E164, targets }, { status });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "server error" }, { status: 500 });
   }
