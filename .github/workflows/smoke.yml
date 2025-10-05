@@ -26,17 +26,27 @@ jobs:
           # Provide a fallback for directUrl in Prisma to avoid P1012 when not provided
           if [ -n "${{ secrets.DATABASE_URL }}" ]; then
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
+          elif [ -n "${{ vars.DATABASE_URL }}" ]; then
+            echo "DATABASE_URL=${{ vars.DATABASE_URL }}" >> $GITHUB_ENV
+          fi
+
+          # Prefer secret for unpooled; fallback to vars; lastly reuse pooled
+          if [ -n "${{ secrets.DATABASE_URL_UNPOOLED }}" ]; then
             echo "DATABASE_URL_UNPOOLED=${{ secrets.DATABASE_URL_UNPOOLED }}" >> $GITHUB_ENV
-            # Fallback: if unpooled is not set, reuse DATABASE_URL
-            if [ -z "${{ secrets.DATABASE_URL_UNPOOLED }}" ]; then
-              echo "DATABASE_URL_UNPOOLED=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
-            fi
+          elif [ -n "${{ vars.DATABASE_URL_UNPOOLED }}" ]; then
+            echo "DATABASE_URL_UNPOOLED=${{ vars.DATABASE_URL_UNPOOLED }}" >> $GITHUB_ENV
+          elif [ -n "${{ secrets.DATABASE_URL }}" ]; then
+            echo "DATABASE_URL_UNPOOLED=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
+          elif [ -n "${{ vars.DATABASE_URL }}" ]; then
+            echo "DATABASE_URL_UNPOOLED=${{ vars.DATABASE_URL }}" >> $GITHUB_ENV
           fi
 
       - name: Verify database env
         run: |
-          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
-            echo "ERROR: DATABASE_URL secret is not set. Add it under Settings > Secrets and variables > Actions." >&2
+          if [ -z "${{ secrets.DATABASE_URL }}" ] && [ -z "${{ vars.DATABASE_URL }}" ]; then
+            echo "ERROR: DATABASE_URL is not configured (neither in Secrets nor in Variables)." >&2
+            echo "Add it under Settings > Secrets and variables > Actions (repo secrets or variables)." >&2
+            echo "If you set Environment-level variables, make sure this job targets that environment." >&2
             exit 1
           fi
 

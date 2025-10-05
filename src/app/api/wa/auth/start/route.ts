@@ -36,15 +36,27 @@ async function resolveCode(raw: string): Promise<
   if (!(["attendant", "supervisor", "supplier"].includes(role))) return { ok: false, reason: "invalid" };
 
   let outlet: string | null = null;
-  let products: string[] = [];
+  let productKeys: string[] = [];
+  // Upsert PersonCode to keep DB in sync with admin_codes (prevents stale inactive rows)
+    try {
+      const pcCode = canonFull(person.code || full);
+      const pcRole = role as any;
+      const existing = await (prisma as any).personCode.findUnique({ where: { code: pcCode } });
+      if (existing) {
+        await (prisma as any).personCode.update({ where: { code: pcCode }, data: { role: pcRole, name: person?.name || existing.name || null, active: true } });
+      } else {
+        await (prisma as any).personCode.create({ data: { code: pcCode, role: pcRole, name: person?.name || null, active: true } });
+      }
+    } catch {}
+
   if (role === "attendant") {
     const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: canonFull(person.code || "") }, include: { products: true } });
     outlet = (scope as any)?.outletName || (person as any)?.outlet || null;
-    products = Array.isArray((scope as any)?.products) ? (scope as any).products.map((p: any) => p.productKey) : [];
+      productKeys = Array.isArray((scope as any)?.products) ? (scope as any).products.map((p: any) => p.productKey) : []; 
   } else {
     outlet = (person as any)?.outlet || null;
   }
-  return { ok: true, role, code: canonFull(person.code || full), name: person?.name || null, outlet, products } as any;
+  return { ok: true, role, code: canonFull(person.code || full), name: person?.name || null, outlet, products: productKeys } as any;
 }
 
 async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean> {
