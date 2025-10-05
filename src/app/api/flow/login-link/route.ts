@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       const app = process.env.APP_ORIGIN || "";
       // Best-effort failure notify
       const to = waPhone || null;
-      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+  if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "LOGIN_FAIL" }); } catch {} }
       return NextResponse.json({ ok: false, code: "AMBIGUOUS_CODE", targets }, { status: 409 });
     }
 
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       const targets = businessChatTargets();
       const app = process.env.APP_ORIGIN || "";
       const to = waPhone || null;
-      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+  if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "LOGIN_FAIL" }); } catch {} }
       return NextResponse.json({ ok: false, code: "INVALID_CODE", targets }, { status: 404 });
     }
 
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       const targets = businessChatTargets();
       const app = process.env.APP_ORIGIN || "";
       const to = waPhone || null;
-      if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+  if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "LOGIN_FAIL" }); } catch {} }
       return NextResponse.json({ ok: false, code: "INACTIVE", targets }, { status: 403 });
     }
 
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
         const targets = businessChatTargets();
         const app = process.env.APP_ORIGIN || "";
         const to = waPhone || null;
-        if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "TEMPLATE_OUTBOUND" }); } catch {} }
+  if (to) { try { await sendTemplate({ to, template: WA_TEMPLATES.loginFailure, params: ["", `${app}/login`], contextType: "LOGIN_FAIL" }); } catch {} }
         return NextResponse.json({ ok: false, code: "CODE_NOT_ASSIGNED", targets }, { status: 422 });
       }
     }
