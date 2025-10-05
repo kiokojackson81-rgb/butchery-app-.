@@ -18,11 +18,26 @@ async function ensureLoginProvision(loginCode: string) {
     (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null),
     (prisma as any).attendantScope.findFirst({ where: { codeNorm: code } }).catch(() => null),
   ]);
-  if (!assignment && !scope && !existing) return null;
+
+  // Fallback: consult admin_codes Setting (active attendant records)
+  let fallbackOutlet: string | null = null;
+  if (!assignment && !scope) {
+    try {
+      const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+      const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
+      const attendants = list.filter(
+        (p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "attendant"
+      );
+      const selected = attendants.find((p: any) => normalizeCode(p?.code || "") === code);
+      if (selected?.outlet) fallbackOutlet = String(selected.outlet);
+    } catch {}
+  }
+  if (!assignment && !scope && !fallbackOutlet && !existing) return null;
 
   const person = await (prisma as any).personCode.findUnique({ where: { code } }).catch(() => null);
   let outletRow = null;
-  const outletName: string | null = (assignment as any)?.outlet || (scope as any)?.outletName || null;
+  const outletName: string | null =
+    (assignment as any)?.outlet || (scope as any)?.outletName || fallbackOutlet || null;
   if (outletName) {
     outletRow = await (prisma as any).outlet.findFirst({
       where: { name: { equals: outletName, mode: "insensitive" } },

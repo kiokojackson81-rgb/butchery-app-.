@@ -32,6 +32,24 @@ export async function GET() {
 			map[code] = { outlet, productKeys: keys };
 		}
 
+		// Also merge from Setting('attendant_scope') mirror if present
+		try {
+			const scopeSetting = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+			const obj = (scopeSetting as any)?.value || {};
+			if (obj && typeof obj === "object") {
+				for (const rawKey of Object.keys(obj)) {
+					const key = canon(rawKey);
+					if (!key || map[key]) continue;
+					const val = obj[rawKey] || {};
+					const outlet = String(val?.outlet || "");
+					const keys = Array.isArray(val?.productKeys)
+						? (val.productKeys as any[]).map((k: any) => String(k || "").trim()).filter((k: string) => k.length > 0).sort()
+						: [];
+					if (outlet) map[key] = { outlet, productKeys: keys };
+				}
+			}
+		} catch {}
+
 		// Fill any missing via the legacy AttendantAssignment table
 		const assigns = await (prisma as any).attendantAssignment.findMany({});
 		for (const a of assigns as any[]) {
@@ -46,7 +64,7 @@ export async function GET() {
 			map[key] = { outlet, productKeys: keys };
 		}
 
-		// Final fallback: mirror from Settings admin_codes for attendants
+			// Final fallback: mirror from Settings admin_codes for attendants
 		try {
 			const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
 			const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
