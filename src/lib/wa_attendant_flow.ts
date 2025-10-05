@@ -119,8 +119,8 @@ function looksLikeCode(t: string) {
 async function notifySupAdm(message: string) {
   try {
     const [sup, adm] = await Promise.all([
-      (prisma as any).phoneMapping.findMany({ where: { role: "supervisor", phoneE164: { not: null } }, select: { phoneE164: true } }),
-      (prisma as any).phoneMapping.findMany({ where: { role: "admin", phoneE164: { not: null } }, select: { phoneE164: true } }),
+      (prisma as any).phoneMapping.findMany({ where: { role: "supervisor", NOT: { phoneE164: null } }, select: { phoneE164: true } }),
+      (prisma as any).phoneMapping.findMany({ where: { role: "admin", NOT: { phoneE164: null } }, select: { phoneE164: true } }),
     ]);
     const list = [...sup, ...adm].map((r: any) => r.phoneE164).filter(Boolean) as string[];
     if (!list.length) return;
