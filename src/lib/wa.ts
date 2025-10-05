@@ -80,8 +80,11 @@ export async function sendTemplate(opts: {
 export async function warmUpSession(to: string): Promise<boolean> {
   try {
     if (DRY) return true;
-    // Common default template name; adjust if your business has a different approved template
-    const res = await sendTemplate({ to, template: "hello_world" });
+    // Use configurable template name; default to common "hello_world".
+    // To disable warm-up entirely, set WHATSAPP_WARMUP_TEMPLATE to "none" or empty.
+    const tmpl = (process.env.WHATSAPP_WARMUP_TEMPLATE ?? "hello_world").trim();
+    if (!tmpl || tmpl.toLowerCase() === "none") return true;
+    const res = await sendTemplate({ to, template: tmpl });
     return (res as any)?.ok === true;
   } catch {
     return false;
