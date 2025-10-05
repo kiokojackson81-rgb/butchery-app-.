@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { getPeriodState } from "@/server/trading_period";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -32,6 +33,9 @@ export async function POST(req: Request) {
     if (!outletName) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
 
     const date = new Date().toISOString().slice(0, 10);
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(outletName, date);
+    if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
     await withRetry(() => prisma.$transaction(async (tx) => {
       await tx.attendantExpense.deleteMany({ where: { date, outletName } });

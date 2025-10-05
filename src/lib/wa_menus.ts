@@ -2,8 +2,33 @@
 import { sendInteractive } from "@/lib/wa";
 import { getSupervisorConfig, getSupplierConfig } from "@/lib/wa_config";
 import { menuMain } from "@/lib/wa_messages";
+import { getPeriodState } from "@/server/trading_period";
 
 export async function sendAttendantMenu(to: string, outlet: string) {
+  // State-aware: if LOCKED, show read-only items
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    const state = await getPeriodState(outlet, date);
+    if (state === "LOCKED") {
+      await sendInteractive({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: `Day is locked for ${outlet} (${date}).` },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "MENU_SUPPLY", title: "View opening" } },
+              { type: "reply", reply: { id: "MENU_SUMMARY", title: "View summary" } },
+              { type: "reply", reply: { id: "MENU", title: "Help / Logout" } },
+            ],
+          },
+        },
+      });
+      return;
+    }
+  } catch {}
   // Use the full list menu for a single, unified attendant menu
   const payload = await menuMain(to, outlet);
   await sendInteractive(payload);

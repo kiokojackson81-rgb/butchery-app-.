@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getPeriodState, countActiveProducts } from "@/server/trading_period";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,17 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ ok: true, count: logs.length, logs });
+    // Optional: include simple period snapshot if outlet query present
+    const outlet = search.get("outlet");
+    let snapshot: any = null;
+    if (outlet) {
+      const date = new Date().toISOString().slice(0, 10);
+      const state = await getPeriodState(outlet, date);
+      const counts = await countActiveProducts(outlet, date);
+      snapshot = { outlet, date, state, products: counts };
+    }
+
+    return NextResponse.json({ ok: true, count: logs.length, logs, snapshot });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
   }

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { getPeriodState } from "@/server/trading_period";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     if (!outletName) return NextResponse.json({ ok: false, error: "No outlet" }, { status: 400 });
 
     const date = new Date().toISOString().slice(0, 10);
-    const { items } = (await req.json()) as { items: Array<{ name: string; amount: number }> };
+  const { items } = (await req.json()) as { items: Array<{ name: string; amount: number }> };
     const data = (items || [])
       .map((i) => ({
         date,
@@ -40,6 +41,10 @@ export async function POST(req: Request) {
         amount: Number.isFinite(Number(i?.amount)) ? Math.max(0, Number(i?.amount)) : 0,
       }))
       .filter((d) => d.name && d.amount > 0);
+
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(outletName, date);
+    if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
     await withRetry(() => prisma.$transaction(async (tx) => {
       await (tx as any).attendantExpense.deleteMany({ where: { date, outletName } });

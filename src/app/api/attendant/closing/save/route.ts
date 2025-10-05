@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { getPeriodState } from "@/server/trading_period";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -38,27 +39,31 @@ export async function POST(req: Request) {
       .map((k) => (k || "").trim())
       .filter(Boolean);
 
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(outletName, date);
+    if (state !== "OPEN") {
+      return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
+    }
+
     await withRetry(() => prisma.$transaction(async (tx) => {
       for (const itemKey of keys) {
         const rawClosing = Number((safeClosing as any)?.[itemKey] ?? 0);
         const rawWaste = Number((safeWaste as any)?.[itemKey] ?? 0);
         const closingQty = Number.isFinite(rawClosing) ? Math.max(0, rawClosing) : 0;
         const wasteQty = Number.isFinite(rawWaste) ? Math.max(0, rawWaste) : 0;
+        // Prevent duplicate overwrite if closed exists (idempotent upsert ok, but spec wants single submit per product)
+        const exists = await (tx as any).attendantClosing.findUnique({ where: { date_outletName_itemKey: { date, outletName, itemKey } } });
+        if (exists) continue; // ignore duplicates silently to keep idempotent
         await (tx as any).attendantClosing.upsert({
           where: { date_outletName_itemKey: { date, outletName, itemKey } },
           create: { date, outletName, itemKey, closingQty, wasteQty },
           update: { closingQty, wasteQty },
         });
       }
-
-      if (keys.length) {
-        await (tx as any).attendantClosing.deleteMany({ where: { date, outletName, itemKey: { notIn: keys } } });
-      } else {
-        await (tx as any).attendantClosing.deleteMany({ where: { date, outletName } });
-      }
+      // Do not delete other items; each product closes once per day
     }, { timeout: 20000, maxWait: 12000 }));
 
-    const rows = await (prisma as any).attendantClosing.findMany({ where: { date, outletName } });
+  const rows = await (prisma as any).attendantClosing.findMany({ where: { date, outletName } });
     const closingMapOut: Record<string, number> = {};
     const wasteMapOut: Record<string, number> = {};
     for (const r of rows) {

@@ -56,7 +56,7 @@ export async function POST(req: Request) {
         const msgs = Array.isArray(v.messages) ? v.messages : [];
         const statuses = Array.isArray(v.statuses) ? v.statuses : [];
 
-        // delivery statuses
+        // delivery statuses (Graph callbacks)
         for (const s of statuses) {
           const id = s.id as string | undefined;
           const status = s.status as string | undefined;
@@ -85,7 +85,20 @@ export async function POST(req: Request) {
 
           const auth = await ensureAuthenticated(phoneE164);
           if (!auth.ok) {
-            await promptWebLogin(phoneE164, auth.reason);
+            // Universal guard: send login prompt once within a short window
+            const tenMinAgo = new Date(Date.now() - 10 * 60_000);
+            const recent = await (prisma as any).waMessageLog.findFirst({
+              where: {
+                status: "LOGIN_PROMPT",
+                createdAt: { gt: tenMinAgo },
+                payload: { path: ["phone"], equals: phoneE164 } as any,
+              },
+              select: { id: true },
+            }).catch(() => null);
+            if (!recent) {
+              await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT" });
+              await promptWebLogin(phoneE164, auth.reason);
+            }
             continue;
           }
 

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { randomUUID } from "node:crypto";
+import { getPeriodState } from "@/server/trading_period";
 
 export async function GET(req: Request) {
   try {
@@ -25,6 +26,9 @@ export async function POST(req: Request) {
   try {
     const { date, outlet, counted } = await req.json();
     if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(String(outlet), String(date).slice(0, 10));
+    if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outlet} (${String(date).slice(0, 10)}).` }, { status: 409 });
     const cVal = Number(counted || 0);
     // Upsert via raw SQL using the unique index on (date, outletName)
     await prisma.$executeRaw`INSERT INTO "AttendantTillCount" ("id", "date", "outletName", "counted") VALUES (${randomUUID()}, ${date}, ${outlet}, ${cVal}) ON CONFLICT ("date", "outletName") DO UPDATE SET "counted" = EXCLUDED."counted"`;

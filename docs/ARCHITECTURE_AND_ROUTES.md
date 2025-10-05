@@ -107,10 +107,12 @@ Supplier
 Attendant
 - POST `/api/attendant/login`
 - POST `/api/attendant/closing`
+  - Notes: Closing writes are rejected when Trading Period is LOCKED (see server/trading_period.ts).
 
 Cash and Operations
 - POST `/api/deposits`
 - POST `/api/expenses`
+  - Notes: Deposits/Expenses/Till Count writes are rejected when Trading Period is LOCKED.
 - GET `/api/metrics/header`
 - POST `/api/notify/low-stock`
 - POST `/api/payments/till`
