@@ -1,10 +1,10 @@
 /* Smooth scrolling for in-page anchors; reduced-motion users are respected above */
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
-/* Tailwind core layers (using @import to satisfy CSS validator) */
-@import "tailwindcss/base";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
+/* Tailwind core layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Optional: a tiny baseline so things don’t look naked before you style */
 :root {
