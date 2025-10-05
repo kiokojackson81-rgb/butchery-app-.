@@ -72,6 +72,9 @@ WhatsApp (WA)
 - POST `/api/wa/auth/finalize` — Finalize link-based login from the web (bind + greet)
 - POST `/api/wa/jobs/expire-sessions` — Cron to expire idle WA sessions
 - POST `/api/wa/jobs/closing-prompt` — Cron to prompt end-of-day closings
+ - GET  `/api/wa/jobs/attendant-closing-reminder` — 21:00 EAT attendant reminder (Utility template)
+ - GET  `/api/wa/jobs/supervisor-review-reminder` — 22:00 EAT supervisor reminder (Utility template)
+ - GET  `/api/wa/jobs/supplier-opening-reminder` — 06:30 EAT supplier reminder (Utility template)
 
 Link-only login flow
 - POST `/api/flow/login-link` — Generate per-phone WA deep link and LINK <nonce> text
@@ -201,6 +204,8 @@ Auth/WA linkage
   - `WA_DRY_RUN` — Don’t call WA; log instead
   - `WA_NOTIFY_ON_SUPPLY` — Auto-send a confirmation after supply POST
   - `WA_SESSION_TTL_MIN` — Idle timeout in minutes (default 10)
+  - `REMINDERS_ENABLED` — Enable scheduled reminder sends (default true)
+  - `TZ_DEFAULT` — Default timezone label for reminder date bucketing (display-only; ISO date is naive)
 - Daraja
   - `DARAJA_BASE_URL`, `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_C2B_SHORTCODE`
 - Misc

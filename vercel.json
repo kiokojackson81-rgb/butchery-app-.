@@ -5,6 +5,18 @@
     {
       "path": "/api/wa/jobs/expire-sessions",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/wa/jobs/attendant-closing-reminder",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/wa/jobs/supervisor-review-reminder",
+      "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/wa/jobs/supplier-opening-reminder",
+      "schedule": "30 03 * * *"
     }
   ]
 }

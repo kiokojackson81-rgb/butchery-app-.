@@ -27,12 +27,13 @@ export async function sendTemplate(opts: {
   template: string;
   params?: string[];
   langCode?: string;
+  contextType?: string; // e.g., ASSIGNMENT | REMINDER | TEMPLATE_OUTBOUND
 }) {
   const toNorm = normalizeGraphPhone(opts.to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -66,12 +67,12 @@ export async function sendTemplate(opts: {
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     throw new Error(`WA send failed: ${res.status}`);
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -96,12 +97,12 @@ export async function warmUpSession(to: string): Promise<boolean> {
 /**
  * Send plain text over WhatsApp.
  */
-export async function sendText(to: string, text: string): Promise<SendResult> {
+export async function sendText(to: string, text: string, contextType?: string): Promise<SendResult> {
   const toNorm = normalizeGraphPhone(to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -122,21 +123,21 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "TEXT_OUTBOUND" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
 /** Send a generic interactive message body (list/buttons) */
-export async function sendInteractive(body: any): Promise<SendResult> {
+export async function sendInteractive(body: any, contextType?: string): Promise<SendResult> {
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -151,11 +152,11 @@ export async function sendInteractive(body: any): Promise<SendResult> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "INTERACTIVE_OUTBOUND" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -199,6 +200,7 @@ export async function logOutbound(entry: {
   waMessageId?: string | null;
   status?: string | null;
   direction?: "in" | "out";
+  type?: string | null;
 }) {
   try {
     await (prisma as any).waMessageLog.create({
@@ -209,6 +211,7 @@ export async function logOutbound(entry: {
         payload: entry.payload as any,
         waMessageId: entry.waMessageId ?? null,
         status: entry.status ?? null,
+        type: entry.type ?? null,
       },
     });
   } catch {}

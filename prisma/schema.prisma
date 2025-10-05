@@ -251,6 +251,7 @@ model WaMessageLog {
   payload      Json
   waMessageId  String?  @unique
   status       String?
+  type         String?
   createdAt    DateTime @default(now())
 }
 
@@ -265,6 +266,17 @@ model WaSession {
   cursor    Json?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+/// Track idempotent reminder sends (per day/phone/type)
+model ReminderSend {
+  id        String   @id @default(cuid())
+  type      String
+  phoneE164 String
+  date      String
+  createdAt DateTime @default(now())
+
+  @@unique([type, phoneE164, date])
 }
 
 enum PersonRole {

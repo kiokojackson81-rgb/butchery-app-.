@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum, normalizeCode } from "@/lib/codeNormalize";
+import { sendTemplate } from "@/lib/wa";
+import { WA_TEMPLATES } from "@/server/wa/templates";
+import { getLoginLinkFor } from "@/server/wa_links";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -189,7 +192,8 @@ export async function POST(req: Request) {
       previousByCode.set(canonical, { id: (row as any).id, role });
     }
 
-    let count = 0;
+  let count = 0;
+  const roleRemovalEvents: Array<{ code: string; role: PersonRole; outlet?: string }> = [];
     for (const code of canonicalOrder) {
       const entry = cleanByCode.get(code)!;
       await ensureNoDigitCollision(entry.rawCode);
@@ -289,6 +293,7 @@ export async function POST(req: Request) {
         return false;
       });
       if (removed) deleted += 1;
+      if (removed) roleRemovalEvents.push({ code: entry.canonical, role: entry.role });
     }
 
     await (prisma as any).setting.upsert({
@@ -296,6 +301,47 @@ export async function POST(req: Request) {
       update: { value: sanitizedPayload },
       create: { key: "admin_codes", value: sanitizedPayload },
     });
+
+    // Fire assignment/role-removed notifications (best-effort)
+    try {
+      const APP_ORIGIN = process.env.APP_ORIGIN || "";
+      // Notify attendants about assignment changes using template
+      for (const code of canonicalOrder) {
+        const pc = await (prisma as any).personCode.findFirst({ where: { code } }).catch(() => null);
+        const role = String(pc?.role || "attendant").toLowerCase() as PersonRole;
+        const pm = await (prisma as any).phoneMapping.findUnique({ where: { code } }).catch(() => null);
+        const phone = pm?.phoneE164 as string | undefined;
+        if (!phone) continue;
+        if (role === "attendant") {
+          const sc = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: code }, include: { products: true } }).catch(() => null);
+          const outlet = sc?.outletName || "";
+          const keys: string[] = Array.isArray(sc?.products) ? sc.products.map((p: any) => p?.productKey).filter(Boolean) : [];
+          const rows = await (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, name: true } }).catch(() => []);
+          const nameByKey = new Map<string, string>();
+          for (const r of rows as any[]) nameByKey.set(r.key, r.name || r.key);
+          const products = keys.map((k) => nameByKey.get(k) ?? k).join(", ") || "no products";
+          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
+          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.attendantAssignment, params: [outlet, products, link], contextType: "ASSIGNMENT" }); } catch {}
+        } else if (role === "supervisor") {
+          const outlet = (await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null))?.outlet || "";
+          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
+          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supervisorAssignment, params: [outlet, link], contextType: "ASSIGNMENT" }); } catch {}
+        } else if (role === "supplier") {
+          const outlet = (await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null))?.outlet || "";
+          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
+          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supplierAssignment, params: [outlet, link], contextType: "ASSIGNMENT" }); } catch {}
+        }
+      }
+
+      // Role removal notices
+      for (const ev of roleRemovalEvents) {
+        const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: ev.code } }).catch(() => null);
+        const phone = pm?.phoneE164 as string | undefined; if (!phone) continue;
+        const outlet = ev.outlet || "";
+        const roleLabel = ev.role === "attendant" ? "Attendant" : ev.role === "supervisor" ? "Supervisor" : "Supplier";
+  try { await sendTemplate({ to: phone, template: WA_TEMPLATES.roleRemoved, params: [roleLabel, outlet], contextType: "ASSIGNMENT" }); } catch {}
+      }
+    } catch {}
 
     return NextResponse.json({ ok: true, count, deleted });
   } catch (e: any) {
