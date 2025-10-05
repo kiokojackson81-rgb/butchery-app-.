@@ -28,16 +28,18 @@ export async function sendTemplate(opts: {
   params?: string[];
   langCode?: string;
 }) {
+  const toNorm = normalizeGraphPhone(opts.to);
+  const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
   const lang = opts.langCode || "en";
-  const to = normalizeGraphPhone(opts.to);
+  const to = toNorm;
 
   const body: any = {
     messaging_product: "whatsapp",
@@ -64,12 +66,12 @@ export async function sendTemplate(opts: {
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { request: body, response: json, status: res.status }, status: "ERROR" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR" });
     throw new Error(`WA send failed: ${res.status}`);
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { request: body, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -95,15 +97,16 @@ export async function warmUpSession(to: string): Promise<boolean> {
  * Send plain text over WhatsApp.
  */
 export async function sendText(to: string, text: string): Promise<SendResult> {
+  const toNorm = normalizeGraphPhone(to);
+  const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", text }, waMessageId, status: "SENT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
-  const toNorm = normalizeGraphPhone(to);
   const body = {
     messaging_product: "whatsapp",
     to: toNorm,
@@ -119,25 +122,27 @@ export async function sendText(to: string, text: string): Promise<SendResult> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: json, status: res.status }, status: "ERROR" });
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
 /** Send a generic interactive message body (list/buttons) */
 export async function sendInteractive(body: any): Promise<SendResult> {
+  const toNorm = normalizeGraphPhone(body?.to || "");
+  const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { via: "dry-run", body }, waMessageId, status: "SENT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
   const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
   const token = requiredEnv("WHATSAPP_TOKEN");
-  const normalized = { ...body, to: normalizeGraphPhone(body?.to || "") };
+  const normalized = { ...body, to: toNorm };
   const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -146,11 +151,11 @@ export async function sendInteractive(body: any): Promise<SendResult> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { request: normalized, response: json, status: res.status }, status: "ERROR" });
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { request: normalized, response: json }, waMessageId, status: "SENT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
