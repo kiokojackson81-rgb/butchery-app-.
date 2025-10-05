@@ -847,6 +847,8 @@ export default function AdminPage() {
         <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
         <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
         <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
+        {/* Quick link to WhatsApp management */}
+        <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
       </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}

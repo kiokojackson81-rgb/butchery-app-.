@@ -20,6 +20,18 @@ export default function WALogsPage() {
   const [status, setStatus] = useState("");
   const [limit, setLimit] = useState(50);
   const [sinceMin, setSinceMin] = useState(1440);
+  const [sendTo, setSendTo] = useState("");
+  const [sendText, setSendText] = useState("");
+  const [sendTemplate, setSendTemplate] = useState("");
+  const [sendParams, setSendParams] = useState("");
+  const [sending, setSending] = useState(false);
+
+  // Flow configuration state
+  const [attendantCfg, setAttendantCfg] = useState<any | null>(null);
+  const [supplierCfg, setSupplierCfg] = useState<any | null>(null);
+  const [supervisorCfg, setSupervisorCfg] = useState<any | null>(null);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgSaving, setCfgSaving] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -46,6 +58,27 @@ export default function WALogsPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function loadConfig() {
+    setCfgLoading(true);
+    try {
+      const [a, s, v] = await Promise.all([
+        fetch("/api/settings/wa_flow_attendant", { cache: "no-store" }).then(r=>r.json()).catch(()=>({ value: null })),
+        fetch("/api/settings/wa_flow_supplier", { cache: "no-store" }).then(r=>r.json()).catch(()=>({ value: null })),
+        fetch("/api/settings/wa_flow_supervisor", { cache: "no-store" }).then(r=>r.json()).catch(()=>({ value: null })),
+      ]);
+      setAttendantCfg(a?.value ?? {
+        enableExpense: true, enableDeposit: true, enableTxns: true,
+        enableSupplyView: true, enableSummary: true, enableSubmitAndLock: true, enableWaste: true,
+      });
+      setSupplierCfg(s?.value ?? { enableTransfer: true, enableRecent: true, enableDisputes: true });
+      setSupervisorCfg(v?.value ?? { showReview: true, showTxns: true, showLogout: true });
+    } finally {
+      setCfgLoading(false);
+    }
+  }
+
+  useEffect(() => { loadConfig(); }, []);
 
   const rows = useMemo(() => logs.map((l) => ({
     id: l.id,
@@ -95,6 +128,147 @@ export default function WALogsPage() {
         <button className="border rounded px-3 py-1" onClick={load} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
       </div>
 
+      {/* Sender controls */}
+      <div className="rounded border p-3">
+        <h2 className="font-medium mb-2">Send WhatsApp Message</h2>
+        <div className="flex gap-2 flex-wrap items-end">
+          <div className="flex flex-col">
+            <label className="text-xs">To (+E164)</label>
+            <input className="border rounded px-2 py-1 w-56" placeholder="+2547…" value={sendTo} onChange={(e)=>setSendTo(e.target.value)} />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs">Template (optional)</label>
+            <input className="border rounded px-2 py-1 w-56" placeholder="template_name" value={sendTemplate} onChange={(e)=>setSendTemplate(e.target.value)} />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs">Params (comma-separated)</label>
+            <input className="border rounded px-2 py-1 w-72" placeholder="p1,p2,p3" value={sendParams} onChange={(e)=>setSendParams(e.target.value)} />
+          </div>
+          <div className="flex-1 flex flex-col min-w-[280px]">
+            <label className="text-xs">Or Text</label>
+            <input className="border rounded px-2 py-1" placeholder="Plain text to send" value={sendText} onChange={(e)=>setSendText(e.target.value)} />
+          </div>
+          <button
+            className="border rounded px-3 py-1"
+            disabled={sending || !sendTo || (!sendTemplate && !sendText)}
+            onClick={async ()=>{
+              try {
+                setSending(true);
+                const to = sendTo.startsWith("+") ? sendTo : `+${sendTo}`;
+                if (sendTemplate) {
+                  const body = { to, template: sendTemplate, params: sendParams ? sendParams.split(",").map(s=>s.trim()) : [] };
+                  const r = await fetch("/api/wa/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                  const j = await r.json();
+                  if (!j?.ok) throw new Error(j?.error || "send failed");
+                } else {
+                  const r = await fetch("/api/wa/send-text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, text: sendText }) });
+                  const j = await r.json();
+                  if (!j?.ok) throw new Error(j?.error || "send failed");
+                }
+                setSendText("");
+                await load();
+                alert("Sent ✅");
+              } catch (e: any) {
+                alert("Send failed: " + String(e?.message || e));
+              } finally {
+                setSending(false);
+              }
+            }}
+          >{sending ? "Sending…" : "Send"}</button>
+        </div>
+      </div>
+
+      {/* Flow configuration controls */}
+      <div className="rounded border p-3">
+        <h2 className="font-medium mb-2">Flow Configuration</h2>
+        <div className="text-xs text-gray-600 mb-3">Toggle features for Attendant, Supplier, and Supervisor WhatsApp menus. Changes apply to new messages immediately.</div>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="rounded border p-2">
+            <h3 className="font-medium mb-2">Attendant</h3>
+            {!attendantCfg ? (
+              <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
+            ) : (
+              <div className="flex flex-col gap-2 text-sm">
+                {[
+                  ["enableExpense", "Enable Expense"],
+                  ["enableDeposit", "Enable Deposit"],
+                  ["enableTxns", "Enable TXNS view"],
+                  ["enableSupplyView", "Enable Supply View"],
+                  ["enableSummary", "Enable Summary"],
+                  ["enableSubmitAndLock", "Enable Submit & Lock"],
+                  ["enableWaste", "Enable Waste entry"],
+                ].map(([k, label]) => (
+                  <label key={String(k)} className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={!!attendantCfg[k as any]} onChange={(e)=>setAttendantCfg((prev:any)=>({ ...prev, [k]: e.target.checked }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded border p-2">
+            <h3 className="font-medium mb-2">Supplier</h3>
+            {!supplierCfg ? (
+              <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
+            ) : (
+              <div className="flex flex-col gap-2 text-sm">
+                {[
+                  ["enableTransfer", "Enable Transfer"],
+                  ["enableRecent", "Enable Recent"],
+                  ["enableDisputes", "Enable Disputes"],
+                ].map(([k, label]) => (
+                  <label key={String(k)} className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={!!supplierCfg[k as any]} onChange={(e)=>setSupplierCfg((prev:any)=>({ ...prev, [k]: e.target.checked }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded border p-2">
+            <h3 className="font-medium mb-2">Supervisor</h3>
+            {!supervisorCfg ? (
+              <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
+            ) : (
+              <div className="flex flex-col gap-2 text-sm">
+                {[
+                  ["showReview", "Show Review"],
+                  ["showTxns", "Show TXNS"],
+                  ["showLogout", "Show Logout"],
+                ].map(([k, label]) => (
+                  <label key={String(k)} className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={!!supervisorCfg[k as any]} onChange={(e)=>setSupervisorCfg((prev:any)=>({ ...prev, [k]: e.target.checked }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <button className="border rounded px-3 py-1" disabled={cfgLoading} onClick={loadConfig}>Reload</button>
+          <button
+            className="border rounded px-3 py-1"
+            disabled={cfgSaving || !attendantCfg || !supplierCfg || !supervisorCfg}
+            onClick={async ()=>{
+              try {
+                setCfgSaving(true);
+                await Promise.all([
+                  fetch("/api/settings/wa_flow_attendant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: attendantCfg }) }),
+                  fetch("/api/settings/wa_flow_supplier", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: supplierCfg }) }),
+                  fetch("/api/settings/wa_flow_supervisor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: supervisorCfg }) }),
+                ]);
+                alert("Saved ✅");
+              } catch (e:any) {
+                alert("Save failed: " + String(e?.message || e));
+              } finally {
+                setCfgSaving(false);
+              }
+            }}
+          >{cfgSaving ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+
       {error && <div className="text-red-600 text-sm">{error}</div>}
 
       <div className="overflow-auto">
@@ -117,7 +291,18 @@ export default function WALogsPage() {
                 <td className="p-2">{r.status}</td>
                 <td className="p-2">{r.tmpl}</td>
                 <td className="p-2 whitespace-nowrap">{r.phone}</td>
-                <td className="p-2 font-mono text-xs">{r.preview}</td>
+                <td className="p-2 font-mono text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">{r.preview}</span>
+                    {!!r.phone && (
+                      <button
+                        className="border rounded px-2 py-1 text-xs"
+                        title="Reply"
+                        onClick={()=>{ setSendTo(r.phone); setSendTemplate(""); setSendParams(""); setSendText(""); }}
+                      >Reply</button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

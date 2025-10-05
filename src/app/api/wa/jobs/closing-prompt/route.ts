@@ -19,7 +19,7 @@ export async function GET() {
         update: { code: a.code, outlet: a.outlet || null, state: "MENU", cursor: { date, rows: [] } },
       });
       try {
-        const body = menuMain(phone, a.outlet || undefined);
+  const body = await menuMain(phone, a.outlet || undefined);
         const res = await sendInteractive(body);
         await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: res }, waMessageId: (res as any)?.waMessageId ?? null, status: (res as any)?.ok ? "SENT" : "ERROR" });
       } catch (err) {

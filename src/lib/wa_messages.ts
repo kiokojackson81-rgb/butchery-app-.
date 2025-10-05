@@ -1,5 +1,6 @@
 // src/lib/wa_messages.ts
 // Centralized WhatsApp message payload builders (interactive + text)
+// (import removed duplicate)
 
 // WhatsApp payload limits (Interactive)
 export const WA_MAXS = {
@@ -173,24 +174,26 @@ export function msgText(to: string, body: string) {
   } as const;
 }
 
-export function menuMain(to: string, outletName?: string) {
+import { getAttendantConfig } from "@/lib/wa_config";
+
+export async function menuMain(to: string, outletName?: string) {
+  const cfg = await getAttendantConfig();
+  const rows: InteractiveRow[] = [
+    { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: cfg.enableWaste ? "Enter closing & waste" : "Enter closing only" },
+  ];
+  if (cfg.enableExpense) rows.push({ id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" });
+  if (cfg.enableDeposit) rows.push({ id: "MENU_DEPOSIT", title: "Record Deposit", description: "Paste M-Pesa SMS" });
+  if (cfg.enableTxns) rows.push({ id: "MENU_TXNS", title: "View till payments (10)", description: "Recent deposits" });
+  if (cfg.enableSupplyView) rows.push({ id: "MENU_SUPPLY", title: "View today’s supply", description: "Opening stock by item" });
+  if (cfg.enableSummary) rows.push({ id: "MENU_SUMMARY", title: "View summary", description: cfg.enableSubmitAndLock ? "Expected deposit & lock" : "Expected deposit" });
+
   return buildInteractiveListPayload({
     to,
     bodyText: outletName ? `${outletName} — what would you like to do?` : "What would you like to do?",
     footerText: "BarakaOps",
     buttonLabel: "Choose",
     sections: [
-      {
-        title: "Menu",
-        rows: [
-          { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: "Enter closing & waste" },
-          { id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" },
-          { id: "MENU_DEPOSIT", title: "Record Deposit", description: "Paste M-Pesa SMS" },
-          { id: "MENU_TXNS", title: "View till payments (10)", description: "Recent deposits" },
-          { id: "MENU_SUPPLY", title: "View today’s supply", description: "Opening stock by item" },
-          { id: "MENU_SUMMARY", title: "View summary", description: "Expected deposit & totals" },
-        ],
-      },
+      { title: "Menu", rows },
     ],
   });
 }
@@ -237,13 +240,21 @@ export function promptWaste(to: string, itemTitle: string) {
   return msgText(to, `Enter waste (kg) for ${itemTitle}`);
 }
 
-export function summarySubmitModify(
+export async function summarySubmitModify(
   to: string,
   rows: Array<{ name: string; closing: number; waste: number }>,
   outletName: string
 ) {
   const lines = rows.map((r) => `${r.name}: closing ${r.closing}, waste ${r.waste}`);
   const body = sanitizeText([outletName ? `${outletName} — summary` : "Summary", ...lines].join("\n"), WA_MAXS.BODY_TEXT)!;
+  const cfg = await getAttendantConfig();
+  const buttons: any[] = [
+    { type: "reply", reply: { id: "SUMMARY_SUBMIT", title: "Submit" } },
+  ];
+  if (cfg.enableSubmitAndLock) {
+    buttons.push({ type: "reply", reply: { id: "SUMMARY_LOCK", title: "Submit & Lock" } });
+  }
+  buttons.push({ type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Modify" } });
   return {
     messaging_product: "whatsapp",
     to,
@@ -252,11 +263,7 @@ export function summarySubmitModify(
       type: "button",
       body: { text: body },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "SUMMARY_SUBMIT", title: "Submit" } },
-          { type: "reply", reply: { id: "SUMMARY_LOCK", title: "Submit & Lock" } },
-          { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Modify" } },
-        ],
+        buttons,
       },
     },
   } as const;

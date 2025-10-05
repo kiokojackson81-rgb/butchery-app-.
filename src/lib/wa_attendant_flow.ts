@@ -233,7 +233,7 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-      await sendInteractive(menuMain(phone, s.outlet || undefined));
+  await sendInteractive(await menuMain(phone, s.outlet || undefined));
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -349,7 +349,7 @@ export async function handleInboundText(phone: string, text: string) {
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
         await saveSession(phone, { state: "MENU", ...cur });
-        await sendInteractive(menuMain(phone, s.outlet || undefined));
+  await sendInteractive(await menuMain(phone, s.outlet || undefined));
         return;
       }
       // Guard: product already closed today
@@ -514,7 +514,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     if (!prods.length) {
       await sendText(phone, "All products are already closed for today.");
       await saveSession(phone, { state: "SUMMARY", ...cur });
-      await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
+  await sendInteractive(await summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
       return;
     }
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
@@ -584,7 +584,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
       await saveSession(phone, { state: "MENU", ...cur });
-      await sendInteractive(menuMain(phone, s.outlet || undefined));
+    await sendInteractive(await menuMain(phone, s.outlet || undefined));
       return;
     }
     const prods = await getAssignedProducts(s.code || "");
@@ -596,7 +596,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
         await sendText(phone, `${name} is already closed for today. Pick another product.`);
         const remaining = prods.filter((p) => !closed.has(p.key));
         await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-        await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+    await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
         return;
       }
     }
