@@ -629,14 +629,24 @@ export default function AttendantDashboardPage() {
             </div>
           </section>
 
-          {/* Submit button after stock table */}
+          {/* Submit button after stock table (mobile sticky bar for reach) */}
           <div className="mb-8">
-            <button onClick={submitStock} className="px-4 py-2 rounded-2xl bg-black text-white">
-              Submit & Start New Period
-            </button>
-            {submitted && (
-              <span className="ml-3 text-green-700 text-sm align-middle">Submitted. New trading period started.</span>
-            )}
+            <div className="hidden sm:block">
+              <button onClick={submitStock} className="px-4 py-2 rounded-2xl bg-black text-white">
+                Submit & Start New Period
+              </button>
+              {submitted && (
+                <span className="ml-3 text-green-700 text-sm align-middle">Submitted. New trading period started.</span>
+              )}
+            </div>
+            <div className="sm:hidden sticky-save-bottom">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-white/80">Stock ready?</span>
+                <button onClick={submitStock} className="px-4 py-2 rounded-xl bg-white text-black font-semibold">
+                  Submit & Start
+                </button>
+              </div>
+            </div>
           </div>
         </>
       )}

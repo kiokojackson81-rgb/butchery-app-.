@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import StorageBridge from "@/app/_bridges/StorageBridge";
+import InputBehaviorBridge from "@/app/_bridges/InputBehaviorBridge";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,6 +30,7 @@ export default function RootLayout({
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <StorageBridge />
+        <InputBehaviorBridge />
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>

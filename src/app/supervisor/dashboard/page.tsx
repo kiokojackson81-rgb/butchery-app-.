@@ -560,6 +560,16 @@ export default function SupervisorDashboard() {
             </tbody>
           </table>
           </div>
+          {/* Sticky quick actions on mobile */}
+          <div className="sm:hidden sticky-save-bottom mt-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-white/80">Deposits</span>
+              <div className="flex gap-2">
+                <button className="px-3 py-2 rounded-lg bg-white text-black text-sm font-semibold" onClick={()=>window.scrollTo({top:0,behavior:'smooth'})}>Top</button>
+                <button className="px-3 py-2 rounded-lg bg-white/10 text-white ring-1 ring-white/20 text-sm" onClick={()=>setTab("supply")}>Supply</button>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 

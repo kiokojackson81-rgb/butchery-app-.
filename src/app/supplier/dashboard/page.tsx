@@ -737,22 +737,22 @@ export default function SupplierDashboard(): JSX.Element {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Opening Supply — {selectedOutletName || "—"} ({dateStr})</h2>
           <div className="flex gap-2">
-            <button className="border rounded-xl px-3 py-1 text-xs" onClick={saveDraft} disabled={!selectedOutletName}>
-              Save
-            </button>
-            {/* NEW: Download PDF */}
-            <button className="border rounded-xl px-3 py-1 text-xs" onClick={downloadPdfReport} disabled={!selectedOutletName}>
-              Download PDF
-            </button>
-            <button
-              className="border rounded-xl px-3 py-1 text-xs bg-black text-white"
-              onClick={submitDay}
-              disabled={!selectedOutletName}
-              title="Submit (keeps day open)"
-            >
-              Submit
-            </button>
-          </div>
+              <button className="border rounded-xl px-3 py-1 text-xs" onClick={saveDraft} disabled={!selectedOutletName}>
+                Save
+              </button>
+              {/* NEW: Download PDF */}
+              <button className="border rounded-xl px-3 py-1 text-xs" onClick={downloadPdfReport} disabled={!selectedOutletName}>
+                Download PDF
+              </button>
+              <button
+                className="border rounded-xl px-3 py-1 text-xs bg-black text-white"
+                onClick={submitDay}
+                disabled={!selectedOutletName}
+                title="Submit (keeps day open)"
+              >
+                Submit
+              </button>
+            </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-3 mobile-scroll-x">
@@ -882,6 +882,23 @@ export default function SupplierDashboard(): JSX.Element {
           <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={requestModification}>
             Request Modification
           </button>
+        </div>
+        {/* Sticky action bar on mobile */}
+        <div className="sm:hidden sticky-save-bottom mt-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-white/80">Supply ready?</span>
+            <div className="flex items-center gap-2">
+              <button className="px-3 py-2 rounded-lg bg-white text-black text-sm font-semibold" onClick={saveDraft} disabled={!selectedOutletName}>
+                Save
+              </button>
+              <button className="px-3 py-2 rounded-lg bg-white/10 text-white ring-1 ring-white/20 text-sm" onClick={downloadPdfReport} disabled={!selectedOutletName}>
+                PDF
+              </button>
+              <button className="px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold" onClick={submitDay} disabled={!selectedOutletName}>
+                Submit
+              </button>
+            </div>
+          </div>
         </div>
 
         {submitted && (
