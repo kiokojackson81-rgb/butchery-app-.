@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
   return (
-    <main className="min-h-[100svh] bg-gradient-to-b from-emerald-600 via-emerald-700 to-emerald-900 text-white">
+    <main className="min-h-[100svh] bg-gradient-to-b from-[#7A1F2B] to-[#0E5A43] text-white">
       <div className="relative isolate">
-        <svg className="absolute -top-16 -right-20 h-56 w-56 opacity-30" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <svg className="absolute -top-16 -right-20 h-56 w-56 opacity-20" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
           <path fill="#10B981" d="M46.8,-72.4C58.8,-63.3,65.7,-47.7,71.3,-32.1C76.8,-16.6,81.2,-1.1,78.8,13.1C76.4,27.4,67.2,40.5,55.8,51.2C44.4,61.9,30.8,70.1,16.2,74.6C1.7,79.1,-13.9,79.9,-27.9,74.5C-41.9,69.1,-54.2,57.5,-63.2,44.3C-72.2,31.1,-77.9,16.5,-79.3,1.5C-80.7,-13.5,-77.8,-27.1,-70.9,-39.2C-64,-51.4,-53.2,-61.9,-40.6,-70.4C-28,-79,-14,-85.6,0.6,-86.7C15.1,-87.8,30.3,-83.4,46.8,-72.4Z" transform="translate(100 100)" />
         </svg>
 
@@ -18,14 +18,14 @@ export default function LoginPage() {
               </svg>
             </span>
             <div>
-              <h1 className="text-lg font-semibold tracking-wide">BarakaOps</h1>
-              <p className="text-white/70 text-sm">Login with your code to continue</p>
+              <h1 className="text-xl font-semibold tracking-wide">BarakaOps</h1>
+              <p className="text-white/80 text-sm">Enter your login code</p>
             </div>
           </div>
 
           <LoginForm />
 
-          <p className="mt-6 text-center text-xs text-white/60">Having trouble? Visit Admin to verify your code or phone mapping.</p>
+          <p className="mt-6 text-center text-xs text-white/70">Having trouble? Contact Admin.</p>
         </div>
       </div>
       <div className="h-4 sm:h-6" />

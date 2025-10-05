@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
-import { sendText, warmUpSession } from "@/lib/wa";
+import { sendText, warmUpSession, logOutbound } from "@/lib/wa";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
 function msSince(iso?: string) {
@@ -58,6 +58,16 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
     if (role === "attendant") await sendAttendantMenu(to, outletFinal || "your outlet");
     else if (role === "supervisor") await sendSupervisorMenu(to);
     else await sendSupplierMenu(to);
+  } catch {}
+
+  try {
+    await logOutbound({
+      direction: "out",
+      templateName: null,
+      payload: { meta: { phoneE164: phoneDB, outlet: outletFinal, role }, event: "login_welcome_sent" },
+      status: "SENT",
+      type: "login_welcome_sent",
+    });
   } catch {}
 
   return { ok: true, role, code: pc.code, outlet: outletFinal, phoneE164: phoneDB } as const;

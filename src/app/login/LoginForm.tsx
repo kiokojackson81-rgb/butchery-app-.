@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
 function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
@@ -11,7 +10,6 @@ function normalizeCode(v: string) {
 }
 
 export default function LoginForm() {
-  const router = useRouter();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -39,22 +37,31 @@ export default function LoginForm() {
     setInfo(null);
   setDeepLink(null);
     try {
-      // Validate code, resolve role/outlet, and get WA deep link (no prefill)
-      const r = await fetch("/api/auth/code-login", {
+      // Validate code, resolve role/outlet, send Welcome+menu, and get pure WA deeplink
+      const url = new URL(location.href);
+      const wa = url.searchParams.get("wa");
+      const r = await fetch("/api/wa/auth/login-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: loginCode })
+        body: JSON.stringify({ code: loginCode, src: "web", wa })
       });
       const j = await r.json().catch(() => ({} as any));
       if (!r.ok || !j?.ok) {
-        throw new Error(j?.error || "Invalid or ambiguous code.");
+        const ec = j?.code || "GENERIC";
+        if (ec === "INVALID_CODE") throw new Error("That code wasn’t found or is inactive. Check with Admin.");
+        if (ec === "AMBIGUOUS_CODE") throw new Error("Multiple codes share those digits. Enter the full code (letters + numbers).");
+        if (ec === "CODE_NOT_ASSIGNED") throw new Error("Your outlet is not set. Ask Supervisor to assign your outlet.");
+        throw new Error(j?.message || "We couldn’t log you in. Try again or contact Admin.");
       }
       const link: string = j?.waDeepLink || "";
       setDeepLink(link);
       try { sessionStorage.setItem("last_login_code", loginCode); } catch {}
 
-      // Replace form with success message per spec; do not auto-redirect.
-      setInfo("Login successful! Click below to continue on WhatsApp.");
+      // Show success strip and deep-open WhatsApp immediately
+      setInfo("Success. We’re opening WhatsApp and sending your menu…");
+      if (link) {
+        try { window.location.href = link; } catch {}
+      }
     } catch (err: any) {
       setError(String(err?.message || "WhatsApp login is temporarily unavailable."));
     } finally {
@@ -88,11 +95,11 @@ export default function LoginForm() {
           disabled={disabled}
           className={cx(
             "w-full rounded-2xl px-4 py-3 text-base font-semibold",
-            disabled ? "bg-white/70 text-emerald-700/70" : "bg-white text-emerald-700",
+            disabled ? "bg-white/70 text-emerald-900/70" : "bg-white text-emerald-900",
             "active:scale-[.995] transition"
           )}
         >
-          {pending ? "Preparing WhatsApp…" : "Open in WhatsApp"}
+          {pending ? "Logging in…" : "Login"}
         </button>
       </form>
 
@@ -104,38 +111,7 @@ export default function LoginForm() {
         <div className="mt-3 rounded-xl bg-emerald-400/15 px-4 py-3 text-sm ring-1 ring-emerald-300/30">{info}</div>
       )}
 
-      {deepLink && (
-        <div className="mt-4">
-          <a href={deepLink} className="block text-center rounded-2xl bg-white text-emerald-700 px-4 py-3 font-semibold" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>
-        </div>
-      )}
-
-      <div className="mt-6 border-t border-white/10 pt-4 text-xs text-white/80 space-y-2">
-        <div className="opacity-80">Already mapped to WhatsApp on this phone?</div>
-        <button
-          className="w-full rounded-xl bg-white/10 px-4 py-2 ring-1 ring-white/20 hover:bg-white/15 transition"
-          onClick={async () => {
-            setError(null); setInfo(null);
-            const loginCode = normalizeCode(code).toUpperCase();
-            if (!/^[A-Z0-9]{3,10}$/.test(loginCode)) { setError("Enter a valid code first."); return; }
-            setPending(true);
-            try {
-              const r = await fetch("/api/wa/portal-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: loginCode }) });
-              const j = await r.json().catch(() => ({} as any));
-              if (!r.ok || !j?.ok) throw new Error(j?.reason || "Unable to send menu.");
-              if (j.bound) setInfo("We sent your WhatsApp menu to your mapped number.");
-              else if (j.token) setInfo(`Not yet mapped. In WhatsApp, send: ${j.token}`);
-              else setInfo("Check WhatsApp for your login prompt.");
-            } catch (e: any) {
-              setError(String(e?.message || "Failed to send menu."));
-            } finally {
-              setPending(false);
-            }
-          }}
-        >
-          Send menu to my WhatsApp
-        </button>
-      </div>
+      {/* Single-action UX: no secondary CTAs */}
     </div>
   );
 }
