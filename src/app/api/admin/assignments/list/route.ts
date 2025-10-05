@@ -64,16 +64,32 @@ export async function GET() {
 			map[key] = { outlet, productKeys: keys };
 		}
 
-			// Final fallback: mirror from Settings admin_codes for attendants
+				// Final fallback: mirror from Settings admin_codes for attendants
 		try {
 			const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
 			const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
 			const attendants = list.filter((p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "attendant");
+					// Preload scope mirror and legacy assigns for outlet inference when admin_codes lacks explicit outlet
+					let scopeMirror: any = null;
+					try {
+						const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+						scopeMirror = (scopeRow as any)?.value || null;
+					} catch {}
 			for (const p of attendants) {
 				const key = canon(String(p?.code || ""));
-				const outlet = String(p?.outlet || "");
-				if (!key || !outlet || map[key]) continue;
-				map[key] = { outlet, productKeys: [] };
+						let outlet = String(p?.outlet || "");
+						if (!outlet && scopeMirror && typeof scopeMirror === "object") {
+							const fromMirror = scopeMirror[key]?.outlet || scopeMirror[p?.code]?.outlet || scopeMirror[canon(String(p?.code||""))]?.outlet;
+							if (fromMirror) outlet = String(fromMirror);
+						}
+						if (!outlet) {
+							try {
+								const legacy = await (prisma as any).attendantAssignment.findUnique({ where: { code: key } });
+								if (legacy?.outlet) outlet = String(legacy.outlet);
+							} catch {}
+						}
+						if (!key || !outlet || map[key]) continue;
+						map[key] = { outlet, productKeys: [] };
 			}
 		} catch {}
 
