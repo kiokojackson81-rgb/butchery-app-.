@@ -10,6 +10,7 @@ import { sendText } from "@/lib/wa";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
+import { touchWaSession } from "@/lib/waSession";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,7 @@ export async function POST(req: Request) {
           }).catch(() => {});
 
           if (!phoneE164) continue;
+          try { await touchWaSession(phoneE164); } catch {}
 
           // Idempotency: ensure we reply only once per wamid
           if (wamid) {
@@ -187,6 +189,59 @@ export async function POST(req: Request) {
 
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
+            // Fast command router: 1-7 shortcuts and keywords
+            const lower = text.toLowerCase();
+            const firstToken = lower.split(/\s+/)[0] || "";
+            const isDigitCmd = /^[1-7]$/.test(firstToken);
+            if (isDigitCmd) {
+              const digit = firstToken;
+              if (sessRole === "supervisor") {
+                const map: Record<string, string> = {
+                  "1": "SV_REVIEW_CLOSINGS",
+                  "2": "SV_REVIEW_DEPOSITS",
+                  "3": "SV_REVIEW_EXPENSES",
+                  "4": "SV_APPROVE_UNLOCK",
+                  "5": "SV_HELP",
+                  "6": "SV_HELP",
+                  "7": "SV_HELP",
+                };
+                await handleSupervisorAction(auth.sess, map[digit] || "SV_HELP", phoneE164);
+                continue;
+              } else if (sessRole === "supplier") {
+                const map: Record<string, string> = {
+                  "1": "SUPL_DELIVERY",
+                  "2": "SUPL_VIEW_OPENING",
+                  "3": "SUPL_DISPUTES",
+                  "4": "SUPL_HELP",
+                  "5": "SUPL_HELP",
+                  "6": "SUPL_HELP",
+                  "7": "SUPL_HELP",
+                };
+                await handleSupplierAction(auth.sess, map[digit] || "SUPL_HELP", phoneE164);
+                continue;
+              } else {
+                const map: Record<string, string> = {
+                  "1": "ATD_CLOSING",
+                  "2": "ATD_DEPOSIT",
+                  "3": "MENU_SUMMARY",
+                  "4": "MENU_SUPPLY",
+                  "5": "ATD_EXPENSE",
+                  "6": "MENU", // till not implemented here; fallback to help/menu
+                  "7": "MENU",
+                };
+                await handleAuthenticatedInteractive(auth.sess, map[digit] || "MENU");
+                continue;
+              }
+            }
+
+            // Keyword shorthands
+            if (/^(menu|help)$/i.test(text)) {
+              if (sessRole === "supervisor") { await sendSupervisorMenu(toGraphPhone(phoneE164)); continue; }
+              if (sessRole === "supplier") { await sendSupplierMenu(toGraphPhone(phoneE164)); continue; }
+              await sendAttendantMenu(toGraphPhone(phoneE164), auth.sess?.outlet || "your outlet");
+              continue;
+            }
+
             if (sessRole === "supervisor") {
               await handleSupervisorText(auth.sess, text, phoneE164);
             } else if (sessRole === "supplier") {

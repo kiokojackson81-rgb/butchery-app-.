@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
 import { sendText, warmUpSession, logOutbound } from "@/lib/wa";
+import { markLastMsg, touchWaSession } from "@/lib/waSession";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 
 function msSince(iso?: string) {
@@ -74,6 +75,8 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
       type: "login_welcome_sent",
     });
   } catch {}
+
+  try { await markLastMsg(phoneDB, "welcome_sent"); await touchWaSession(phoneDB); } catch {}
 
   try {
     await logOutbound({ direction: "in", templateName: null, payload: { event: "session.linked", phone: phoneDB, role, outlet: outletFinal, tradingPeriodId }, status: "INFO", type: "SESSION_LINKED" });
