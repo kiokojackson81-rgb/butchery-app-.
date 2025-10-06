@@ -86,19 +86,6 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // Fast-path: on text and WA_AI_ENABLED, hand off to GPT regardless of auth
-          if (type === "text" && String(process.env.WA_AI_ENABLED || "true").toLowerCase() === "true") {
-            const text = (m.text?.body ?? "").trim();
-            try {
-              const reply = await runGptForIncoming(phoneE164, text);
-              const r = String(reply || "").trim();
-              if (r) await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
-              continue;
-            } catch {
-              // fall through to legacy guard
-            }
-          }
-
           const auth = await ensureAuthenticated(phoneE164);
           if (!auth.ok) {
             // Universal guard: send login prompt once within a short window
@@ -116,6 +103,22 @@ export async function POST(req: Request) {
               await promptWebLogin(phoneE164, auth.reason);
             }
             continue;
+          }
+
+          // If authenticated and AI is enabled, you may optionally route free text to GPT instead of legacy flows.
+          // Keep role-aware handlers as the source of truth for known intents.
+          if (type === "text" && String(process.env.WA_AI_ENABLED || "true").toLowerCase() === "true") {
+            const text = (m.text?.body ?? "").trim();
+            try {
+              const reply = await runGptForIncoming(phoneE164, text);
+              const r = String(reply || "").trim();
+              if (r) {
+                await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                continue;
+              }
+            } catch {
+              // fall back to role flows below
+            }
           }
 
           const sessRole = String(auth.sess?.role || "attendant");

@@ -4,6 +4,7 @@ import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { finalizeLoginDirect } from "@/app/api/wa/auth/finalize/route";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { findPersonCodeTolerant } from "@/server/db_person";
+import { logOutbound } from "@/lib/wa";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
 
     // If wa phone provided, attempt direct finalize and bind
     if (wa) {
+      try { await logOutbound({ direction: "in", payload: { event: "login.page.submit", code: full || num, phone_guess: wa }, status: "INFO" }); } catch {}
       const fin = await finalizeLoginDirect(wa, pc.code);
       if (!(fin as any)?.ok) {
         // fall back to creating a pending session for webhook to finalize on first inbound
@@ -43,7 +45,10 @@ export async function POST(req: Request) {
         }).catch(() => {});
       } else {
         // On successful code validation, immediately send welcome via dispatcher
-        try { await sendOpsMessage(wa, { kind: "login_welcome", role: role as any, outlet: outlet || undefined }); } catch {}
+        try {
+          await sendOpsMessage(wa, { kind: "login_welcome", role: role as any, outlet: outlet || undefined });
+          await logOutbound({ direction: "out", payload: { event: "menu.sent", phone: wa, role, outlet }, status: "SENT", type: "menu.sent" });
+        } catch {}
       }
     } else {
       // No wa phone provided: create or refresh pending session for webhook
