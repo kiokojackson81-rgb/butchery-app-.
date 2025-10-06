@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendTemplate } from "@/lib/wa";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { WA_TEMPLATES } from "./templates";
 
 function todayISO(tz = process.env.TZ_DEFAULT || "Africa/Nairobi") {
@@ -27,9 +28,15 @@ export async function runAttendantClosingReminder() {
     // skip if already closed and no pending
     const hasClosing = await (prisma as any).attendantClosing.findFirst({ where: { date, outletName: outlet } }).catch(() => null);
     if (hasClosing && pending <= 0) continue;
-    const fmt = pending > 0 ? `KES ${pending.toLocaleString("en-KE")}` : "0";
-    const link = (process.env.APP_ORIGIN || "") + "/login";
-  try { await sendTemplate({ to: phone, template: WA_TEMPLATES.attendantClosingReminder, params: [outlet, fmt, link], contextType: "REMINDER" }); } catch {}
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      // old path (temporary)
+      const fmt = pending > 0 ? `KES ${pending.toLocaleString("en-KE")}` : "0";
+      const link = (process.env.APP_ORIGIN || "") + "/login";
+      try { await sendTemplate({ to: phone, template: WA_TEMPLATES.attendantClosingReminder, params: [outlet, fmt, link], contextType: "REMINDER" }); } catch {}
+    } else {
+      // new AI dispatcher path
+      try { await sendOpsMessage(phone, { kind: "closing_reminder", outlet, pendingAmount: pending }); } catch {}
+    }
     try { await (prisma as any).reminderSend.create({ data: { type: "attendant-21", phoneE164: phone, date } }); } catch {}
     count++;
   }
@@ -51,8 +58,12 @@ export async function runSupervisorReviewReminder() {
     const closingCount = await (prisma as any).attendantClosing.count({ where: { date, outletName: outlet } }).catch(() => 0);
     const total = depCount + expCount + closingCount;
     if (total <= 0) continue;
-    const link = (process.env.APP_ORIGIN || "") + "/login";
-  try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supervisorReviewReminder, params: [outlet, String(closingCount), String(depCount), String(expCount), link], contextType: "REMINDER" }); } catch {}
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      const link = (process.env.APP_ORIGIN || "") + "/login";
+      try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supervisorReviewReminder, params: [outlet, String(closingCount), String(depCount), String(expCount), link], contextType: "REMINDER" }); } catch {}
+    } else {
+      try { await sendOpsMessage(phone, { kind: "free_text", text: `Reminder: Review today for ${outlet}. Closings: ${closingCount}, Deposits pending: ${depCount}.` }); } catch {}
+    }
     try { await (prisma as any).reminderSend.create({ data: { type: "supervisor-22", phoneE164: phone, date } }); } catch {}
     count++;
   }
@@ -70,8 +81,12 @@ export async function runSupplierOpeningReminder() {
     if (dup) continue;
     const existing = await (prisma as any).supplyOpeningRow.findFirst({ where: { date, outletName: outlet } }).catch(() => null);
     if (existing) continue;
-    const link = (process.env.APP_ORIGIN || "") + "/login";
-  try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supplierOpeningReminder, params: [outlet, date, link], contextType: "REMINDER" }); } catch {}
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      const link = (process.env.APP_ORIGIN || "") + "/login";
+      try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supplierOpeningReminder, params: [outlet, date, link], contextType: "REMINDER" }); } catch {}
+    } else {
+      try { await sendOpsMessage(phone, { kind: "free_text", text: `Good morning! Submit today’s supply for ${outlet}.` }); } catch {}
+    }
     try { await (prisma as any).reminderSend.create({ data: { type: "supplier-0630", phoneE164: phone, date } }); } catch {}
     count++;
   }

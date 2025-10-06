@@ -17,6 +17,17 @@
     {
       "path": "/api/wa/jobs/supplier-opening-reminder",
       "schedule": "30 03 * * *"
+    },
+    {
+      "path": "/api/wa/jobs/ops-role-notice-morning",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/wa/jobs/ops-role-notice-evening",
+      "schedule": "0 21 * * *"
     }
+  ],
+  "routes": [
+    { "src": "/api/whatsapp/webhook", "dest": "/api/wa/webhook" }
   ]
 }

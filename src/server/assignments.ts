@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { canonFull } from "@/server/canon";
 import { sendText } from "@/lib/wa";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { getLoginLinkFor } from "@/server/wa_links";
 
 export type AssignmentSnapshot = {
@@ -162,10 +163,16 @@ export async function notifyAttendantAssignmentChange(codeRaw: string, opts?: {
   const outletText = afterSnapshot.outlet ? ` at ${afterSnapshot.outlet}` : "";
   const message = `Welcome ${name} — you’ve been assigned to manage ${productList}${outletText}.\nLogin to start managing: ${url}`;
 
-  const result = await sendText(phoneE164, message);
-  if (!result.ok) {
-    console.error(`[notifyAssign] send failed for ${code}: ${result.error}`);
-    return { sent: false, reason: "send-failed" };
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      const result = await sendText(phoneE164, message);
+      if (!result.ok) {
+        console.error(`[notifyAssign] send failed for ${code}: ${result.error}`);
+        return { sent: false, reason: "send-failed" };
+      }
+    } else {
+      try { await sendOpsMessage(phoneE164, { kind: "assignment_notice", role: "attendant", outlet: afterSnapshot.outlet || "" }); } catch {}
+    }
   }
 
   return { sent: true };

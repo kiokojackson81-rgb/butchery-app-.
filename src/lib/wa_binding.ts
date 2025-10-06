@@ -19,14 +19,18 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
   });
 
   if (!pending) {
-    await sendText(fromGraphNoPlus, "Link code not found or expired. Please retry from https://barakafresh.com/login");
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(fromGraphNoPlus, "Link code not found or expired. Please retry from https://barakafresh.com/login");
+    }
     return true; // handled
   }
 
   // Token freshness (10 minutes)
   const issued = Number((pending as any)?.cursor?.issuedAt || 0);
   if (!issued || Date.now() - issued > 10 * 60_000) {
-    await sendText(fromGraphNoPlus, "This link code has expired. Please login again at https://barakafresh.com/login");
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(fromGraphNoPlus, "This link code has expired. Please login again at https://barakafresh.com/login");
+    }
     await (prisma as any).waSession.delete({ where: { id: pending.id } }).catch(() => {});
     return true;
   }
@@ -34,7 +38,9 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
   // Enforce safe binding: if code already bound to another phone, block
   const existing = await (prisma as any).phoneMapping.findUnique({ where: { code: pending.code } });
   if (existing?.phoneE164 && existing.phoneE164 !== phonePlus) {
-    await sendText(fromGraphNoPlus, "This code is already linked to another phone. Contact your supervisor.");
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(fromGraphNoPlus, "This code is already linked to another phone. Contact your supervisor.");
+    }
     await (prisma as any).waSession.delete({ where: { id: pending.id } }).catch(() => {});
     return true;
   }

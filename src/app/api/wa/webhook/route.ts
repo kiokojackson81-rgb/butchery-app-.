@@ -6,6 +6,8 @@ import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
+import { sendText } from "@/lib/wa";
+import { toGraphPhone } from "@/server/canon";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,6 +125,21 @@ export async function POST(req: Request) {
 
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
+            // Optional GPT handoff: if enabled, forward to GPT route and reply
+            if (String(process.env.WA_AI_ENABLED || "true").toLowerCase() === "true") {
+              try {
+                const g = await fetch(`${process.env.APP_ORIGIN || ""}/api/whatsapp/gpt`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  cache: "no-store",
+                  body: JSON.stringify({ phoneE164, text })
+                });
+                const jr = await g.json().catch(() => ({} as any));
+                const reply = String(jr?.reply || "").trim();
+                if (reply) await sendText(toGraphPhone(phoneE164), reply, "AI_DISPATCH_TEXT");
+                continue;
+              } catch {}
+            }
             if (sessRole === "supervisor") {
               await handleSupervisorText(auth.sess, text, phoneE164);
             } else if (sessRole === "supplier") {

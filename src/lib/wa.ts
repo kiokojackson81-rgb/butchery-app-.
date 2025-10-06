@@ -29,6 +29,16 @@ export async function sendTemplate(opts: {
   langCode?: string;
   contextType?: string; // e.g., ASSIGNMENT | REMINDER | TEMPLATE_OUTBOUND
 }) {
+  // Feature-flag legacy senders: allow through only AI dispatcher and reopen templates
+  const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
+  const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
+  if (!autosend && opts.contextType && !allowedContext.includes(opts.contextType)) {
+    const toNorm = normalizeGraphPhone(opts.to);
+    const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
+    const waMessageId = `NOOP-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "feature-flag-noop", ...opts } }, waMessageId, status: "NOOP", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    return { ok: true, waMessageId, response: { noop: true } } as const;
+  }
   const toNorm = normalizeGraphPhone(opts.to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
@@ -98,6 +108,16 @@ export async function warmUpSession(to: string): Promise<boolean> {
  * Send plain text over WhatsApp.
  */
 export async function sendText(to: string, text: string, contextType?: string): Promise<SendResult> {
+  // Feature-flag legacy senders: allow AI dispatcher paths only
+  const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
+  const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
+  if (!autosend && (!contextType || !allowedContext.includes(contextType))) {
+    const toNorm = normalizeGraphPhone(to);
+    const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
+    const waMessageId = `NOOP-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: contextType || "TEXT_OUTBOUND" });
+    return { ok: true, waMessageId, response: { noop: true } } as const;
+  }
   const toNorm = normalizeGraphPhone(to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
@@ -133,6 +153,16 @@ export async function sendText(to: string, text: string, contextType?: string): 
 
 /** Send a generic interactive message body (list/buttons) */
 export async function sendInteractive(body: any, contextType?: string): Promise<SendResult> {
+  // Feature-flag legacy senders: allow AI dispatcher paths only
+  const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
+  const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
+  if (!autosend && (!contextType || !allowedContext.includes(contextType))) {
+    const toNorm = normalizeGraphPhone(body?.to || "");
+    const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
+    const waMessageId = `NOOP-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: contextType || "INTERACTIVE_OUTBOUND" });
+    return { ok: true, waMessageId, response: { noop: true } } as const;
+  }
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   if (DRY) {

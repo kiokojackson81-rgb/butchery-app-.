@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { getTodaySupplySummary, SupplySummaryLine } from "@/server/supply";
 import { createReviewItem } from "@/server/review";
 import { format } from "date-fns";
@@ -38,7 +39,12 @@ function uniquePhones(rows: Array<{ phoneE164: string | null }>): string[] {
 
 async function sendBulk(phones: string[], message: string) {
   if (!phones.length) return;
-  await Promise.allSettled(phones.map((phone) => sendText(phone, message)));
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    // old path (temporary)
+    await Promise.allSettled(phones.map((phone) => sendText(phone, message)));
+  } else {
+    await Promise.allSettled(phones.map((phone) => sendOpsMessage(phone, { kind: "free_text", text: message })));
+  }
 }
 
 export async function notifySupplyPosted(opts: {
@@ -86,7 +92,11 @@ If disputed by the outlet, Supervisor will contact you.`;
   await sendBulk(uniquePhones(supervisors), msgSupervisor);
   await sendBulk(uniquePhones(admins), msgAdmin);
   if (supplier?.phoneE164) {
-    await sendText(supplier.phoneE164, msgSupplier);
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(supplier.phoneE164, msgSupplier);
+    } else {
+      await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
+    }
   }
 
   return { sent: true };
@@ -121,7 +131,11 @@ Please review in the dashboard.`;
   await sendBulk(uniquePhones(supervisors), messageSupervisor);
 
   const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
-  await sendText(opts.attendantPhone, ack);
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    await sendText(opts.attendantPhone, ack);
+  } else {
+    await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
+  }
 
   return { ok: true };
 }

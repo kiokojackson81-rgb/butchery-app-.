@@ -1,0 +1,84 @@
+// src/lib/ai_util.ts
+import { WA_SYSTEM_PROMPT } from "@/ai/prompts/wa_system";
+
+export type OpsContext =
+  | { kind: "login_welcome"; role: "attendant"|"supplier"|"supervisor"; outlet?: string; name?: string }
+  | { kind: "closing_reminder"; outlet: string; pendingAmount?: number }
+  | { kind: "supply_notice"; outlet: string; list?: string }
+  | { kind: "assignment_notice"; role: string; outlet: string }
+  | { kind: "free_text"; text: string };
+
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+type GraphButtonPayload = {
+  messaging_product: "whatsapp";
+  to: string;
+  type: "interactive";
+  interactive: any; // keep loose; constructed buttons/lists
+};
+
+export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: string }): Promise<{ text?: string; interactive?: GraphButtonPayload }> {
+  // Fast-path some contexts without model calls when obvious
+  if (ctx.kind === "free_text") {
+    return { text: ctx.text };
+  }
+
+  const deepLink = opts?.deepLink || null;
+  const userPrompt = buildUserPrompt(ctx, deepLink || undefined);
+
+  // If AI is disabled, return a deterministic minimal message
+  if (String(process.env.WA_AI_ENABLED || "true").toLowerCase() !== "true") {
+    return { text: userPrompt.slice(0, 750) };
+  }
+
+  const sys = WA_SYSTEM_PROMPT;
+  try {
+    const resp = await fetch(OPENAI_API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 400,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: userPrompt }
+        ]
+      })
+    });
+    const json = await resp.json().catch(() => ({}));
+    const text = (json?.choices?.[0]?.message?.content || "").toString().trim();
+    return { text: (text || userPrompt).slice(0, 790) };
+  } catch (e) {
+    return { text: userPrompt.slice(0, 750) };
+  }
+}
+
+function buildUserPrompt(ctx: OpsContext, deepLink?: string): string {
+  switch (ctx.kind) {
+    case "login_welcome": {
+      const who = ctx.role === "attendant" ? "Attendant" : ctx.role === "supervisor" ? "Supervisor" : "Supplier";
+      const outlet = ctx.outlet ? ` — ${ctx.outlet}` : "";
+      return `Login successful for ${who}${outlet}. Provide a short welcome plus a numbered options menu for this role. If deep link is present, include a one-line instruction to tap it.\n${deepLink ? `Open link: ${deepLink}` : ""}`.trim();
+    }
+    case "closing_reminder": {
+      const amt = Number(ctx.pendingAmount || 0);
+      const line = amt > 0 ? `Pending deposit today: KES ${amt.toLocaleString("en-KE")}.` : "";
+      return `Closing reminder for ${ctx.outlet}. ${line} Provide a short nudge and show a compact options menu.`;
+    }
+    case "supply_notice": {
+      const list = ctx.list ? `\n${ctx.list}` : "";
+      return `Supply recorded for ${ctx.outlet}.${list}\nProvide an acknowledgement and offer next actions (e.g., Dispute, View deliveries, Help).`;
+    }
+    case "assignment_notice": {
+      return `Assignment updated: role=${ctx.role}, outlet=${ctx.outlet}. Provide a short confirmation and next-step menu.`;
+    }
+    case "free_text":
+      return ctx.text;
+  }
+}
+
+export type { GraphButtonPayload };

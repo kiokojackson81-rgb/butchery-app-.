@@ -175,6 +175,13 @@
 			"type": "shell",
 			"command": "npm i -D @playwright/test@^1.48.2",
 			"group": "build"
+		},
+		{
+			"label": "typecheck (on-demand)",
+			"type": "shell",
+			"command": "npm run typecheck",
+			"args": [],
+			"group": "build"
 		}
 	]
 }

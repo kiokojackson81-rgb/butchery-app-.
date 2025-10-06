@@ -21,18 +21,24 @@ async function phonesForOutlet(outlet: string, roles: ("attendant" | "supervisor
 export async function notifyOpeningLocked(outlet: string, date: string, summaryLine: string) {
   const tos = await phonesForOutlet(outlet, ["attendant", "supervisor"]);
   const body = `Opening stock locked for ${outlet} on ${date}:\n${summaryLine}`;
-  await Promise.all(tos.map((to: string) => sendText(to, body)));
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    await Promise.all(tos.map((to: string) => sendText(to, body)));
+  }
 }
 
 export async function notifyTransferCreated(fromOutlet: string, toOutlet: string, date: string, desc: string) {
   const tosFrom = await phonesForOutlet(fromOutlet, ["attendant", "supervisor"]);
   const tosTo = await phonesForOutlet(toOutlet, ["attendant", "supervisor"]);
   const msg = `Transfer on ${date}: ${desc}`;
-  await Promise.all([...new Set([...tosFrom, ...tosTo])].map((to: string) => sendText(to, msg)));
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    await Promise.all([...new Set([...tosFrom, ...tosTo])].map((to: string) => sendText(to, msg)));
+  }
 }
 
 export async function notifySupervisorDispute(outlet: string, date: string, desc: string) {
   const tos = await phonesForOutlet(outlet, ["supervisor"]);
   const msg = `Dispute filed (${outlet} • ${date}): ${desc}`;
-  await Promise.all(tos.map((to: string) => sendText(to, msg)));
+  if (process.env.WA_AUTOSEND_ENABLED === "true") {
+    await Promise.all(tos.map((to: string) => sendText(to, msg)));
+  }
 }

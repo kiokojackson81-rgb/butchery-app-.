@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { finalizeLoginDirect } from "@/app/api/wa/auth/finalize/route";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { findPersonCodeTolerant } from "@/server/db_person";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
@@ -40,6 +41,9 @@ export async function POST(req: Request) {
           update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
           create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
         }).catch(() => {});
+      } else {
+        // On successful code validation, immediately send welcome via dispatcher
+        try { await sendOpsMessage(wa, { kind: "login_welcome", role: role as any, outlet: outlet || undefined }); } catch {}
       }
     } else {
       // No wa phone provided: create or refresh pending session for webhook
@@ -50,7 +54,7 @@ export async function POST(req: Request) {
       }).catch(() => {});
     }
 
-    const link = businessDeepLink();
+  const link = businessDeepLink();
     if (!link) return NextResponse.json({ ok: false, code: "CONFIG", message: "WhatsApp not configured" }, { status: 500 });
     return NextResponse.json({ ok: true, role, outlet, waDeepLink: link });
   } catch (e: any) {
