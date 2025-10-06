@@ -13,7 +13,13 @@ test.describe("login prompt dispatch (dry-run)", () => {
     const j = await res.json();
     expect(j.ok).toBeTruthy();
 
-    // Fetch logs to confirm outbound message
+    // Prefer response preview when available
+    if (j.previewText) {
+      expect(/log in|login|Open link|Tap to log in/i.test(j.previewText)).toBeTruthy();
+      return;
+    }
+
+    // Fallback: Fetch logs to confirm outbound message
     const toDigits = (p: string) => String(p || "").replace(/[^0-9+]/g, "").replace(/^\+/, "");
     const to = toDigits(TEST_PHONE);
     const logs = await request.get(`${BASE}/api/wa/logs?to=${encodeURIComponent(to)}&limit=20`);

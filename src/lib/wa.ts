@@ -233,15 +233,28 @@ export async function logOutbound(entry: {
   type?: string | null;
 }) {
   try {
+    // Persist a copy of type inside payload.meta for visibility even if the column is absent/mismatched
+    const payload = (() => {
+      try {
+        const p = entry.payload || {};
+        if (entry.type && typeof p === "object" && p) {
+          if (!p.meta) (p as any).meta = {};
+          (p as any).meta._type = entry.type;
+        }
+        return p;
+      } catch {
+        return entry.payload;
+      }
+    })();
     await (prisma as any).waMessageLog.create({
       data: {
         attendantId: entry.attendantId ?? null,
         direction: entry.direction ?? "out",
         templateName: entry.templateName ?? null,
-        payload: entry.payload as any,
+        payload: payload as any,
         waMessageId: entry.waMessageId ?? null,
         status: entry.status ?? null,
-        type: entry.type ?? null,
+        // omit `type` field assignment to avoid Prisma client mismatches at runtime
       },
     });
   } catch {}

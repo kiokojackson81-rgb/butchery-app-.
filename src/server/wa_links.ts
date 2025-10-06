@@ -28,7 +28,7 @@ export async function createLoginLink(phoneE164: string) {
     await (prisma as any).waSession.create({
       data: {
         phoneE164,
-        role: null,
+        role: "attendant",
         code: null,
         outlet: null,
         state: "LOGIN",

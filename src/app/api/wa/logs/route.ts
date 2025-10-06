@@ -13,12 +13,20 @@ export async function GET(req: Request) {
     const after = searchParams.get("after") || undefined;
     const to = (searchParams.get("to") || "").replace(/[^0-9+]/g, "").replace(/^\+/, "");
 
+    // Build server-side filters
     let where: any = {};
-    // Simple contains on JSON payload stringified; DB impl can be optimized later
-    if (q) where = { OR: [
-      { templateName: { contains: q } },
-      { status: { contains: q } },
-    ] };
+    const ors: any[] = [];
+    if (to) {
+      const e164 = to.startsWith("+") ? to : "+" + to;
+      ors.push({ payload: { path: ["meta", "phoneE164"], equals: e164 } as any });
+      ors.push({ payload: { path: ["request", "to"], equals: to } as any });
+      ors.push({ payload: { path: ["to"], equals: to } as any });
+    }
+    if (q) {
+      ors.push({ templateName: { contains: q } });
+      ors.push({ status: { contains: q } });
+    }
+    if (ors.length) where = { OR: ors };
 
     const rows = await (prisma as any).waMessageLog.findMany({
       where,
@@ -36,17 +44,7 @@ export async function GET(req: Request) {
       },
     });
 
-    // Optional filter by recipient phone (normalized E.164 without '+')
-    const filtered = to
-      ? rows.filter((r: any) => {
-          const p = r?.payload as any;
-          const candidate = p?.request?.to || p?.to || p?.request?.recipient || "";
-          const norm = String(candidate).replace(/[^0-9+]/g, "").replace(/^\+/, "");
-          return norm ? norm.endsWith(to) || norm === to : false;
-        })
-      : rows;
-
-    return NextResponse.json({ ok: true, rows: filtered });
+    return NextResponse.json({ ok: true, rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }
