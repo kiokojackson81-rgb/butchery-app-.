@@ -24,6 +24,11 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   const role = String(pc.role || "attendant");
   let outletFinal: string | null = null;
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  const tradingPeriodId = outletFinal ? `${y}-${m}-${d}@${outletFinal}` : null;
   if (role === "attendant") {
     const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } });
     outletFinal = scope?.outletName ?? null;
@@ -44,9 +49,9 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
   try {
     const prev = await (prisma as any).waSession.findFirst({ where: { phoneE164: phoneDB } });
     if (prev) {
-      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString() } as any } });
+      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId } as any } });
     } else {
-      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString() } as any } });
+      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId } as any } });
     }
   } catch {}
 
@@ -64,10 +69,14 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
     await logOutbound({
       direction: "out",
       templateName: null,
-      payload: { meta: { phoneE164: phoneDB, outlet: outletFinal, role }, event: "login_welcome_sent" },
+      payload: { meta: { phoneE164: phoneDB, outlet: outletFinal, role, tradingPeriodId }, event: "login_welcome_sent" },
       status: "SENT",
       type: "login_welcome_sent",
     });
+  } catch {}
+
+  try {
+    await logOutbound({ direction: "in", templateName: null, payload: { event: "session.linked", phone: phoneDB, role, outlet: outletFinal, tradingPeriodId }, status: "INFO", type: "SESSION_LINKED" });
   } catch {}
 
   return { ok: true, role, code: pc.code, outlet: outletFinal, phoneE164: phoneDB } as const;

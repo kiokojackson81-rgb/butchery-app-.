@@ -7,6 +7,7 @@ import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedIntera
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText } from "@/lib/wa";
+import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
 
@@ -79,6 +80,12 @@ export async function POST(req: Request) {
 
           if (!phoneE164) continue;
 
+          // Idempotency: ensure we reply only once per wamid
+          if (wamid) {
+            const already = await (prisma as any).waMessageLog.findFirst({ where: { payload: { path: ["in_reply_to"], equals: wamid } as any } }).catch(() => null);
+            if (already) continue;
+          }
+
           // Helper button: resend login link
           const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;
           if (maybeButtonId === "open_login") {
@@ -110,10 +117,48 @@ export async function POST(req: Request) {
           if (type === "text" && String(process.env.WA_AI_ENABLED || "true").toLowerCase() === "true") {
             const text = (m.text?.body ?? "").trim();
             try {
+              // Lightweight intent router before GPT
+              const lower = text.toLowerCase();
+              const keywords: Array<[string, "attendant" | "supervisor" | "supplier"]> = [
+                ["closing", "attendant"],
+                ["deposit", "attendant"],
+                ["expense", "attendant"],
+                ["summary", "attendant"],
+                ["opening", "supplier"],
+                ["supply", "supplier"],
+              ];
+              const match = keywords.find(([k]) => lower.includes(k));
+              if (match) {
+                // Fall through to role flows below (handlers implement actual logic)
+              } else {
+                // Vague/greeting? If <3 words or greeting-like, send quick menu
+                const words = lower.split(/\s+/).filter(Boolean);
+                const isVague = words.length < 3 || /^(hi|hey|hello|ok|okay|niaje|mambo|sasa|yo)\b/.test(lower);
+                if (isVague) {
+                  const role = String(auth.sess?.role || "attendant");
+                  const to = toGraphPhone(phoneE164);
+                  if (role === "supervisor") await sendSupervisorMenu(to);
+                  else if (role === "supplier") await sendSupplierMenu(to);
+                  else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                  await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text }, status: "SENT", type: "INTENT_UNRESOLVED" });
+                  continue;
+                }
+              }
+
+              // GPT attempt with timeout and single retry; empty response falls back to menu
               const reply = await runGptForIncoming(phoneE164, text);
               const r = String(reply || "").trim();
               if (r) {
                 await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
+                continue;
+              } else {
+                const role = String(auth.sess?.role || "attendant");
+                const to = toGraphPhone(phoneE164);
+                if (role === "supervisor") await sendSupervisorMenu(to);
+                else if (role === "supplier") await sendSupplierMenu(to);
+                else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text, reason: "gpt-empty" }, status: "SENT", type: "INTENT_UNRESOLVED" });
                 continue;
               }
             } catch {

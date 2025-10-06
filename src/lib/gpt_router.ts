@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import WA_MASTER_PROMPT from "@/ai/prompts/wa_master";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+const GPT_TIMEOUT_MS = 15_000;
 
 type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
 
@@ -26,6 +27,13 @@ async function saveConversation(phoneE164: string, convo: ChatTurn[]) {
   } catch {}
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error("GPT_TIMEOUT")), ms);
+    p.then((v) => { clearTimeout(id); resolve(v); }, (e) => { clearTimeout(id); reject(e); });
+  });
+}
+
 export async function runGptForIncoming(phoneE164: string, userText: string): Promise<string> {
   const convo = await getConversation(phoneE164);
   const messages: ChatTurn[] = [
@@ -35,22 +43,36 @@ export async function runGptForIncoming(phoneE164: string, userText: string): Pr
   ];
 
   try {
-    const resp = await fetch(OPENAI_API_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.2, max_tokens: 500, messages })
+    async function callOnce() {
+      const resp = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.2, max_tokens: 500, messages })
+      });
+      const json = await resp.json().catch(() => ({}));
+      const status = resp.status;
+      const text = String(json?.choices?.[0]?.message?.content || "").trim();
+      return { status, text } as const;
+    }
+
+    // First attempt with timeout
+    let { status, text } = await withTimeout(callOnce(), GPT_TIMEOUT_MS).catch((e) => {
+      throw e;
     });
-    const json = await resp.json().catch(() => ({}));
-  const text = String(json?.choices?.[0]?.message?.content || "").trim();
+    // Retry once on transient errors
+    if ((status >= 500 || status === 429) && !text) {
+      ({ status, text } = await withTimeout(callOnce(), GPT_TIMEOUT_MS));
+    }
     // Save short transcript (cap to last ~8 turns)
-  const next: ChatTurn[] = [...convo, { role: "user", content: userText } as ChatTurn, { role: "assistant", content: text } as ChatTurn];
+    const next: ChatTurn[] = [...convo, { role: "user", content: userText } as ChatTurn, { role: "assistant", content: text } as ChatTurn];
     const trimmed = next.slice(-8);
     await saveConversation(phoneE164, trimmed);
-    return text || "(no response)";
+    return text || "";
   } catch (e: any) {
-    return "We couldn’t respond right now. Please try again in a moment.";
+    // On timeout/failure return empty string to allow fallback menu at the webhook
+    return "";
   }
 }

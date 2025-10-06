@@ -27,14 +27,14 @@ async function lastInboundAt(phoneE164: string): Promise<Date | null> {
 }
 
 export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
-  const ttl = Number(process.env.WA_SESSION_TTL_MIN || 60);
+  const ttlMin = Number(process.env.WA_SESSION_TTL_MIN || 60);
   const to = toE164.startsWith("+") ? toE164 : "+" + toE164;
 
   // If outside the 24h window: send ops_nudge template first to reopen
   let stale = true;
   try {
     const at = await lastInboundAt(to);
-    stale = minutesSince(at) > ttl;
+    stale = minutesSince(at) > 24 * 60; // strictly 24h for template reopen
   } catch { stale = true; }
 
   // Always ensure we have a login deep link handy for unauthenticated flows
@@ -45,7 +45,17 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
     const name = process.env.WA_TEMPLATE_NAME || "ops_nudge";
     const p1 = "BarakaOps needs your attention";
     const p2 = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
-    try { await sendTemplate({ to, template: name, params: [p1, p2], contextType: "TEMPLATE_REOPEN" }); } catch {}
+    // Throttle: ReminderSend unique per day/phone/type
+    const today = new Date();
+    const keyDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const type = "ops_nudge_v1";
+    const exists = await (prisma as any).reminderSend.findUnique({ where: { type_phoneE164_date: { type, phoneE164: to, date: keyDate } } }).catch(() => null);
+    if (!exists) {
+      try {
+        await sendTemplate({ to, template: name, params: [p1, p2], contextType: "TEMPLATE_REOPEN" });
+        await (prisma as any).reminderSend.create({ data: { type, phoneE164: to, date: keyDate } });
+      } catch {}
+    }
   }
 
   // Compose GPT message
