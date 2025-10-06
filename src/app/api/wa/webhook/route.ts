@@ -88,12 +88,12 @@ export async function POST(req: Request) {
 
           const auth = await ensureAuthenticated(phoneE164);
           if (!auth.ok) {
-            // Universal guard: send login prompt once within a short window
-            const tenMinAgo = new Date(Date.now() - 10 * 60_000);
+            // Universal guard: send login prompt at most once per 24 hours per phone
+            const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
             const recent = await (prisma as any).waMessageLog.findFirst({
               where: {
                 status: "LOGIN_PROMPT",
-                createdAt: { gt: tenMinAgo },
+                createdAt: { gt: windowStart },
                 payload: { path: ["phone"], equals: phoneE164 } as any,
               },
               select: { id: true },
