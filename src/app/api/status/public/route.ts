@@ -9,6 +9,22 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const doPing = url.searchParams.get("ping") === "1";
 
+  // Restrict access: require a shared key. Accept either header `x-status-key` or query `key`.
+  // If STATUS_PUBLIC_KEY is not configured, deny by default.
+  const requiredKey = process.env.STATUS_PUBLIC_KEY || "";
+  const providedKey = req.headers.get("x-status-key") || url.searchParams.get("key") || "";
+  if (!requiredKey || providedKey !== requiredKey) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "unauthorized",
+        note:
+          "Provide the correct key via header x-status-key or query ?key=... (configure STATUS_PUBLIC_KEY).",
+      },
+      { status: 401 }
+    );
+  }
+
   const now = new Date().toISOString();
   const WA_AI_ENABLED = process.env.WA_AI_ENABLED === "true";
   const WA_AUTOSEND_ENABLED = process.env.WA_AUTOSEND_ENABLED === "true";
@@ -70,6 +86,6 @@ export async function GET(req: Request) {
     public: { NEXT_PUBLIC_WA_PUBLIC_E164 },
     ping,
     note:
-      "Public-safe status. Secrets are NOT exposed. If your deployment uses Vercel protection, this route may still require a bypass token.",
+      "Public-safe status. Secrets are NOT exposed. Access requires STATUS_PUBLIC_KEY via header x-status-key or query ?key=.",
   });
 }
