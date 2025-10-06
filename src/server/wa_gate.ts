@@ -1,26 +1,9 @@
 import { createLoginLink } from "@/server/wa_links";
-import { sendText, sendInteractive } from "@/lib/wa";
-import { toGraphPhone, toE164DB } from "@/server/canon";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
+import { toGraphPhone } from "@/server/canon";
 
 export async function promptWebLogin(phoneE164: string, reason?: string) {
   const { url } = await createLoginLink(phoneE164);
-  const msg = `To continue, tap to log in:\n${url}`;
-  const toGraph = toGraphPhone(phoneE164);
-  if (process.env.WA_AUTOSEND_ENABLED === "true") {
-    // old path (temporary)
-    await sendText(toGraph, msg);
-    await sendInteractive({
-      to: toGraph,
-      type: "button",
-      body: { text: "Need the login link again?" },
-      action: {
-        buttons: [
-          { type: "reply", reply: { id: "open_login", title: "Send login link" } },
-          { type: "reply", reply: { id: "help", title: "Help" } },
-        ],
-      },
-    });
-  } else {
-    // no-op; new dispatcher will handle via login flows
-  }
+  // Route via centralized dispatcher; it will handle 24h reopen and composition
+  await sendOpsMessage(phoneE164, { kind: "login_prompt", reason });
 }

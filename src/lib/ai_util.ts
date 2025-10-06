@@ -6,6 +6,7 @@ export type OpsContext =
   | { kind: "closing_reminder"; outlet: string; pendingAmount?: number }
   | { kind: "supply_notice"; outlet: string; list?: string }
   | { kind: "assignment_notice"; role: string; outlet: string }
+  | { kind: "login_prompt"; reason?: string }
   | { kind: "free_text"; text: string };
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
@@ -59,6 +60,11 @@ export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: stri
 
 function buildUserPrompt(ctx: OpsContext, deepLink?: string): string {
   switch (ctx.kind) {
+    case "login_prompt": {
+      const reason = ctx.reason ? `Reason: ${ctx.reason}. ` : "";
+      const linkLine = deepLink ? `Tap to log in: ${deepLink}` : "Open the BarakaOps login page and complete sign-in.";
+      return `${reason}Please log in to continue. ${linkLine}`.trim();
+    }
     case "login_welcome": {
       const who = ctx.role === "attendant" ? "Attendant" : ctx.role === "supervisor" ? "Supervisor" : "Supplier";
       const outlet = ctx.outlet ? ` — ${ctx.outlet}` : "";
