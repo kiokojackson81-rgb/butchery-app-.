@@ -78,13 +78,13 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
     }
   } catch {}
 
-  // Refresh session to MENU
+  // Refresh session to MENU (ACTIVE)
   try {
     const prev = await (prisma as any).waSession.findFirst({ where: { phoneE164: phoneDB } });
     if (prev) {
-      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId } as any } });
+      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId, status: "ACTIVE" } as any } });
     } else {
-      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId } as any } });
+      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId, status: "ACTIVE" } as any } });
     }
   } catch {}
 
@@ -112,6 +112,9 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   try {
     await logOutbound({ direction: "in", templateName: null, payload: { event: "session.linked", phone: phoneDB, role, outlet: outletFinal, tradingPeriodId }, status: "INFO", type: "SESSION_LINKED" });
+  } catch {}
+  try {
+    await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneDB, meta: { phoneE164: phoneDB, session_state: "MENU", has_session: true }, event: "login.finalized" }, status: "INFO", type: "LOGIN_FINALIZED" });
   } catch {}
 
   return { ok: true, role, code: pc.code, outlet: outletFinal, phoneE164: phoneDB } as const;

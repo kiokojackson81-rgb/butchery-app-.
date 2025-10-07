@@ -40,7 +40,7 @@ export type SupplierCursor = {
   toOutlet?: string;
 };
 
-const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 60);
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
 
 function todayLocalISO() {
   const d = new Date();

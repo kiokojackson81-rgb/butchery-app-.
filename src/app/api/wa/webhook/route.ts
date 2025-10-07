@@ -79,17 +79,18 @@ export async function POST(req: Request) {
           const type = (m.type as string) || "MESSAGE";
           const wamid = m.id as string | undefined;
 
-          await (prisma as any).waMessageLog.create({
-            data: { direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type },
-          }).catch(() => {});
-
           if (!phoneE164) continue;
 
-          // Idempotency: ensure we reply only once per wamid
+          // Idempotency: if we've already sent a reply to this wamid, ignore repeats immediately
           if (wamid) {
             const already = await (prisma as any).waMessageLog.findFirst({ where: { payload: { path: ["in_reply_to"], equals: wamid } as any } }).catch(() => null);
             if (already) continue;
           }
+
+          // Log inbound after idempotency gate
+          await (prisma as any).waMessageLog.create({
+            data: { direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type },
+          }).catch(() => {});
 
           // Helper button: resend login link
           const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;
@@ -101,6 +102,15 @@ export async function POST(req: Request) {
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
           const auth = await ensureAuthenticated(phoneE164);
+          try {
+            await logOutbound({
+              direction: "in",
+              templateName: null,
+              payload: { phone: phoneE164, meta: { phoneE164, session_state: (auth as any)?.sess?.state, has_session: !!(auth as any)?.ok }, event: "inbound.info" },
+              status: "INFO",
+              type: "INBOUND_INFO",
+            });
+          } catch {}
           if (!auth.ok) {
             // Universal guard: send login prompt at most once per 24 hours per phone
             const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
@@ -117,7 +127,7 @@ export async function POST(req: Request) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
             }
             if (!recent) {
-              await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT" });
+              await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
               await promptWebLogin(phoneE164, auth.reason);
             }
             try { await touchWaSession(phoneE164); } catch {}

@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
 const APP_ORIGIN = process.env.APP_ORIGIN || "https://barakafresh.com";
-const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
 
 export async function createLoginLink(phoneE164: string) {
   const nonce = crypto.randomBytes(6).toString("hex"); // 12 chars
