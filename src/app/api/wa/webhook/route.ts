@@ -12,6 +12,7 @@ import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/w
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
+import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,62 @@ export async function GET(req: Request) {
 
 // POST: receive events
 export async function POST(req: Request) {
+          // Canonical intent/button ID helpers
+          function aliasToCanonical(id: string): string {
+            const u = String(id || "").toUpperCase();
+            const map: Record<string, string> = {
+              // Attendant legacy → canonical tabs
+              "ATT_CLOSING": "ATT_TAB_STOCK",
+              "ATT_DEPOSIT": "ATT_TAB_DEPOSITS",
+              "ATT_EXPENSE": "ATT_TAB_EXPENSES",
+              "MENU_SUPPLY": "ATT_TAB_SUPPLY",
+              "MENU_SUMMARY": "ATT_TAB_SUMMARY",
+              "TILL_COUNT": "ATT_TAB_TILL",
+              "MENU": "ATT_TAB_SUMMARY",
+              // Supplier legacy
+              "SPL_DELIVER": "SUP_TAB_SUPPLY_TODAY",
+              "SPL_RECENT": "SUP_TAB_VIEW",
+              "SPL_DISPUTES": "SUP_TAB_DISPUTE",
+              // Supervisor legacy
+              "SUP_REVIEW": "SV_TAB_REVIEW_QUEUE",
+              "SUP_REPORT": "SV_TAB_SUMMARIES",
+              "SUP_TXNS": "SV_TAB_SUMMARIES",
+            };
+            return map[u] || u;
+          }
+          function canonicalToFlowId(role: string, id: string): string {
+            const u = String(id || "").toUpperCase();
+            if (role === "supervisor") {
+              const map: Record<string, string> = {
+                "SV_TAB_REVIEW_QUEUE": "SUP_REVIEW",
+                "SV_TAB_SUMMARIES": "SUP_REPORT",
+                "SV_TAB_UNLOCK": "SUP_UNLOCK_CONFIRM", // best-effort mapping if supported
+                "SV_TAB_HELP": "SUP_REPORT", // fall back to summaries/help
+              };
+              return map[u] || u;
+            }
+            if (role === "supplier") {
+              const map: Record<string, string> = {
+                "SUP_TAB_SUPPLY_TODAY": "SPL_DELIVER",
+                "SUP_TAB_VIEW": "SPL_RECENT",
+                "SUP_TAB_DISPUTE": "SPL_DISPUTES",
+                "SUP_TAB_HELP": "SPL_MENU",
+              };
+              return map[u] || u;
+            }
+            // attendant (default)
+            const map: Record<string, string> = {
+              "ATT_TAB_STOCK": "ATT_CLOSING",
+              "ATT_TAB_SUPPLY": "MENU_SUPPLY",
+              "ATT_TAB_DEPOSITS": "ATT_DEPOSIT",
+              "ATT_TAB_EXPENSES": "ATT_EXPENSE",
+              "ATT_TAB_TILL": "MENU_TXNS",
+              "ATT_TAB_SUMMARY": "MENU_SUMMARY",
+              "LOCK_DAY": "SUMMARY_LOCK",
+              "LOCK_DAY_CONFIRM": "SUMMARY_LOCK",
+            };
+            return map[u] || u;
+          }
           function mapDigitToId(role: string, digit: string): string {
             if (role === "supervisor") {
               const map: Record<string, string> = {
@@ -68,15 +125,14 @@ export async function POST(req: Request) {
               return map[digit] || "SUPL_HELP";
             } else {
               const map: Record<string, string> = {
-                "1": "ATT_CLOSING",
-                "2": "ATT_DEPOSIT",
-                "3": "MENU_SUMMARY",
-                "4": "MENU_SUPPLY",
-                "5": "ATT_EXPENSE",
-                "6": "MENU",
-                "7": "HELP",
+                "1": "ATT_TAB_STOCK",
+                "2": "ATT_TAB_SUPPLY",
+                "3": "ATT_TAB_DEPOSITS",
+                "4": "ATT_TAB_EXPENSES",
+                "5": "ATT_TAB_TILL",
+                "6": "ATT_TAB_SUMMARY",
               };
-              return map[digit] || "MENU";
+              return map[digit] || "ATT_TAB_SUMMARY";
             }
           }
   const raw = await req.text();
@@ -220,50 +276,54 @@ export async function POST(req: Request) {
               return null;
             })();
 
-            // Persist OOC sample
-            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+            // Persist OOC sample (sanitized)
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
-            const sendButtons = async (buttons?: string[]) => {
-              const ids = (Array.isArray(buttons) && buttons.length ? buttons : ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"]).slice(0, 3);
+            const sendRoleTabs = async () => {
               const to = toGraphPhone(phoneE164);
-              const body = {
-                messaging_product: "whatsapp",
-                to,
-                type: "interactive",
-                interactive: {
-                  type: "button",
-                  body: { text: replyText ? replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim() : "Please choose an option:" },
-                  action: { buttons: ids.map((id) => ({ type: "reply", reply: { id, title: id } })) },
-                },
-              } as any;
-              await sendInteractive(body, "AI_DISPATCH_INTERACTIVE");
+              if (sessRole === "supervisor") return sendSupervisorMenu(to);
+              if (sessRole === "supplier") return sendSupplierMenu(to);
+              return sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
             };
 
-            if (!ooc || !ooc.intent) {
+            const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
+            if ((!ooc || !ooc.intent) && oocRequired) {
               // Invalid OOC → clarifier fallback (ops compose) without calling legacy menus
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
-              try { await sendButtons(); } catch {}
+              try { await sendRoleTabs(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
             }
 
             // Valid OOC intents
-            const intent: string = String(ooc.intent || "").toUpperCase();
-            const isAttOrMenu = /^(ATT_|MENU_)/.test(intent);
-            if (isAttOrMenu) {
-              // Drive handler via intent id
-              try { await handleAuthenticatedInteractive(auth.sess, intent); } catch {}
-              // Send GPT text back (strip OOC block)
-              const to = toGraphPhone(phoneE164);
-              const display = replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim();
-              if (display) {
-                try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
-              }
+            const chk = validateOOC(ooc);
+            if (!chk.ok) {
+              try {
+                await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", reason: chk.reason, field: chk.field, ooc: sanitizeForLog(ooc) }, status: "WARN", type: "OOC_INVALID" });
+              } catch {}
+              try { await sendRoleTabs(); } catch {}
               continue;
             }
 
-            // FREE_TEXT or other → send clarifier with buttons (from OOC if provided)
-            try { await sendButtons(Array.isArray(ooc.buttons) ? ooc.buttons : undefined); } catch {}
+            const intentRaw: string = String(ooc.intent || "");
+            const canonical = aliasToCanonical(intentRaw);
+            const flowId = canonicalToFlowId(sessRole, canonical);
+            // Route to role-specific handlers
+            const to = toGraphPhone(phoneE164);
+            const display = replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim();
+            try {
+              if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
+              else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
+              else await handleAuthenticatedInteractive(auth.sess, flowId);
+            } catch {}
+            if (display) {
+              try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
+            }
+            try { await sendRoleTabs(); } catch {}
+            continue;
+
+            // FREE_TEXT or other → send clarifier with full role tabs
+            try { await sendRoleTabs(); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback.free_text" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
             continue;
           }
@@ -405,7 +465,8 @@ export async function POST(req: Request) {
             const interactiveType = m.interactive?.type as string | undefined;
             const listId = m.interactive?.list_reply?.id as string | undefined;
             const buttonId = m.interactive?.button_reply?.id as string | undefined;
-            const id = listId || buttonId || "";
+            const idRaw = listId || buttonId || "";
+            const id = aliasToCanonical(idRaw);
             if (!id) continue;
             // GPT echo on interactive to record OOC and validate intent (when GPT_ONLY)
             if (GPT_ONLY) {
@@ -432,15 +493,17 @@ export async function POST(req: Request) {
                 }
               } catch {}
             }
-            if (sessRole === "supervisor") {
-              await handleSupervisorAction(auth.sess, id, phoneE164);
-              continue;
-            }
-            if (sessRole === "supplier") {
-              await handleSupplierAction(auth.sess, id, phoneE164);
-              continue;
-            }
-            await handleAuthenticatedInteractive(auth.sess, id);
+            const flowId = canonicalToFlowId(sessRole, id);
+            if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
+            else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
+            else await handleAuthenticatedInteractive(auth.sess, flowId);
+            // Always follow with tabs menu for role
+            try {
+              const to = toGraphPhone(phoneE164);
+              if (sessRole === "supervisor") await sendSupervisorMenu(to);
+              else if (sessRole === "supplier") await sendSupplierMenu(to);
+              else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+            } catch {}
             continue;
           }
 

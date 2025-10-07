@@ -11,35 +11,38 @@ export async function sendAttendantMenu(to: string, outlet: string) {
     const date = new Date().toISOString().slice(0, 10);
     const state = await getPeriodState(outlet, date);
     if (state === "LOCKED") {
-      await sendInteractive({
-        messaging_product: "whatsapp",
+      const payload = buildInteractiveListPayload({
         to,
-        type: "interactive",
-        interactive: {
-          type: "button",
-          body: { text: `Day is locked for ${outlet} (${date}).` },
-          action: {
-            buttons: [
-              { type: "reply", reply: { id: "MENU_SUPPLY", title: "View opening" } },
-              { type: "reply", reply: { id: "MENU_SUMMARY", title: "View summary" } },
-              { type: "reply", reply: { id: "MENU", title: "Help / Logout" } },
+        bodyText: `Day is locked for ${outlet} (${date}). Tabs available:`,
+        footerText: "BarakaOps",
+        buttonLabel: "Tabs",
+        sections: [
+          {
+            title: "Attendant Tabs",
+            rows: [
+              { id: "ATT_TAB_STOCK", title: "Stock" },
+              { id: "ATT_TAB_SUPPLY", title: "Supply" },
+              { id: "ATT_TAB_DEPOSITS", title: "Deposits" },
+              { id: "ATT_TAB_EXPENSES", title: "Expenses" },
+              { id: "ATT_TAB_TILL", title: "Till" },
+              { id: "ATT_TAB_SUMMARY", title: "Summary" },
             ],
           },
-        },
-      }, "AI_DISPATCH_INTERACTIVE");
+        ],
+      });
+      await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
       return;
     }
   } catch {}
   const cfg = await getAttendantConfig();
   const rows: any[] = [];
-  // Order per spec
-  rows.push({ id: "ATT_CLOSING", title: "Enter closing", description: "Open product list" });
-  if (cfg.enableDeposit) rows.push({ id: "ATT_DEPOSIT", title: "Submit deposit", description: "Record till deposit" });
-  if (cfg.enableExpense) rows.push({ id: "ATT_EXPENSE", title: "Add expense", description: "Name and amount" });
-  if (cfg.enableTillCount) rows.push({ id: "ATT_TILL", title: "Till count", description: "Manual cash count" });
-  if (cfg.enableSupplyView) rows.push({ id: "ATT_OPENING", title: "View opening", description: "Today’s opening stock" });
-  if (cfg.enableSubmitAndLock) rows.push({ id: "ATT_LOCK", title: "Submit & lock", description: "Finalize today" });
-  rows.push({ id: "ATT_HELP", title: "Help / Logout", description: "Get help or exit" });
+  // Canonical 6-tab menu (always shown)
+  rows.push({ id: "ATT_TAB_STOCK", title: "Stock", description: "Enter closing & waste" });
+  rows.push({ id: "ATT_TAB_SUPPLY", title: "Supply", description: "Opening math & add lines" });
+  rows.push({ id: "ATT_TAB_DEPOSITS", title: "Deposits", description: "Paste M-PESA SMS" });
+  rows.push({ id: "ATT_TAB_EXPENSES", title: "Expenses", description: "Quick categories" });
+  rows.push({ id: "ATT_TAB_TILL", title: "Till", description: "Payments / TXNS" });
+  rows.push({ id: "ATT_TAB_SUMMARY", title: "Summary", description: cfg.enableSubmitAndLock ? "Lock day when ready" : "Totals" });
 
   const payload = buildInteractiveListPayload({
     to,
@@ -53,10 +56,10 @@ export async function sendAttendantMenu(to: string, outlet: string) {
 
 export async function sendSupplierMenu(to: string) {
   const rows: any[] = [
-    { id: "SUPL_DELIVERY", title: "Submit delivery", description: "Record today’s opening" },
-    { id: "SUPL_VIEW_OPENING", title: "View today’s opening", description: "See entered items" },
-    { id: "SUPL_DISPUTES", title: "Resolve disputes", description: "View/resolve items" },
-    { id: "SUPL_HELP", title: "Help / Logout", description: "Get help or exit" },
+    { id: "SUP_TAB_SUPPLY_TODAY", title: "Deliveries today", description: "Add or view lines" },
+    { id: "SUP_TAB_VIEW", title: "View deliveries", description: "Recent activity" },
+    { id: "SUP_TAB_DISPUTE", title: "Disputes", description: "Open items" },
+    { id: "SUP_TAB_HELP", title: "Help / Logout", description: "Get help or exit" },
   ];
   const payload = buildInteractiveListPayload({
     to,
@@ -69,11 +72,10 @@ export async function sendSupplierMenu(to: string) {
 
 export async function sendSupervisorMenu(to: string) {
   const rows: any[] = [
-    { id: "SV_REVIEW_CLOSINGS", title: "Review closings" },
-    { id: "SV_REVIEW_DEPOSITS", title: "Review deposits" },
-    { id: "SV_REVIEW_EXPENSES", title: "Review expenses" },
-    { id: "SV_APPROVE_UNLOCK", title: "Approve / unlock day" },
-    { id: "SV_HELP", title: "Help / Logout" },
+    { id: "SV_TAB_REVIEW_QUEUE", title: "Review queue" },
+    { id: "SV_TAB_SUMMARIES", title: "Summaries" },
+    { id: "SV_TAB_UNLOCK", title: "Unlock / Adjust" },
+    { id: "SV_TAB_HELP", title: "Help / Logout" },
   ];
   const payload = buildInteractiveListPayload({
     to,

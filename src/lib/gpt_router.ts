@@ -50,7 +50,7 @@ export async function runGptForIncoming(phoneE164: string, userText: string): Pr
           "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.2, max_tokens: 500, messages })
+  body: JSON.stringify({ model: "gpt-4o-mini", temperature: 0.2, max_tokens: 400, messages })
       });
       const json = await resp.json().catch(() => ({}));
       const status = resp.status;
