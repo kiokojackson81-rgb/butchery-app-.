@@ -497,7 +497,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   }
 
   // Interpret menu choices
-  if (id === "MENU_SUBMIT_CLOSING" || id === "ATD_CLOSING") {
+  if (id === "MENU_SUBMIT_CLOSING" || id === "ATD_CLOSING" || id === "ATT_CLOSING") {
     if (!s.code || !s.outlet) {
       await sendText(phone, "Login first (send your code).");
       return;

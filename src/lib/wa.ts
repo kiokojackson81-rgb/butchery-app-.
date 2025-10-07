@@ -36,14 +36,14 @@ export async function sendTemplate(opts: {
     const toNorm = normalizeGraphPhone(opts.to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "feature-flag-noop", ...opts } }, waMessageId, status: "NOOP", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: { via: "feature-flag-noop", ...opts } }, waMessageId, status: "NOOP", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(opts.to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -77,12 +77,12 @@ export async function sendTemplate(opts: {
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     throw new Error(`WA send failed: ${res.status}`);
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -115,14 +115,14 @@ export async function sendText(to: string, text: string, contextType?: string): 
     const toNorm = normalizeGraphPhone(to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: contextType || "TEXT_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: contextType || "TEXT_OUTBOUND" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -143,11 +143,11 @@ export async function sendText(to: string, text: string, contextType?: string): 
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "TEXT_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "TEXT_OUTBOUND" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -160,14 +160,15 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
     const toNorm = normalizeGraphPhone(body?.to || "");
     const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: contextType || "INTERACTIVE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: contextType || "INTERACTIVE_OUTBOUND" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
+    // Ensure phoneE164 is present under meta for test filters
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -182,11 +183,11 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "INTERACTIVE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "INTERACTIVE_OUTBOUND" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 

@@ -19,8 +19,11 @@ export async function GET(req: Request) {
     if (to) {
       const e164 = to.startsWith("+") ? to : "+" + to;
       ors.push({ payload: { path: ["meta", "phoneE164"], equals: e164 } as any });
-      ors.push({ payload: { path: ["request", "to"], equals: to } as any });
-      ors.push({ payload: { path: ["to"], equals: to } as any });
+  ors.push({ payload: { path: ["request", "to"], equals: to } as any });
+  ors.push({ payload: { path: ["to"], equals: to } as any });
+  ors.push({ payload: { path: ["body", "to"], equals: to } as any });
+      // Some logs store phone directly on payload.phone (e.g., LOGIN_PROMPT markers)
+      ors.push({ payload: { path: ["phone"], equals: e164 } as any });
     }
     if (q) {
       ors.push({ templateName: { contains: q } });
