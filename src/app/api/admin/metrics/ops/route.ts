@@ -10,12 +10,16 @@ export async function GET() {
     const since6h = new Date(Date.now() - 6 * 60 * 60_000);
     const since24h = new Date(Date.now() - 24 * 60 * 60_000);
 
-    const [inbound6h, loginPrompts6h, dedup24h, oocInfo24h, outbounds24h] = await Promise.all([
+    const [inbound6h, loginPrompts6h, dedup24h, oocInfo24h, outbounds24h, gptOnly24h, gptOnlyInvalid24h, oocMismatch24h, gptFallback24h] = await Promise.all([
       (prisma as any).waMessageLog.count({ where: { direction: "in", createdAt: { gt: since6h } } }),
       (prisma as any).waMessageLog.count({ where: { status: "LOGIN_PROMPT", createdAt: { gt: since6h } } }),
       (prisma as any).waMessageLog.count({ where: { status: "INBOUND_DEDUP", createdAt: { gt: since24h } } }),
       (prisma as any).waMessageLog.findMany({ where: { type: "OOC_INFO", createdAt: { gt: since24h } }, select: { payload: true } }),
       (prisma as any).waMessageLog.findMany({ where: { direction: "out", createdAt: { gt: since24h } }, select: { status: true, payload: true } }),
+      (prisma as any).waMessageLog.count({ where: { type: "GPT_ONLY_INBOUND", createdAt: { gt: since24h } } }),
+      (prisma as any).waMessageLog.count({ where: { type: "OOC_INVALID", createdAt: { gt: since24h } } }),
+      (prisma as any).waMessageLog.count({ where: { type: "OOC_INTENT_MISMATCH", createdAt: { gt: since24h } } }),
+      (prisma as any).waMessageLog.count({ where: { type: "GPT_ONLY_FALLBACK", createdAt: { gt: since24h } } }),
     ]);
 
     const unauthenticatedRate = inbound6h ? loginPrompts6h / inbound6h : 0;
@@ -42,7 +46,14 @@ export async function GET() {
 
     const meta = { sampleOOC: (oocInfo24h?.[0] as any)?.payload?.meta?.ooc ?? null };
 
-    return NextResponse.json({ ok: true, unauthenticatedRate, inbound_dedup_hits: dedup24h, interactive_vs_numeric: interactiveVsNumeric, duplicate_outbounds_skipped: duplicateOutboundSkips, meta });
+    const gptOnly = {
+      gpt_only_total_24h: gptOnly24h,
+      gpt_only_ooc_invalid_24h: gptOnlyInvalid24h,
+      ooc_intent_mismatch_24h: oocMismatch24h,
+      gpt_only_fallback_sends_24h: gptFallback24h,
+    };
+
+    return NextResponse.json({ ok: true, unauthenticatedRate, inbound_dedup_hits: dedup24h, interactive_vs_numeric: interactiveVsNumeric, duplicate_outbounds_skipped: duplicateOutboundSkips, gptOnly, meta });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }

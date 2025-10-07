@@ -7,7 +7,7 @@ import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
-import { sendText } from "@/lib/wa";
+import { sendText, sendInteractive } from "@/lib/wa";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
@@ -82,6 +82,7 @@ export async function POST(req: Request) {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
 
   if (!verifySignature(raw, sig)) {
     if (!DRY) {
@@ -195,68 +196,76 @@ export async function POST(req: Request) {
           const sessRole = String(auth.sess?.role || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
 
-          // Fast path: for text, handle numeric shortcuts and keywords first
-          if (type === "text") {
+          // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
+          if (type === "text" && GPT_ONLY) {
             const text = (m.text?.body ?? "").trim();
-            const lower = text.toLowerCase();
-            const firstToken = lower.split(/\s+/)[0] || "";
-            const isDigitCmd = /^[1-7]$/.test(firstToken);
-            if (isDigitCmd) {
-              const digit = firstToken;
-              if (sessRole === "supervisor") {
-                const map: Record<string, string> = {
-                  "1": "SV_REVIEW_CLOSINGS",
-                  "2": "SV_REVIEW_DEPOSITS",
-                  "3": "SV_REVIEW_EXPENSES",
-                  "4": "SV_APPROVE_UNLOCK",
-                  "5": "SV_HELP",
-                  "6": "SV_HELP",
-                  "7": "SV_HELP",
-                };
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
-                await handleSupervisorAction(auth.sess, map[digit] || "SV_HELP", phoneE164);
-                continue;
-              } else if (sessRole === "supplier") {
-                const map: Record<string, string> = {
-                  "1": "SUPL_DELIVERY",
-                  "2": "SUPL_VIEW_OPENING",
-                  "3": "SUPL_DISPUTES",
-                  "4": "SUPL_HELP",
-                  "5": "SUPL_HELP",
-                  "6": "SUPL_HELP",
-                  "7": "SUPL_HELP",
-                };
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
-                await handleSupplierAction(auth.sess, map[digit] || "SUPL_HELP", phoneE164);
-                continue;
-              } else {
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
-                // DRY-mode pre-enforcement: set state early so tests see it immediately
-                if (digit === "1" && DRY) {
-                  try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "CLOSING_PICK" } }); } catch {}
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "NUMERIC_PRESET", id: "ATT_CLOSING" }, status: "HANDLED" }); } catch {}
-                }
-                await handleAuthenticatedInteractive(auth.sess, mapDigitToId(sessRole, digit));
-                // DRY-mode enforcement for test observability: ensure session enters CLOSING_PICK on '1'
-                if (digit === "1" && DRY) {
-                  try {
-                    await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "CLOSING_PICK" } });
-                  } catch {}
-                  try {
-                    await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "NUMERIC_HANDLED", id: "ATT_CLOSING" }, status: "HANDLED" });
-                  } catch {}
-                }
-                continue;
-              }
-            }
+            // Mark GPT-only path entry
+            try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
 
-            // Keyword shorthands
-            if (/^(menu|help)$/i.test(text)) {
-              if (sessRole === "supervisor") { await sendSupervisorMenu(toGraphPhone(phoneE164)); continue; }
-              if (sessRole === "supplier") { await sendSupplierMenu(toGraphPhone(phoneE164)); continue; }
-              await sendAttendantMenu(toGraphPhone(phoneE164), auth.sess?.outlet || "your outlet");
+            // Call GPT
+            const r = await runGptForIncoming(phoneE164, text);
+            const replyText = String(r || "").trim();
+
+            // Try OOC parse
+            const ooc = (() => {
+              try {
+                const start = replyText.lastIndexOf("<<<OOC>");
+                const end = replyText.lastIndexOf("</OOC>>>");
+                if (start >= 0 && end > start) {
+                  const jsonPart = replyText.substring(start + 7, end).trim();
+                  const parsed = JSON.parse(jsonPart);
+                  return parsed;
+                }
+              } catch {}
+              return null;
+            })();
+
+            // Persist OOC sample
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+
+            const sendButtons = async (buttons?: string[]) => {
+              const ids = (Array.isArray(buttons) && buttons.length ? buttons : ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"]).slice(0, 3);
+              const to = toGraphPhone(phoneE164);
+              const body = {
+                messaging_product: "whatsapp",
+                to,
+                type: "interactive",
+                interactive: {
+                  type: "button",
+                  body: { text: replyText ? replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim() : "Please choose an option:" },
+                  action: { buttons: ids.map((id) => ({ type: "reply", reply: { id, title: id } })) },
+                },
+              } as any;
+              await sendInteractive(body, "AI_DISPATCH_INTERACTIVE");
+            };
+
+            if (!ooc || !ooc.intent) {
+              // Invalid OOC → clarifier fallback (ops compose) without calling legacy menus
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
+              try { await sendButtons(); } catch {}
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
             }
+
+            // Valid OOC intents
+            const intent: string = String(ooc.intent || "").toUpperCase();
+            const isAttOrMenu = /^(ATT_|MENU_)/.test(intent);
+            if (isAttOrMenu) {
+              // Drive handler via intent id
+              try { await handleAuthenticatedInteractive(auth.sess, intent); } catch {}
+              // Send GPT text back (strip OOC block)
+              const to = toGraphPhone(phoneE164);
+              const display = replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim();
+              if (display) {
+                try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
+              }
+              continue;
+            }
+
+            // FREE_TEXT or other → send clarifier with buttons (from OOC if provided)
+            try { await sendButtons(Array.isArray(ooc.buttons) ? ooc.buttons : undefined); } catch {}
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback.free_text" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
+            continue;
           }
 
           // If authenticated and AI is enabled, route remaining free text to GPT with a light intent guard.
@@ -398,6 +407,31 @@ export async function POST(req: Request) {
             const buttonId = m.interactive?.button_reply?.id as string | undefined;
             const id = listId || buttonId || "";
             if (!id) continue;
+            // GPT echo on interactive to record OOC and validate intent (when GPT_ONLY)
+            if (GPT_ONLY) {
+              try {
+                const echo = `user selected ${id}`;
+                const r = await runGptForIncoming(phoneE164, echo);
+                const replyText = String(r || "").trim();
+                const ooc = (() => {
+                  try {
+                    const start = replyText.lastIndexOf("<<<OOC>");
+                    const end = replyText.lastIndexOf("</OOC>>>");
+                    if (start >= 0 && end > start) {
+                      const jsonPart = replyText.substring(start + 7, end).trim();
+                      const parsed = JSON.parse(jsonPart);
+                      return parsed;
+                    }
+                  } catch {}
+                  return null;
+                })();
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                const intent = String(ooc?.intent || "").toUpperCase();
+                if (intent && intent !== id) {
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "WARN", type: "OOC_INTENT_MISMATCH" }); } catch {}
+                }
+              } catch {}
+            }
             if (sessRole === "supervisor") {
               await handleSupervisorAction(auth.sess, id, phoneE164);
               continue;
@@ -410,7 +444,7 @@ export async function POST(req: Request) {
             continue;
           }
 
-          if (type === "text") {
+          if (type === "text" && !GPT_ONLY) {
             const text = (m.text?.body ?? "").trim();
             if (sessRole === "supervisor") {
               await handleSupervisorText(auth.sess, text, phoneE164);
