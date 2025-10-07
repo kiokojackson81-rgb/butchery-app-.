@@ -21,7 +21,36 @@ export async function POST(req: Request) {
     const num = canonNum(code || "");
     if (!full && !num) return NextResponse.json({ ok: false, code: "INVALID_CODE", message: "Invalid code" }, { status: 400 });
 
+    // 1) Try tolerant DB match (active-only)
     let pc: any = await findPersonCodeTolerant(full).catch((e:any) => { if (/ambiguous/i.test(String(e?.message))) throw Object.assign(new Error("AMBIGUOUS_CODE"), { code: "AMBIGUOUS_CODE" }); return null; });
+
+    // 2) If not found, fall back to Settings.admin_codes mirror and re-sync DB to avoid stale inactive rows
+    if (!pc) {
+      try {
+        const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+        const list: any[] = Array.isArray((row as any)?.value) ? (row as any).value : [];
+        const active = list.filter((p: any) => !!p?.active);
+        let person = active.find((p: any) => canonFull(p?.code || "") === full);
+        if (!person && num) {
+          const matches = active.filter((p: any) => canonNum(p?.code || "") === num);
+          if (matches.length === 1) person = matches[0];
+          else if (matches.length > 1) throw Object.assign(new Error("AMBIGUOUS_CODE"), { code: "AMBIGUOUS_CODE" });
+        }
+        if (person) {
+          const pcCode = canonFull(person.code || full);
+          const pcRole = String(person.role || "attendant").toLowerCase();
+          const existing = await (prisma as any).personCode.findUnique({ where: { code: pcCode } }).catch(() => null);
+          if (existing) {
+            await (prisma as any).personCode.update({ where: { code: pcCode }, data: { role: pcRole, name: person?.name || existing?.name || null, active: true } });
+          } else {
+            await (prisma as any).personCode.create({ data: { code: pcCode, role: pcRole, name: person?.name || null, active: true } });
+          }
+          // Re-query via tolerant helper to keep single source of truth
+          pc = await findPersonCodeTolerant(pcCode).catch(() => null);
+        }
+      } catch {}
+    }
+
     if (!pc) return NextResponse.json({ ok: false, code: "INVALID_CODE", message: "That code wasn’t found or is inactive. Check with Admin." }, { status: 404 });
 
     const role = String(pc.role || "attendant");
