@@ -23,7 +23,7 @@ export async function GET() {
         // old path (temporary)
         try {
           const body = await menuMain(phone, a.outlet || undefined);
-          const res = await sendInteractive(body);
+          const res = await sendInteractive(body, "AI_DISPATCH_INTERACTIVE");
           await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: res }, waMessageId: (res as any)?.waMessageId ?? null, status: (res as any)?.ok ? "SENT" : "ERROR" });
         } catch (err) {
           await logOutbound({ direction: "out", templateName: null, payload: { error: String((err as any)?.message || err) }, status: "ERROR" });

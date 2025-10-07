@@ -35,6 +35,28 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function runGptForIncoming(phoneE164: string, userText: string): Promise<string> {
+  // DRY-run or missing API key: return a deterministic stub with valid OOC
+  const DRY = (process.env.WA_DRY_RUN === "true") || (process.env.NODE_ENV !== "production");
+  if (DRY || !process.env.OPENAI_API_KEY) {
+    const t = String(userText || "");
+    const isStock = /^\s*(1|stock)\s*$/i.test(t);
+    const intent = isStock ? "ATT_TAB_STOCK" : "FREE_TEXT";
+    const text = isStock ? "📦 Stock — quick actions." : "Let’s get you moving. Use the tabs below.";
+    const ooc = {
+      intent,
+      args: {},
+      buttons: [
+        "ATT_TAB_STOCK",
+        "ATT_TAB_SUPPLY",
+        "ATT_TAB_DEPOSITS",
+        "ATT_TAB_EXPENSES",
+        "ATT_TAB_TILL",
+        "ATT_TAB_SUMMARY",
+      ],
+      next_state_hint: "MENU",
+    };
+    return `${text}\n\n<<<OOC>\n${JSON.stringify(ooc)}\n</OOC>>>`;
+  }
   const convo = await getConversation(phoneE164);
   const messages: ChatTurn[] = [
     { role: "system", content: WA_MASTER_PROMPT },

@@ -107,7 +107,7 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
   switch (replyId) {
     case "SUP_REVIEW": {
       await saveSession(sess.id, { state: "SUP_REVIEW_PICK_FILTER", cursor: { ...(sess.cursor as any), date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewFilterButtons() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewFilterButtons() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SUP_FILTER_ALL":
     case "SUP_FILTER_WASTE":
@@ -120,11 +120,11 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
       const items = await getPendingReviewItems(filter, today, cur.outlet);
       await saveSession(sess.id, { state: "SUP_REVIEW_LIST", cursor: cur });
       if (!items.length) {
-        await sendText(gp, "No pending items.");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+        await sendText(gp, "No pending items.", "AI_DISPATCH_TEXT");
+        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
       }
       const rows = items.map((i) => ({ id: i.id, title: `${String(i.type || "").replace(/_/g, " ")}`, desc: `${new Date(i.date).toISOString().slice(0, 10)} • ${i.outlet}` }));
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewList(rows) as any });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewList(rows) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SUP_TXNS": {
       // Top 10 today; if none, last 3 days
@@ -134,20 +134,20 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
         deps = await (prisma as any).attendantDeposit.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10 });
       }
       if (!deps.length) {
-        await sendText(gp, "No deposits.");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+        await sendText(gp, "No deposits.", "AI_DISPATCH_TEXT");
+        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
       }
       const items = deps.map((d: any) => ({ id: d.id, line: compactDepositLine(d) }));
       await saveSession(sess.id, { state: "SUP_DEPOSIT_LIST", cursor: { ...(sess.cursor as any), date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositList(items) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositList(items) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SUP_REPORT": {
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSummaryChoiceButtons() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSummaryChoiceButtons() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SUP_SUMMARY_ALL": {
       const text = await computeSummaryText(today, undefined);
-      await sendText(gp, text);
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+  await sendText(gp, text, "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
     }
   }
 
@@ -156,37 +156,37 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
     const id = replyId.split(":")[1]!;
     const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
     if (!item) {
-      await sendText(gp, "Item not found.");
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+      await sendText(gp, "Item not found.", "AI_DISPATCH_TEXT");
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
-    await sendText(gp, compactReviewText(item));
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any });
+  await sendText(gp, compactReviewText(item), "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SUP_APPROVE:")) {
     const id = replyId.split(":")[1]!;
     await (prisma as any).reviewItem.update({ where: { id }, data: { status: "approved" } });
-    await sendText(gp, "Approved ✅");
+  await sendText(gp, "Approved ✅", "AI_DISPATCH_TEXT");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SUP_REJECT:")) {
     await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), date: today } });
-    return sendText(gp, "Send a short reason (max 200 chars).");
+  return sendText(gp, "Send a short reason (max 200 chars).", "AI_DISPATCH_TEXT");
   }
 
   if (replyId.startsWith("SUP_D:")) {
     const id = replyId.split(":")[1]!;
     const dep = await (prisma as any).attendantDeposit.findUnique({ where: { id } });
     if (!dep) {
-      await sendText(gp, "Deposit not found.");
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+      await sendText(gp, "Deposit not found.", "AI_DISPATCH_TEXT");
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     await saveSession(sess.id, { state: "SUP_DEPOSIT_ITEM", cursor: { ...(sess.cursor as any), depositId: id, date: today } });
-    await sendText(gp, compactDepositLine(dep));
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositModerationButtons(id) as any });
+  await sendText(gp, compactDepositLine(dep), "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildDepositModerationButtons(id) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SUP_D_VALID:")) {
@@ -199,17 +199,17 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
         await notifySupplier(dep.outletName, `Deposit VALID for ${dep.outletName}: KSh ${dep.amount}`);
       }
     } catch {}
-    await sendText(gp, "Marked VALID ✅");
+  await sendText(gp, "Marked VALID ✅", "AI_DISPATCH_TEXT");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SUP_D_INVALID:")) {
     await saveSession(sess.id, { state: "SUP_DEPOSIT_ITEM", cursor: { ...(sess.cursor as any), date: today } });
-    return sendText(gp, "Send a short reason for invalidation.");
+  return sendText(gp, "Send a short reason for invalidation.", "AI_DISPATCH_TEXT");
   }
 
-  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
 }
 
 // Text handler: consumes free-text reasons for reject/invalid flows
@@ -226,9 +226,9 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
     const item = await (prisma as any).reviewItem.findUnique({ where: { id: cur.reviewId } });
     const payload = { ...(item?.payload as any), reason };
     await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: "rejected", payload } });
-    await sendText(gp, "Rejected ❌");
+  await sendText(gp, "Rejected ❌", "AI_DISPATCH_TEXT");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, reviewId: undefined } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if ((sess.state as SupervisorState) === "SUP_DEPOSIT_ITEM" && cur.depositId) {
@@ -242,13 +242,13 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
         await notifySupplier(dep.outletName, `Deposit INVALID for ${dep.outletName}: KSh ${dep.amount}. Reason: ${reason}`);
       }
     } catch {}
-    await sendText(gp, "Marked INVALID ❌");
+  await sendText(gp, "Marked INVALID ❌", "AI_DISPATCH_TEXT");
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, depositId: undefined } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   // Default
-  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
 }
 
 async function computeSummaryText(date: string, outlet?: string) {

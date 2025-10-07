@@ -46,9 +46,9 @@ export async function sendAttendantMenu(to: string, outlet: string) {
 
   const payload = buildInteractiveListPayload({
     to,
-    bodyText: `Welcome — you’re logged in as Attendant for ${outlet} (${new Date().toISOString().slice(0,10)}). Choose an option:`,
+    bodyText: `You’re logged in as Attendant for ${outlet} (${new Date().toISOString().slice(0,10)}). Use the tabs:`,
     footerText: "BarakaOps",
-    buttonLabel: "Choose",
+    buttonLabel: "Tabs",
     sections: [{ title: "Menu", rows }],
   });
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
@@ -63,8 +63,9 @@ export async function sendSupplierMenu(to: string) {
   ];
   const payload = buildInteractiveListPayload({
     to,
-    bodyText: `Welcome — you’re logged in as Supplier (${new Date().toISOString().slice(0,10)}).`,
+    bodyText: `You’re logged in as Supplier (${new Date().toISOString().slice(0,10)}).`,
     footerText: "BarakaOps",
+    buttonLabel: "Tabs",
     sections: [{ title: "Menu", rows }],
   });
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
@@ -79,8 +80,9 @@ export async function sendSupervisorMenu(to: string) {
   ];
   const payload = buildInteractiveListPayload({
     to,
-    bodyText: `Welcome — Supervisor (${new Date().toISOString().slice(0,10)}).`,
+    bodyText: `You’re logged in as Supervisor (${new Date().toISOString().slice(0,10)}).`,
     footerText: "BarakaOps",
+    buttonLabel: "Tabs",
     sections: [{ title: "Menu", rows }],
   });
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");

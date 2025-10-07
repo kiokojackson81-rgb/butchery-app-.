@@ -290,6 +290,10 @@ export async function POST(req: Request) {
             if ((!ooc || !ooc.intent) && oocRequired) {
               // Invalid OOC → clarifier fallback (ops compose) without calling legacy menus
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
+              try {
+                const to = toGraphPhone(phoneE164);
+                await sendText(to, "I didn't quite get that. Use the tabs below.", "AI_DISPATCH_TEXT");
+              } catch {}
               try { await sendRoleTabs(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
@@ -299,7 +303,7 @@ export async function POST(req: Request) {
             const chk = validateOOC(ooc);
             if (!chk.ok) {
               try {
-                await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", reason: chk.reason, field: chk.field, ooc: sanitizeForLog(ooc) }, status: "WARN", type: "OOC_INVALID" });
+                await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", reason: chk.reason, details: (chk as any).details, ooc: sanitizeForLog(ooc) }, status: "WARN", type: "OOC_INVALID" });
               } catch {}
               try { await sendRoleTabs(); } catch {}
               continue;
@@ -320,6 +324,7 @@ export async function POST(req: Request) {
               try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
             }
             try { await sendRoleTabs(); } catch {}
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
 
             // FREE_TEXT or other → send clarifier with full role tabs
@@ -504,6 +509,7 @@ export async function POST(req: Request) {
               else if (sessRole === "supplier") await sendSupplierMenu(to);
               else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
             } catch {}
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
           }
 
