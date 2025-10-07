@@ -2,6 +2,7 @@
 // WhatsApp Cloud (Meta Graph API) transport with optional dry-run.
 
 import { prisma } from "@/lib/prisma";
+import { logMessage } from "@/lib/wa_log";
 
 // Treat any non-production environment as dry-run by default to simplify local dev.
 // Still allow explicit WA_DRY_RUN=true in production-like envs for safety tests.
@@ -36,7 +37,7 @@ export async function sendTemplate(opts: {
     const toNorm = normalizeGraphPhone(opts.to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: { via: "feature-flag-noop", ...opts } }, waMessageId, status: "NOOP", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, request: { via: "feature-flag-noop", ...opts } }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(opts.to);
@@ -115,7 +116,7 @@ export async function sendText(to: string, text: string, contextType?: string): 
     const toNorm = normalizeGraphPhone(to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: contextType || "TEXT_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(to);
@@ -160,7 +161,7 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
     const toNorm = normalizeGraphPhone(body?.to || "");
     const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: contextType || "INTERACTIVE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(body?.to || "");
@@ -234,29 +235,14 @@ export async function logOutbound(entry: {
   type?: string | null;
 }) {
   try {
-    // Persist a copy of type inside payload.meta for visibility even if the column is absent/mismatched
-    const payload = (() => {
-      try {
-        const p = entry.payload || {};
-        if (entry.type && typeof p === "object" && p) {
-          if (!p.meta) (p as any).meta = {};
-          (p as any).meta._type = entry.type;
-        }
-        return p;
-      } catch {
-        return entry.payload;
-      }
-    })();
-    await (prisma as any).waMessageLog.create({
-      data: {
-        attendantId: entry.attendantId ?? null,
-        direction: entry.direction ?? "out",
-        templateName: entry.templateName ?? null,
-        payload: payload as any,
-        waMessageId: entry.waMessageId ?? null,
-        status: entry.status ?? null,
-        // omit `type` field assignment to avoid Prisma client mismatches at runtime
-      },
+    await logMessage({
+      attendantId: entry.attendantId ?? null,
+      direction: entry.direction ?? "out",
+      templateName: entry.templateName ?? null,
+      payload: entry.payload,
+      waMessageId: entry.waMessageId ?? null,
+      status: entry.status ?? null,
+      type: entry.type ?? null,
     });
   } catch {}
 }

@@ -40,6 +40,13 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
 
   const hasCreds = !!(sess.code);
   const isLoginish = sess.state === "LOGIN" || sess.state === "SPLASH";
+  // Race guard: if we finalized very recently, treat as authenticated to avoid a login loop
+  try {
+    const lastFin = (sess as any).lastFinalizeAt ? new Date((sess as any).lastFinalizeAt).getTime() : 0;
+    if (lastFin && Date.now() - lastFin < 20_000 && hasCreds) {
+      return { ok: true, sess };
+    }
+  } catch {}
   // Strong signal from finalize: if cursor.status === "ACTIVE" and we have creds, treat as authenticated
   const isCursorActive = Boolean((sess?.cursor as any)?.status === "ACTIVE");
   if (hasCreds && isCursorActive) {

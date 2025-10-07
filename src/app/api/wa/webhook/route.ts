@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
+import { logMessage } from "@/lib/wa_log";
 import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
@@ -42,6 +43,42 @@ export async function GET(req: Request) {
 
 // POST: receive events
 export async function POST(req: Request) {
+          function mapDigitToId(role: string, digit: string): string {
+            if (role === "supervisor") {
+              const map: Record<string, string> = {
+                "1": "SV_REVIEW_CLOSINGS",
+                "2": "SV_REVIEW_DEPOSITS",
+                "3": "SV_REVIEW_EXPENSES",
+                "4": "SV_APPROVE_UNLOCK",
+                "5": "SV_HELP",
+                "6": "SV_HELP",
+                "7": "SV_HELP",
+              };
+              return map[digit] || "SV_HELP";
+            } else if (role === "supplier") {
+              const map: Record<string, string> = {
+                "1": "SUPL_DELIVERY",
+                "2": "SUPL_VIEW_OPENING",
+                "3": "SUPL_DISPUTES",
+                "4": "SUPL_HELP",
+                "5": "SUPL_HELP",
+                "6": "SUPL_HELP",
+                "7": "SUPL_HELP",
+              };
+              return map[digit] || "SUPL_HELP";
+            } else {
+              const map: Record<string, string> = {
+                "1": "ATT_CLOSING",
+                "2": "ATT_DEPOSIT",
+                "3": "MENU_SUMMARY",
+                "4": "MENU_SUPPLY",
+                "5": "ATT_EXPENSE",
+                "6": "MENU",
+                "7": "HELP",
+              };
+              return map[digit] || "MENU";
+            }
+          }
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
@@ -87,10 +124,31 @@ export async function POST(req: Request) {
             if (already) continue;
           }
 
+          // Fallback idempotency: dedupe on phone+text within a 30s bucket (covers carriers that alter wamid)
+          if (type === "text") {
+            try {
+              const tsSec = Number((m as any).timestamp || 0);
+              const tsMs = Number.isFinite(tsSec) && tsSec > 0 ? tsSec * 1000 : Date.now();
+              const windowMs = Number(process.env.WA_IDEMPOTENCY_TEXT_BUCKET_MS || 30000);
+              const bucket = Math.floor(tsMs / windowMs);
+              const textBody = String(m.text?.body ?? "").trim();
+              if (textBody) {
+                const key = crypto.createHash("sha1").update(`${phoneE164}|${bucket}|${textBody}`).digest("hex");
+                const dupe = await (prisma as any).waMessageLog.findFirst({ where: { status: "INBOUND_DEDUP", payload: { path: ["key"], equals: key } as any } }).catch(() => null);
+                if (dupe) {
+                  // We've already seen and processed an equivalent message in this short window
+                  continue;
+                }
+                // Mark this window so repeats will be ignored
+                await logMessage({ direction: "in", templateName: null, waMessageId: wamid || null, status: "INBOUND_DEDUP", type: "INBOUND_DEDUP", payload: { phone: phoneE164, key, bucket, preview: textBody.slice(0, 80) } });
+              }
+            } catch {}
+          }
+
           // Log inbound after idempotency gate
-          await (prisma as any).waMessageLog.create({
-            data: { direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type },
-          }).catch(() => {});
+          try {
+            await logMessage({ direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type });
+          } catch {}
 
           // Helper button: resend login link
           const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;
@@ -172,22 +230,13 @@ export async function POST(req: Request) {
                 await handleSupplierAction(auth.sess, map[digit] || "SUPL_HELP", phoneE164);
                 continue;
               } else {
-                const map: Record<string, string> = {
-                  "1": "ATT_CLOSING",
-                  "2": "ATT_DEPOSIT",
-                  "3": "MENU_SUMMARY",
-                  "4": "MENU_SUPPLY",
-                  "5": "ATT_EXPENSE",
-                  "6": "MENU", // till not implemented here; fallback to help/menu
-                  "7": "MENU",
-                };
                 await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
                 // DRY-mode pre-enforcement: set state early so tests see it immediately
                 if (digit === "1" && DRY) {
                   try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "CLOSING_PICK" } }); } catch {}
                   try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "NUMERIC_PRESET", id: "ATT_CLOSING" }, status: "HANDLED" }); } catch {}
                 }
-                await handleAuthenticatedInteractive(auth.sess, map[digit] || "MENU");
+                await handleAuthenticatedInteractive(auth.sess, mapDigitToId(sessRole, digit));
                 // DRY-mode enforcement for test observability: ensure session enters CLOSING_PICK on '1'
                 if (digit === "1" && DRY) {
                   try {
@@ -246,6 +295,85 @@ export async function POST(req: Request) {
               const reply = await runGptForIncoming(phoneE164, text);
               const r = String(reply || "").trim();
               if (r) {
+                // Try to parse OOC from the tail of the message
+                const ooc = (() => {
+                  try {
+                    const start = r.lastIndexOf("<<<OOC>");
+                    const end = r.lastIndexOf("</OOC>>>");
+                    if (start >= 0 && end > start) {
+                      const jsonPart = r.substring(start + 7, end).trim();
+                      const parsed = JSON.parse(jsonPart);
+                      return parsed;
+                    }
+                  } catch {}
+                  return null;
+                })();
+
+                // Log OOC for observability
+                try {
+                  await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc } }, status: "INFO", type: "OOC_INFO" });
+                } catch {}
+
+                // If unauthenticated: force login prompt even if GPT says otherwise
+                if (!auth.ok) {
+                  const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
+                  const recent = await (prisma as any).waMessageLog.findFirst({
+                    where: { status: "LOGIN_PROMPT", createdAt: { gt: windowStart }, payload: { path: ["phone"], equals: phoneE164 } as any },
+                    select: { id: true },
+                  }).catch(() => null);
+                  if (!recent) {
+                    await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: "unauth.ooc" }, status: "LOGIN_PROMPT", type: "WARN" });
+                    await promptWebLogin(phoneE164, "unauth");
+                  }
+                  continue;
+                }
+
+                // Missing/invalid OOC → treat as FREE_TEXT and fall back to menu
+                const intent = String(ooc?.intent || "").toUpperCase();
+                if (!ooc || !intent) {
+                  const role = String(auth.sess?.role || "attendant");
+                  const to = toGraphPhone(phoneE164);
+                  if (role === "supervisor") await sendSupervisorMenu(to);
+                  else if (role === "supplier") await sendSupplierMenu(to);
+                  else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                  await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "ooc.invalid", phone: phoneE164, text: r }, status: "SENT", type: "INTENT_UNRESOLVED" });
+                  continue;
+                }
+
+                if (ooc && intent) {
+                  // Normalize intent mapping for attendant menus
+                  const directMap: Record<string, string> = {
+                    "ATT_CLOSING": "ATT_CLOSING",
+                    "ATT_DEPOSIT": "ATT_DEPOSIT",
+                    "ATT_EXPENSE": "ATT_EXPENSE",
+                    "MENU": "MENU",
+                    "MENU_SUMMARY": "MENU_SUMMARY",
+                    "MENU_SUPPLY": "MENU_SUPPLY",
+                    "HELP": "MENU",
+                    "LOGIN": "MENU",
+                  };
+                  const mapped = directMap[intent];
+                  if (mapped) {
+                    // Deposit safety: attempt MPESA parse for logging before handler
+                    try {
+                      if (intent === "ATT_DEPOSIT" && ooc?.args?.mpesaText) {
+                        const textIn = String(ooc.args.mpesaText || "");
+                        // basic parse signature (ref, amount)
+                        const m = /Ksh\s*([0-9,]+)\b.*?([A-Z0-9]{10,})/i.exec(textIn);
+                        if (m) {
+                          const parsed = { amount: Number(m[1].replace(/,/g, "")), ref: m[2] };
+                          await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: { ...ooc, args: { ...(ooc.args||{}), parsed } } } }, status: "INFO", type: "OOC_MPESA_PARSED" });
+                        }
+                      }
+                    } catch {}
+                    await handleAuthenticatedInteractive(auth.sess, mapped);
+                    await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                    await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164, ooc } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
+                    continue;
+                  }
+                }
+
+                // Default: just send the GPT text and fall back to menu if vague
                 await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                 continue;

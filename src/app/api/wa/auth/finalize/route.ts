@@ -80,11 +80,12 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   // Refresh session to MENU (ACTIVE)
   try {
+    const nowIso = new Date().toISOString();
     const prev = await (prisma as any).waSession.findFirst({ where: { phoneE164: phoneDB } });
     if (prev) {
-      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId, status: "ACTIVE" } as any } });
+      await (prisma as any).waSession.update({ where: { id: prev.id }, data: { role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: nowIso, tradingPeriodId, status: "ACTIVE" } as any, lastFinalizeAt: new Date(), sessionVersion: Number(prev.sessionVersion || 0) + 1 } });
     } else {
-      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId, status: "ACTIVE" } as any } });
+      await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: nowIso, tradingPeriodId, status: "ACTIVE" } as any, lastFinalizeAt: new Date(), sessionVersion: 1 } });
     }
   } catch {}
 
