@@ -94,7 +94,7 @@ export async function POST(req: Request) {
 
           // Helper button: resend login link
           const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;
-          if (maybeButtonId === "open_login") {
+          if (maybeButtonId === "open_login" || maybeButtonId === "SEND_LOGIN_LINK") {
             await promptWebLogin(phoneE164);
             continue;
           }

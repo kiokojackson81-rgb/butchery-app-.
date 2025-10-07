@@ -14,7 +14,8 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
   const needsRecover = !sess || !sess.code || sess.state === "LOGIN" || sess.state === "SPLASH";
   if (needsRecover) {
     try {
-      const pm = await (prisma as any).phoneMapping.findUnique({ where: { phoneE164 } }).catch(() => null);
+      // phoneE164 is not unique in PhoneMapping; use findFirst
+      const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164 } }).catch(() => null);
       if (pm?.code) {
         const pc = await (prisma as any).personCode.findFirst({ where: { code: pm.code, active: true } }).catch(() => null);
         if (pc) {
@@ -39,6 +40,11 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
 
   const hasCreds = !!(sess.code);
   const isLoginish = sess.state === "LOGIN" || sess.state === "SPLASH";
+  // Strong signal from finalize: if cursor.status === "ACTIVE" and we have creds, treat as authenticated
+  const isCursorActive = Boolean((sess?.cursor as any)?.status === "ACTIVE");
+  if (hasCreds && isCursorActive) {
+    return { ok: true, sess };
+  }
   if (!hasCreds || isLoginish) return { ok: false, reason: "logged-out" };
 
   const updatedAt = new Date(sess.updatedAt).getTime();
