@@ -31,11 +31,11 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
-  const challenge = searchParams.get("hub.challenge");
+  const hubChallenge = searchParams.get("hub.challenge");
   const vt = process.env.WHATSAPP_VERIFY_TOKEN || "barakaops-verify";
 
-  if (mode === "subscribe" && token === vt && challenge) {
-    return new NextResponse(challenge, { status: 200 });
+  if (mode === "subscribe" && token === vt && hubChallenge) {
+    return new NextResponse(hubChallenge, { status: 200 });
   }
   return NextResponse.json({ ok: false }, { status: 403 });
 }
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
             await logOutbound({
               direction: "in",
               templateName: null,
-              payload: { phone: phoneE164, meta: { phoneE164, session_state: (auth as any)?.sess?.state, has_session: !!(auth as any)?.ok }, event: "inbound.info" },
+              payload: { phone: phoneE164, meta: { phoneE164: phoneE164, session_state: (auth as any)?.sess?.state, has_session: !!(auth as any)?.ok }, event: "inbound.info" },
               status: "INFO",
               type: "INBOUND_INFO",
             });
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
             }).catch(() => null);
             if (auth.reason === "expired") {
               try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "LOGIN" } }); } catch {}
-              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
             }
             if (!recent) {
               await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
                   "6": "SV_HELP",
                   "7": "SV_HELP",
                 };
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
+                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
                 await handleSupervisorAction(auth.sess, map[digit] || "SV_HELP", phoneE164);
                 continue;
               } else if (sessRole === "supplier") {
@@ -168,24 +168,24 @@ export async function POST(req: Request) {
                   "6": "SUPL_HELP",
                   "7": "SUPL_HELP",
                 };
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
+                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
                 await handleSupplierAction(auth.sess, map[digit] || "SUPL_HELP", phoneE164);
                 continue;
               } else {
                 const map: Record<string, string> = {
                   "1": "ATT_CLOSING",
-                  "2": "ATD_DEPOSIT",
+                  "2": "ATT_DEPOSIT",
                   "3": "MENU_SUMMARY",
                   "4": "MENU_SUPPLY",
-                  "5": "ATD_EXPENSE",
+                  "5": "ATT_EXPENSE",
                   "6": "MENU", // till not implemented here; fallback to help/menu
                   "7": "MENU",
                 };
-                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
+                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "numeric.route", digit, role: sessRole }, status: "ROUTE" });
                 // DRY-mode pre-enforcement: set state early so tests see it immediately
                 if (digit === "1" && DRY) {
                   try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "CLOSING_PICK" } }); } catch {}
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "NUMERIC_PRESET", id: "ATT_CLOSING" }, status: "HANDLED" }); } catch {}
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "NUMERIC_PRESET", id: "ATT_CLOSING" }, status: "HANDLED" }); } catch {}
                 }
                 await handleAuthenticatedInteractive(auth.sess, map[digit] || "MENU");
                 // DRY-mode enforcement for test observability: ensure session enters CLOSING_PICK on '1'
@@ -194,7 +194,7 @@ export async function POST(req: Request) {
                     await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "CLOSING_PICK" } });
                   } catch {}
                   try {
-                    await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "NUMERIC_HANDLED", id: "ATT_CLOSING" }, status: "HANDLED" });
+                    await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "NUMERIC_HANDLED", id: "ATT_CLOSING" }, status: "HANDLED" });
                   } catch {}
                 }
                 continue;

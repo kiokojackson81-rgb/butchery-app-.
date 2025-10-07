@@ -26,7 +26,7 @@ export async function sendAttendantMenu(to: string, outlet: string) {
             ],
           },
         },
-      });
+      }, "AI_DISPATCH_INTERACTIVE");
       return;
     }
   } catch {}
@@ -48,7 +48,7 @@ export async function sendAttendantMenu(to: string, outlet: string) {
     buttonLabel: "Choose",
     sections: [{ title: "Menu", rows }],
   });
-  await sendInteractive(payload);
+  await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }
 
 export async function sendSupplierMenu(to: string) {
@@ -64,7 +64,7 @@ export async function sendSupplierMenu(to: string) {
     footerText: "BarakaOps",
     sections: [{ title: "Menu", rows }],
   });
-  await sendInteractive(payload);
+  await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }
 
 export async function sendSupervisorMenu(to: string) {
@@ -81,5 +81,5 @@ export async function sendSupervisorMenu(to: string) {
     footerText: "BarakaOps",
     sections: [{ title: "Menu", rows }],
   });
-  await sendInteractive(payload);
+  await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }
