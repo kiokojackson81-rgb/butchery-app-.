@@ -33,7 +33,7 @@ export type SupervisorCursor = {
   depositId?: string;
 };
 
-const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 60);
 
 function todayLocalISO() {
   const d = new Date();

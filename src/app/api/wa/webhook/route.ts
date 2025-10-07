@@ -98,6 +98,8 @@ export async function POST(req: Request) {
             continue;
           }
 
+          // Refresh activity as early as possible to keep session alive
+          try { await touchWaSession(phoneE164); } catch {}
           const auth = await ensureAuthenticated(phoneE164);
           if (!auth.ok) {
             // Universal guard: send login prompt at most once per 24 hours per phone
