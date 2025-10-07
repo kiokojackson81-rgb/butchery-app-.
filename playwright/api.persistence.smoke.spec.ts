@@ -1,5 +1,8 @@
 import { test, expect, request } from '@playwright/test';
 
+// Skip the entire suite when a real database is not configured
+test.skip(!process.env.DATABASE_URL, 'Skipping DB persistence tests: DATABASE_URL not set');
+
 function ymd() { return new Date().toISOString().slice(0,10); }
 function OUTLET() { return `VT_${Math.random().toString(36).slice(2,7)}`; }
 

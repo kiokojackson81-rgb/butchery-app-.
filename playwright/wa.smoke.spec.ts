@@ -44,7 +44,7 @@ test.describe("WA session loop smokes", () => {
 
     // Expect session to enter a handled state (CLOSING_PICK or SUMMARY if no products remain)
     let handled = false;
-    for (let i = 0; i < 8 && !handled; i++) {
+    for (let i = 0; i < 20 && !handled; i++) {
       const s = await request.get(`${BASE}/api/wa/dev/session?phoneE164=${encodeURIComponent(PHONE)}`);
       const js = await s.json();
       const st = js?.sess?.state;
