@@ -40,6 +40,8 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
 
   const hasCreds = !!(sess.code);
   const isLoginish = sess.state === "LOGIN" || sess.state === "SPLASH";
+  // Explicitly treat LOGGED_OUT as unauthenticated
+  if (sess.state === "LOGGED_OUT") return { ok: false, reason: "logged-out" };
   // Race guard: if we finalized very recently, treat as authenticated to avoid a login loop
   try {
     const lastFin = (sess as any).lastFinalizeAt ? new Date((sess as any).lastFinalizeAt).getTime() : 0;
