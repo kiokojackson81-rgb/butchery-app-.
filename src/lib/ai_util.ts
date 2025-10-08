@@ -18,7 +18,7 @@ type GraphButtonPayload = {
   interactive: any; // keep loose; constructed buttons/lists
 };
 
-import { buildAuthenticatedReply } from "@/lib/ooc_parse";
+import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
 
 export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: string }): Promise<{ text?: string; interactive?: GraphButtonPayload }> {
   // Fast-path some contexts without model calls when obvious
@@ -31,6 +31,13 @@ export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: stri
   if (ctx.kind === "login_welcome") {
     const c = buildAuthenticatedReply(ctx.role, ctx.outlet);
     return { text: `${c.text}\n\n${c.ooc}` };
+  }
+
+  // Deterministic login prompt: compose strict login nudge with OOC
+  if (ctx.kind === "login_prompt") {
+    const deep = opts?.deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
+    const reply = buildUnauthenticatedReply(deep, false);
+    return { text: `${reply.text}\n\n${reply.ooc}` };
   }
 
   const userPrompt = buildUserPrompt(ctx, deepLink || undefined);

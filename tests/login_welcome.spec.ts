@@ -9,7 +9,7 @@ describe('login welcome dispatch', () => {
     const t = res.text || '';
     expect(t.length).toBeGreaterThan(10);
     expect(t).toContain('✅');
-    expect(t).toContain('Welcome');
+    expect(t).toMatch(/Welcome back|Welcome —/);
     expect(t).toContain('<<<OOC>');
     expect(t).toContain('"intent": "MENU"');
     expect(t).toContain('"buttons":');

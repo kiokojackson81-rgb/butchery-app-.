@@ -1,10 +1,10 @@
 // src/lib/ooc_parse.ts
 // --- Authenticated/Unauthenticated WA message builders ---
 export function buildUnauthenticatedReply(deepLink: string, dedupe = false): { text: string; buttons: string[]; ooc: string } {
-  // Always reply, dedupe if needed
+  // Always reply, dedupe if needed. Keep message professional and concise (1-2 lines)
   const mainText = dedupe
-    ? `Still seeing no login. Please open:\n${deepLink}`
-    : `Please log in to continue.\n\nOpen: ${deepLink}`;
+    ? `Still no sign-in detected. Please open:\n${deepLink}`
+    : `Please sign in to continue.\n\nOpen: ${deepLink}`;
   const buttons = ["LOGIN", "HELP"];
   const ooc = `<<<OOC>\n${JSON.stringify({
     intent: "LOGIN",
@@ -20,12 +20,13 @@ export function buildUnauthenticatedReply(deepLink: string, dedupe = false): { t
 }
 
 export function buildAuthenticatedReply(role: "attendant"|"supervisor"|"supplier", outlet?: string): { text: string; buttons: string[]; ooc: string } {
+  // Professional, concise welcome text for each role
   let text = "";
   let buttons: string[] = [];
   let args: Record<string, any> = { role };
   switch (role) {
     case "attendant":
-      text = `✅ Welcome back — ${outlet || "Outlet"}\nWhat would you like to do?\n1) Enter Closing  2) Deposit (paste SMS)  3) Expense\n4) Summary  5) Till Count  6) Supply (view)`;
+      text = `✅ Welcome back — ${outlet || "Outlet"}\nHow can I help you today?\n1) Enter Closing  2) Deposit (paste SMS)  3) Expense\n4) Summary  5) Till Count  6) Supply (view)`;
       buttons = ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"];
       args.outlet = outlet;
       break;
@@ -34,7 +35,7 @@ export function buildAuthenticatedReply(role: "attendant"|"supervisor"|"supplier
       buttons = ["SV_REVIEW_CLOSINGS", "SV_REVIEW_DEPOSITS", "SV_REVIEW_EXPENSES"];
       break;
     case "supplier":
-      text = `✅ Welcome — Supplier\n1) Submit Delivery  2) View Opening  3) Disputes`;
+      text = `✅ Welcome — Supplier\nActions:\n1) Submit Delivery  2) View Opening  3) Disputes`;
       buttons = ["SUPL_DELIVERY", "SUPL_VIEW_OPENING", "SUPL_DISPUTES"];
       break;
   }
