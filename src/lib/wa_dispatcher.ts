@@ -4,6 +4,7 @@ import { sendTemplate, sendText, sendInteractive, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
 import { menuMain } from "@/lib/wa_messages";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
+import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
 import { createLoginLink } from "@/server/wa_links";
 
 function minutesSince(date?: Date | string | null): number {
@@ -69,8 +70,9 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   try {
     if (process.env.WA_INTERACTIVE_ENABLED === "true") {
       if (ctx.kind === "login_welcome") {
-        // Send role-specific interactive menu then append OOC as text
+        // Send role-specific interactive menu then send only the human text (no OOC)
         const role = (ctx as any).role as string;
+        const built = buildAuthenticatedReply(role as any, (ctx as any).outlet || undefined);
         if (role === "attendant") {
           await sendAttendantMenu(to, (ctx as any).outlet || "Outlet");
         } else if (role === "supervisor") {
@@ -78,13 +80,13 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         } else if (role === "supplier") {
           await sendSupplierMenu(to);
         }
-        // OOC must be sent as text (graph interactive payloads can't contain the OOC block reliably)
-        if (typeof composed.text === "string") {
-          await sendText(to, composed.text, "AI_DISPATCH_TEXT");
-        }
+        // Send human-facing text only
+        try { await sendText(to, built.text, "AI_DISPATCH_TEXT"); } catch {}
+        // Log the OOC for observability (do not expose to user)
+        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
         result = { ok: true };
       } else if (ctx.kind === "login_prompt") {
-        // Send a compact interactive button prompting to open the deep link, then append OOC text
+        // Send a compact interactive button prompting to open the deep link, then send only the human text (no OOC)
         const deep = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
         const payload = {
           messaging_product: "whatsapp",
@@ -102,9 +104,9 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
           },
         };
         try { await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE"); } catch { }
-        if (typeof composed.text === "string") {
-          await sendText(to, composed.text, "AI_DISPATCH_TEXT");
-        }
+        const built = buildUnauthenticatedReply(deep, false);
+        try { await sendText(to, built.text, "AI_DISPATCH_TEXT"); } catch {}
+        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
         result = { ok: true };
       }
     }
