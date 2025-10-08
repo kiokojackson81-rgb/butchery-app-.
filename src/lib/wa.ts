@@ -164,6 +164,14 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
     await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
+  // Global kill-switch for interactive payloads (pure GPT text mode)
+  if (process.env.WA_INTERACTIVE_ENABLED !== "true") {
+    const toNorm = normalizeGraphPhone(body?.to || "");
+    const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
+    const waMessageId = `NOOP-${Date.now()}`;
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "interactive.disabled" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "INTERACTIVE_DISABLED" });
+    return { ok: true, waMessageId, response: { noop: true } } as const;
+  }
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   if (DRY) {

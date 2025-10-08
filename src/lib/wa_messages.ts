@@ -191,7 +191,7 @@ export async function menuMain(to: string, outletName?: string) {
     to,
     bodyText: outletName ? `${outletName} — what would you like to do?` : "What would you like to do?",
     footerText: "BarakaOps",
-    buttonLabel: "Choose",
+    buttonLabel: "Tabs",
     sections: [
       { title: "Menu", rows },
     ],
@@ -204,7 +204,7 @@ export function listProducts(to: string, products: Array<{ key: string; name: st
     headerText: undefined,
     bodyText: `${outletName} — choose product`,
     footerText: "BarakaOps",
-    buttonLabel: "Choose",
+    buttonLabel: "Tabs",
     sections: [
       {
         title: "Products",

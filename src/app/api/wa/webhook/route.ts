@@ -140,6 +140,7 @@ export async function POST(req: Request) {
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
   const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
+  const TABS_ENABLED = String(process.env.WA_TABS_ENABLED || "false").toLowerCase() === "true";
 
   if (!verifySignature(raw, sig)) {
     if (!DRY) {
@@ -254,8 +255,16 @@ export async function POST(req: Request) {
           try { await touchWaSession(phoneE164); } catch {}
 
           // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
-          if (type === "text" && GPT_ONLY) {
-            const text = (m.text?.body ?? "").trim();
+          if (GPT_ONLY && (type === "text" || type === "interactive")) {
+            // Normalize inbound into a text prompt for GPT
+            const text = (() => {
+              if (type === "text") return (m.text?.body ?? "").trim();
+              const lr = (m as any)?.interactive?.list_reply?.id as string | undefined;
+              const br = (m as any)?.interactive?.button_reply?.id as string | undefined;
+              const title = (m as any)?.interactive?.list_reply?.title || (m as any)?.interactive?.button_reply?.title;
+              const id = lr || br || "";
+              return `[button:${id}] ${title || ""}`.trim();
+            })();
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
 
@@ -281,6 +290,7 @@ export async function POST(req: Request) {
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
             const sendRoleTabs = async () => {
+              if (!TABS_ENABLED) return;
               const to = toGraphPhone(phoneE164);
               await sendSixTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
             };
@@ -291,7 +301,8 @@ export async function POST(req: Request) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
               try {
                 const to = toGraphPhone(phoneE164);
-                await sendText(to, "I didn't quite get that. Use the tabs below.", "AI_DISPATCH_TEXT");
+                const msg = TABS_ENABLED ? "I didn't quite get that. Use the tabs below." : "I didn't quite get that.";
+                await sendText(to, msg, "AI_DISPATCH_TEXT");
               } catch {}
               try { await sendRoleTabs(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}

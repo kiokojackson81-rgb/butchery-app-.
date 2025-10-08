@@ -61,6 +61,10 @@ export function buildSixTabsPayload(to: string, role: "attendant"|"supervisor"|"
 }
 
 export async function sendSixTabs(to: string, role: "attendant"|"supervisor"|"supplier", outlet?: string) {
+  // Allow disabling tabs globally to run in pure GPT-text mode
+  if (process.env.WA_TABS_ENABLED !== "true") {
+    return; // no-op when tabs are disabled
+  }
   const payload = buildSixTabsPayload(to, role, outlet);
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }
