@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
 import { logMessage } from "@/lib/wa_log";
 import { promptWebLogin } from "@/server/wa_gate";
+import { createLoginLink } from "@/server/wa_links";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
@@ -14,7 +15,7 @@ import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
-import { parseOOCBlock, stripOOC } from "@/lib/ooc_parse";
+import { parseOOCBlock, stripOOC, buildUnauthenticatedReply, buildAuthenticatedReply } from "@/lib/ooc_parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -252,7 +253,7 @@ export async function POST(req: Request) {
               type: "INBOUND_INFO",
             });
           } catch {}
-          if (!auth.ok) {
+            if (!auth.ok) {
             // Universal guard: send login prompt at most once per 24 hours per phone
             const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
             const recent = await (prisma as any).waMessageLog.findFirst({
@@ -267,19 +268,23 @@ export async function POST(req: Request) {
               try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "LOGIN" } }); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
             }
-            if (!recent) {
-              await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
-              await promptWebLogin(phoneE164, auth.reason);
-              markSent();
-            } else {
-              // Suppressed duplicate login prompt → still send a lightweight reminder to avoid silence
-              try {
+            try {
+              const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
+              if (!recent) {
+                await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
+                // send template/reopen via centralized gate (debounced)
+                await promptWebLogin(phoneE164, auth.reason);
+                // Also send the strict short nudge + OOC as required
+                const reply = buildUnauthenticatedReply(url, false);
                 const to = toGraphPhone(phoneE164);
-                const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
-                const msg = `You're not logged in. Open ${origin}/login to continue.`;
-                  await sendTextSafe(to, msg, "AI_DISPATCH_TEXT");
-              } catch {}
-            }
+                try { await sendTextSafe(to, `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT"); } catch {}
+              } else {
+                // Suppressed duplicate login prompt → still send a lightweight reminder (deduped) with OOC
+                const reply = buildUnauthenticatedReply(url, true);
+                const to = toGraphPhone(phoneE164);
+                try { await sendTextSafe(to, `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT"); } catch {}
+              }
+            } catch {}
             try { await touchWaSession(phoneE164); } catch {}
             continue;
           }
@@ -475,11 +480,19 @@ export async function POST(req: Request) {
                     where: { status: "LOGIN_PROMPT", createdAt: { gt: windowStart }, payload: { path: ["phone"], equals: phoneE164 } as any },
                     select: { id: true },
                   }).catch(() => null);
-                  if (!recent) {
-                    await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: "unauth.ooc" }, status: "LOGIN_PROMPT", type: "WARN" });
-                    await promptWebLogin(phoneE164, "unauth");
-                  }
-                  continue;
+                    try {
+                      const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
+                      if (!recent) {
+                        await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: "unauth.ooc" }, status: "LOGIN_PROMPT", type: "WARN" });
+                        await promptWebLogin(phoneE164, "unauth");
+                        const reply = buildUnauthenticatedReply(url, false);
+                        await sendTextSafe(toGraphPhone(phoneE164), `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT");
+                      } else {
+                        const reply = buildUnauthenticatedReply(url, true);
+                        await sendTextSafe(toGraphPhone(phoneE164), `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT");
+                      }
+                    } catch {}
+                    continue;
                 }
 
                 // Missing/invalid OOC → treat as FREE_TEXT and fall back to menu
