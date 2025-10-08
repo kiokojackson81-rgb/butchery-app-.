@@ -64,7 +64,7 @@ export function buildInteractiveListPayload(opts: {
     normalizedSections = opts.sections.map((sec) => ({ ...sec, rows: sec.rows.slice(0, WA_MAXS.ROWS_PER_SECTION) }));
   }
 
-  const button = sanitizeText(opts.buttonLabel || "Choose", WA_MAXS.BUTTON_LABEL)!;
+  const button = sanitizeText(opts.buttonLabel || "Tabs", WA_MAXS.BUTTON_LABEL)!;
   const header = sanitizeText(opts.headerText, WA_MAXS.HEADER_TEXT);
   const body = sanitizeText(opts.bodyText, WA_MAXS.BODY_TEXT)!;
   const footer = sanitizeText(opts.footerText, WA_MAXS.FOOTER_TEXT);
@@ -101,7 +101,7 @@ export function buildProductList(
   opts?: { headerText?: string; bodyText?: string; footerText?: string; sectionTitle?: string }
 ) {
   const headerText = opts?.headerText ?? "Products";
-  const bodyText = opts?.bodyText ?? "Select a product to enter QTY/WASTE";
+  const bodyText = opts?.bodyText ?? "Pick a product to enter QTY/WASTE";
   const footerText = opts?.footerText;
   const sectionTitle = opts?.sectionTitle ?? "Items";
   return {
@@ -114,7 +114,7 @@ export function buildProductList(
       body: { text: bodyText },
       ...(footerText ? { footer: { text: footerText } } : {}),
       action: {
-        button: "Choose product",
+        button: "Tabs",
         sections: [
           {
             title: sectionTitle,

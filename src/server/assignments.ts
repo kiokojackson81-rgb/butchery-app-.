@@ -165,7 +165,7 @@ export async function notifyAttendantAssignmentChange(codeRaw: string, opts?: {
 
   if (process.env.WA_AUTOSEND_ENABLED === "true") {
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      const result = await sendText(phoneE164, message);
+  const result = await sendText(phoneE164, message, "AI_DISPATCH_TEXT");
       if (!result.ok) {
         console.error(`[notifyAssign] send failed for ${code}: ${result.error}`);
         return { sent: false, reason: "send-failed" };

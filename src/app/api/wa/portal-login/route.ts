@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
 import { warmUpSession, sendText } from "@/lib/wa";
+import { sendSixTabs } from "@/lib/wa_buttons";
 import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
 
 export const runtime = "nodejs";
@@ -69,10 +69,8 @@ export async function POST(req: Request) {
       });
 
   try { await warmUpSession(phoneGraph); } catch {}
-  await sendText(phoneGraph, "Welcome — you’re logged in. Open the menu to continue.");
-  if (role === "attendant") await sendAttendantMenu(phoneGraph, outlet || "your outlet");
-  else if (role === "supplier") await sendSupplierMenu(phoneGraph);
-  else await sendSupervisorMenu(phoneGraph);
+  await sendText(phoneGraph, "Welcome — you’re logged in. Use the tabs below to continue.", "AI_DISPATCH_TEXT");
+  await sendSixTabs(phoneGraph, (role as any) || "attendant", outlet || undefined);
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
     }

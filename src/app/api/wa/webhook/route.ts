@@ -8,7 +8,8 @@ import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedIntera
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText, sendInteractive } from "@/lib/wa";
-import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
+// Legacy role menus are disabled under GPT-only; use six-tabs helper instead
+import { sendSixTabs } from "@/lib/wa_buttons";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
@@ -281,9 +282,7 @@ export async function POST(req: Request) {
 
             const sendRoleTabs = async () => {
               const to = toGraphPhone(phoneE164);
-              if (sessRole === "supervisor") return sendSupervisorMenu(to);
-              if (sessRole === "supplier") return sendSupplierMenu(to);
-              return sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+              await sendSixTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
             };
 
             const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
@@ -357,9 +356,7 @@ export async function POST(req: Request) {
                 if (isVague) {
                   const role = String(auth.sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  if (role === "supervisor") await sendSupervisorMenu(to);
-                  else if (role === "supplier") await sendSupplierMenu(to);
-                  else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                  await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -407,9 +404,7 @@ export async function POST(req: Request) {
                 if (!ooc || !intent) {
                   const role = String(auth.sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  if (role === "supervisor") await sendSupervisorMenu(to);
-                  else if (role === "supplier") await sendSupplierMenu(to);
-                  else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                  await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "ooc.invalid", phone: phoneE164, text: r }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -454,9 +449,7 @@ export async function POST(req: Request) {
               } else {
                 const role = String(auth.sess?.role || "attendant");
                 const to = toGraphPhone(phoneE164);
-                if (role === "supervisor") await sendSupervisorMenu(to);
-                else if (role === "supplier") await sendSupplierMenu(to);
-                else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
+                await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text, reason: "gpt-empty" }, status: "SENT", type: "INTENT_UNRESOLVED" });
                 continue;
               }
@@ -502,13 +495,8 @@ export async function POST(req: Request) {
             if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
             else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
             else await handleAuthenticatedInteractive(auth.sess, flowId);
-            // Always follow with tabs menu for role
-            try {
-              const to = toGraphPhone(phoneE164);
-              if (sessRole === "supervisor") await sendSupervisorMenu(to);
-              else if (sessRole === "supplier") await sendSupplierMenu(to);
-              else await sendAttendantMenu(to, auth.sess?.outlet || "your outlet");
-            } catch {}
+            // Always follow with tabs menu for role (six tabs)
+            try { await sendSixTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
           }

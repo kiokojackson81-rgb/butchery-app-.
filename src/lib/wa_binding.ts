@@ -20,7 +20,7 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
 
   if (!pending) {
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(fromGraphNoPlus, "Link code not found or expired. Please retry from https://barakafresh.com/login");
+  await sendText(fromGraphNoPlus, "Link code not found or expired. Please retry from https://barakafresh.com/login", "AI_DISPATCH_TEXT");
     }
     return true; // handled
   }
@@ -29,7 +29,7 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
   const issued = Number((pending as any)?.cursor?.issuedAt || 0);
   if (!issued || Date.now() - issued > 10 * 60_000) {
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(fromGraphNoPlus, "This link code has expired. Please login again at https://barakafresh.com/login");
+  await sendText(fromGraphNoPlus, "This link code has expired. Please login again at https://barakafresh.com/login", "AI_DISPATCH_TEXT");
     }
     await (prisma as any).waSession.delete({ where: { id: pending.id } }).catch(() => {});
     return true;
@@ -39,7 +39,7 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
   const existing = await (prisma as any).phoneMapping.findUnique({ where: { code: pending.code } });
   if (existing?.phoneE164 && existing.phoneE164 !== phonePlus) {
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(fromGraphNoPlus, "This code is already linked to another phone. Contact your supervisor.");
+  await sendText(fromGraphNoPlus, "This code is already linked to another phone. Contact your supervisor.", "AI_DISPATCH_TEXT");
     }
     await (prisma as any).waSession.delete({ where: { id: pending.id } }).catch(() => {});
     return true;

@@ -59,7 +59,7 @@ function isSessionValid(sess: any) {
 
 async function sendLoginLink(phoneGraph: string) {
   // Minimal login hint; the login link sender is centralized elsewhere
-  await sendText(phoneGraph, "You're not logged in. Tap the login link we sent recently to continue.");
+  await sendText(phoneGraph, "You're not logged in. Tap the login link we sent recently to continue.", "AI_DISPATCH_TEXT");
 }
 
 async function saveSessionPatch(sessId: string, patch: Partial<{ state: string; cursor: SupplierCursor }>) {
@@ -78,14 +78,14 @@ async function upsertOpeningLock(outlet: string, date: string) {
 async function notifyAttendants(outlet: string, text: string) {
   const rows = await (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet } });
   for (const r of rows) {
-    if (r.phoneE164) await sendText(toGraphPhone(r.phoneE164), text);
+  if (r.phoneE164) await sendText(toGraphPhone(r.phoneE164), text, "AI_DISPATCH_TEXT");
   }
 }
 
 async function notifySupervisorsAdmins(outlet: string, text: string) {
   const rows = await (prisma as any).phoneMapping.findMany({ where: { role: { in: ["supervisor", "admin"] as any }, outlet } });
   for (const r of rows) {
-    if (r.phoneE164) await sendText(toGraphPhone(r.phoneE164), text);
+  if (r.phoneE164) await sendText(toGraphPhone(r.phoneE164), text, "AI_DISPATCH_TEXT");
   }
 }
 
@@ -107,13 +107,13 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     case "SPL_DELIVER": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_OUTLET", cursor: { date: today } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
     case "SPL_TRANSFER": {
       await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_FROM", cursor: { date: today } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
     case "SPL_RECENT": {
@@ -121,20 +121,20 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       const lines = (rows || []).length
         ? rows.map((r: any) => `• ${r.outletName} — ${r.itemKey} ${r.qty}${r.unit} @ ${r.buyPrice}`).join("\n")
         : "No deliveries today.";
-      await sendText(gp, lines);
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  await sendText(gp, lines, "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DISPUTES": {
       // show recent disputes (today or last 3 days) for visibility
       const since = new Date(Date.now() - 3 * 24 * 3600 * 1000);
       const items = await (prisma as any).reviewItem.findMany({ where: { type: { in: ["dispute", "supply_dispute"] as any }, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10 });
       if (!items.length) {
-        await sendText(gp, "No open disputes.");
+        await sendText(gp, "No open disputes.", "AI_DISPATCH_TEXT");
       } else {
         const lines = items.map((i: any) => `• ${i.outlet} — ${new Date(i.date).toISOString().slice(0,10)} — ${(i.payload as any)?.reason || (i.payload as any)?.summary || ''}`.slice(0, 300)).join("\n");
-        await sendText(gp, lines);
+        await sendText(gp, lines, "AI_DISPATCH_TEXT");
       }
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
     case "SPL_BACK":
@@ -142,37 +142,37 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
 
     case "SPL_CANCEL":
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
 
     case "SPL_LOCK": {
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       if (!c.outlet) {
-        await sendText(gp, "Select an outlet first.");
+  await sendText(gp, "Select an outlet first.", "AI_DISPATCH_TEXT");
         return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
       }
       const cnt = await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: c.outlet } });
       if (!cnt) {
-        await sendText(gp, "Add at least one item before locking.");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock: false }) as any });
+  await sendText(gp, "Add at least one item before locking.", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock: false }) as any }, "AI_DISPATCH_INTERACTIVE");
       }
       await upsertOpeningLock(c.outlet, c.date);
       await notifyAttendants(c.outlet, `Opening stock is live for ${c.outlet} (${c.date}). Proceed with operations.`);
       await notifySupervisorsAdmins(c.outlet, `Delivery posted & locked for ${c.outlet} (${c.date}).`);
-      await sendText(gp, `Opening locked for ${c.outlet} (${c.date}).`);
+  await sendText(gp, `Opening locked for ${c.outlet} (${c.date}).`, "AI_DISPATCH_TEXT");
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
     case "SPL_ADD_MORE": {
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
     case "SPL_MENU":
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   // List and unit handlers
@@ -182,25 +182,25 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     if (sess.state === "SPL_TRANSFER_FROM") {
       await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_TO", cursor: { ...c, fromOutlet: outlet } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true, NOT: { name: outlet } }, select: { name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     if (sess.state === "SPL_TRANSFER_TO") {
-      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_PRODUCT", cursor: { ...c, toOutlet: outlet } });
+  await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_PRODUCT", cursor: { ...c, toOutlet: outlet } });
       const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     // Default: delivery -> next is pick product
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, outlet } });
     const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SPL_P:")) {
     const productKey = replyId.split(":")[1]!;
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_QTY", cursor: { ...c, productKey } });
-    await sendText(gp, "Enter quantity (numbers only, e.g., 8 or 8.5)");
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Enter quantity (numbers only, e.g., 8 or 8.5)", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId === "UNIT_KG" || replyId === "UNIT_PCS") {
@@ -208,7 +208,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     const unit = replyId === "UNIT_KG" ? "kg" : "pcs";
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c, unit } });
     const p = await (prisma as any).product.findUnique({ where: { key: c.productKey }, select: { name: true } });
-    await sendText(gp, `Save delivery for ${c.outlet}: ${p?.name || c.productKey} ${c.qty}${unit} @ ${c.buyPrice}?`);
+    await sendText(gp, `Save delivery for ${c.outlet}: ${p?.name || c.productKey} ${c.qty}${unit} @ ${c.buyPrice}?`, "AI_DISPATCH_TEXT");
     return sendInteractive({
       messaging_product: "whatsapp",
       to: gp,
@@ -224,21 +224,21 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
           ],
         },
       },
-    } as any);
+    } as any, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId === "SPL_SAVE") {
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
     const { outlet, productKey, qty, buyPrice, unit } = c;
     if (!outlet || !productKey || !qty || !buyPrice || !unit) {
-      await sendText(gp, "Missing details; please try again.");
+  await sendText(gp, "Missing details; please try again.", "AI_DISPATCH_TEXT");
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     // If exists, prompt Add vs Replace
     const existed = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
     if (existed) {
-      await sendText(gp, `You've already submitted ${productKey} today for ${outlet}. Add to existing or Replace?`);
+      await sendText(gp, `You've already submitted ${productKey} today for ${outlet}. Add to existing or Replace?`, "AI_DISPATCH_TEXT");
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c } });
       return sendInteractive({
         messaging_product: "whatsapp",
@@ -246,7 +246,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
         type: "interactive",
         interactive: {
           type: "button",
-          body: { text: `Existing ${productKey}: ${existed.qty}${existed.unit}. Choose action:` },
+          body: { text: `Existing ${productKey}: ${existed.qty}${existed.unit}. Pick action:` },
           action: {
             buttons: [
               { type: "reply", reply: { id: "SPL_SAVE_ADD", title: "Add" } },
@@ -255,7 +255,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
             ],
           },
         },
-      } as any);
+      } as any, "AI_DISPATCH_INTERACTIVE");
     }
     await (prisma as any).supplyOpeningRow.upsert({
       where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
@@ -263,18 +263,18 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
-    await sendText(gp, `Saved: ${productKey} ${qty}${unit} @ ${buyPrice} for ${outlet} (${c.date}).`);
+  await sendText(gp, `Saved: ${productKey} ${qty}${unit} @ ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT");
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId === "SPL_SAVE_ADD" || replyId === "SPL_SAVE_REPLACE") {
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
     const { outlet, productKey, qty, buyPrice, unit } = c;
     if (!outlet || !productKey || !qty || !buyPrice || !unit) {
-      await sendText(gp, "Missing details; please try again.");
+  await sendText(gp, "Missing details; please try again.", "AI_DISPATCH_TEXT");
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     const existing = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
     const existedQty = Number(existing?.qty || 0);
@@ -285,13 +285,13 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
-    await sendText(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`);
+  await sendText(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT");
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   // Default
-  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
 }
 
 export async function handleSupplierText(sess: any, text: string, phoneE164: string) {
@@ -303,19 +303,19 @@ export async function handleSupplierText(sess: any, text: string, phoneE164: str
     case "SPL_DELIV_QTY": {
       const num = parseQty(text);
       if (num == null) {
-        await sendText(gp, "Numbers only, e.g., 8 or 8.5");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Numbers only, e.g., 8 or 8.5", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
       }
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PRICE", cursor: { ...c, qty: num } });
-      await sendText(gp, "Enter buying price in Ksh (numbers only), e.g., 700");
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Enter buying price in Ksh (numbers only), e.g., 700", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_PRICE": {
       const price = parseInt(String(text || "").replace(/[^\d]/g, ""), 10);
       if (!Number.isFinite(price) || price <= 0 || price > 1_000_000) {
-        await sendText(gp, "Numbers only, e.g., 700");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Numbers only, e.g., 700", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
       }
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_UNIT", cursor: { ...c, buyPrice: price } });
@@ -333,7 +333,7 @@ export async function handleSupplierText(sess: any, text: string, phoneE164: str
             ],
           },
         },
-      } as any);
+      } as any, "AI_DISPATCH_INTERACTIVE");
     }
     default:
       return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
@@ -346,17 +346,17 @@ async function supplierGoBack(sess: any, gp: string) {
     case "SPL_DELIV_QTY": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
       const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_PRICE": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_QTY", cursor: { ...c } });
-      await sendText(gp, "Enter quantity (numbers only, e.g., 8 or 8.5)");
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Enter quantity (numbers only, e.g., 8 or 8.5)", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_UNIT": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PRICE", cursor: { ...c } });
-      await sendText(gp, "Enter buying price in Ksh (numbers only), e.g., 700");
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any });
+  await sendText(gp, "Enter buying price in Ksh (numbers only), e.g., 700", "AI_DISPATCH_TEXT");
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_CONFIRM": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_UNIT", cursor: { ...c } });
@@ -374,20 +374,20 @@ async function supplierGoBack(sess: any, gp: string) {
             ],
           },
         },
-      } as any);
+      } as any, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_PICK_PRODUCT": {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_OUTLET", cursor: { ...c } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_PICK_OUTLET": {
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: todayLocalISO() } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     default: {
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: todayLocalISO() } });
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
   }
 }

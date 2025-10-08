@@ -6,6 +6,8 @@ import { getPeriodState } from "@/server/trading_period";
 import { getAttendantConfig } from "@/lib/wa_config";
 
 export async function sendAttendantMenu(to: string, outlet: string) {
+  // Legacy sender hard-guard in GPT-only mode
+  if (process.env.WA_GPT_ONLY === "true") return;
   // State-aware: if LOCKED, show read-only items
   try {
     const date = new Date().toISOString().slice(0, 10);
@@ -55,6 +57,8 @@ export async function sendAttendantMenu(to: string, outlet: string) {
 }
 
 export async function sendSupplierMenu(to: string) {
+  // Legacy sender hard-guard in GPT-only mode
+  if (process.env.WA_GPT_ONLY === "true") return;
   const rows: any[] = [
     { id: "SUP_TAB_SUPPLY_TODAY", title: "Deliveries today", description: "Add or view lines" },
     { id: "SUP_TAB_VIEW", title: "View deliveries", description: "Recent activity" },
@@ -72,6 +76,8 @@ export async function sendSupplierMenu(to: string) {
 }
 
 export async function sendSupervisorMenu(to: string) {
+  // Legacy sender hard-guard in GPT-only mode
+  if (process.env.WA_GPT_ONLY === "true") return;
   const rows: any[] = [
     { id: "SV_TAB_REVIEW_QUEUE", title: "Review queue" },
     { id: "SV_TAB_SUMMARIES", title: "Summaries" },

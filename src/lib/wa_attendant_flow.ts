@@ -5,7 +5,6 @@ import { normCode, toDbPhone } from "@/server/util/normalize";
 import { createLoginLink } from "@/server/wa_links";
 import { touchSession } from "@/server/wa/session";
 import {
-  menuMain,
   listProducts,
   promptQty,
   buttonsWasteOrSkip,
@@ -20,6 +19,7 @@ import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
+import { sendSixTabs } from "@/lib/wa_buttons";
 import { handleSupplyDispute } from "@/server/supply_notify";
 // (sendText) already imported; (prisma) already imported at top
 
@@ -124,7 +124,7 @@ async function notifySupAdm(message: string) {
     ]);
     const list = [...sup, ...adm].map((r: any) => r.phoneE164).filter(Boolean) as string[];
     if (!list.length) return;
-    await Promise.allSettled(list.map((to) => sendText(to, message)));
+  await Promise.allSettled(list.map((to) => sendText(to, message)));
   } catch (e) {
     console.warn("notifySupAdm failed", e);
   }
@@ -135,7 +135,8 @@ async function promptLogin(phone: string) {
   const urlObj = await createLoginLink(toDbPhone(phone));
   await sendText(
     phone,
-    `You're not logged in. Tap this link to log in via the website:\n${urlObj.url}\nAfter verifying your code, we'll greet you here.`
+    `You're not logged in. Tap this link to log in via the website:\n${urlObj.url}\nAfter verifying your code, we'll greet you here.`,
+    "AI_DISPATCH_TEXT"
   );
   // Optional: provide a helper button to re-send the link later
   await sendInteractive({
@@ -146,7 +147,7 @@ async function promptLogin(phone: string) {
       { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Send login link" } },
       { type: "reply", reply: { id: "HELP", title: "Help" } },
     ] },
-  } as any);
+  } as any, "AI_DISPATCH_INTERACTIVE");
 }
 
 // Helper: bind phone to code/role and enter MENU (reuses existing mapping + outlet logic)
@@ -189,9 +190,9 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
   });
 
   const to = phoneE164.replace(/^\+/, "");
-  if (finalRole === "attendant") await sendAttendantMenu(to, outlet || "your outlet");
-  else if (finalRole === "supervisor") await sendSupervisorMenu(to);
-  else await sendSupplierMenu(to);
+  if (finalRole === "attendant") await sendSixTabs(to, "attendant", outlet || undefined);
+  else if (finalRole === "supervisor") await sendSixTabs(to, "supervisor");
+  else await sendSixTabs(to, "supplier");
   return true;
 }
 
@@ -210,7 +211,7 @@ async function tryAutoLinkLogin(text: string, phoneE164: string) {
     const ok = await bindPhoneAndEnterMenu({ phoneE164, code: pc.code, role: pc.role });
     if (!ok) return false;
     await (prisma as any).waSession.delete({ where: { phoneE164: linkPhone } }).catch(() => {});
-    await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`);
+    await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`, "AI_DISPATCH_TEXT");
     return true;
   }
   // NOTE: We no longer accept LOGIN <CODE> in chat. Use website finalize flow instead.
@@ -233,7 +234,7 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-  await sendInteractive(await menuMain(phone, s.outlet || undefined));
+      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -244,9 +245,9 @@ export async function handleInboundText(phone: string, text: string) {
   // Global commands
   if (/^(HELP)$/i.test(t)) {
     if (!s.code) {
-      await sendText(phone, "You're not logged in. Use the login link we sent above to continue.");
+      await sendText(phone, "You're not logged in. Use the login link we sent above to continue.", "AI_DISPATCH_TEXT");
     } else {
-      await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.");
+      await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.", "AI_DISPATCH_TEXT");
     }
     return;
   }
@@ -258,19 +259,19 @@ export async function handleInboundText(phone: string, text: string) {
         data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
       });
     } catch {}
-    await sendText(phone, "You've been logged out. We'll send you a login link now.");
+    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT");
     await promptLogin(phone);
     return;
   }
   const disputeMatch = t.match(/^DISPUTE\b(?:\s+(.*))?$/i);
   if (disputeMatch) {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You need to be linked to an outlet before raising a dispute. Ask your supervisor.");
+      await sendText(phone, "You need to be linked to an outlet before raising a dispute. Ask your supervisor.", "AI_DISPATCH_TEXT");
       return;
     }
     const reason = (disputeMatch[1] || '').trim();
     if (!reason) {
-      await sendText(phone, "Please include a reason after DISPUTE. Example: DISPUTE wrong weight on beef.");
+      await sendText(phone, "Please include a reason after DISPUTE. Example: DISPUTE wrong weight on beef.", "AI_DISPATCH_TEXT");
       return;
     }
     try {
@@ -283,13 +284,13 @@ export async function handleInboundText(phone: string, text: string) {
       });
     } catch (err) {
       console.error('supply dispute failed', err);
-      await sendText(phone, "We couldn't record the dispute. Please contact your supervisor directly.");
+      await sendText(phone, "We couldn't record the dispute. Please contact your supervisor directly.", "AI_DISPATCH_TEXT");
     }
     return;
   }
   if (/^(TXNS)$/i.test(t)) {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "Login first (send your code).");
+      await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
       return;
     }
     const rows = await (prisma as any).attendantDeposit.findMany({
@@ -298,11 +299,12 @@ export async function handleInboundText(phone: string, text: string) {
       orderBy: { createdAt: "desc" },
     });
     if (!rows.length) {
-      await sendText(phone, "No deposits yet today.");
+      await sendText(phone, "No deposits yet today.", "AI_DISPATCH_TEXT");
     } else {
       await sendText(
         phone,
-        rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n")
+        rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"),
+        "AI_DISPATCH_TEXT"
       );
     }
     return;
@@ -317,7 +319,7 @@ export async function handleInboundText(phone: string, text: string) {
 
   if (s.state === "LOGIN") {
     // Do not accept codes in chat. Always send a login link to finalize on the website.
-    await sendText(phone, "We no longer accept codes in chat. Use the login link to continue.");
+    await sendText(phone, "We no longer accept codes in chat. Use the login link to continue.", "AI_DISPATCH_TEXT");
     await promptLogin(phone);
     return;
   }
@@ -325,11 +327,11 @@ export async function handleInboundText(phone: string, text: string) {
   // MENU context
   if (/^MENU$/i.test(t) || s.state === "MENU") {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).");
+      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT");
       return;
     }
     if (/^MENU$/i.test(t)) {
-      await sendInteractive(menuMain(phone, s.outlet || undefined));
+      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
       return;
     }
     // Otherwise user may send arbitrary text; guide them back
@@ -342,33 +344,33 @@ export async function handleInboundText(phone: string, text: string) {
       const val = Number(t);
       const item = cur.currentItem;
       if (!item) {
-        await sendText(phone, "Pick a product first.");
+        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
         return;
       }
       // Guard: day-level lock
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
-        await saveSession(phone, { state: "MENU", ...cur });
-  await sendInteractive(await menuMain(phone, s.outlet || undefined));
+    await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
+    await saveSession(phone, { state: "MENU", ...cur });
+    await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
       }
       // Guard: product already closed today
       if (s.outlet) {
         const closed = await getClosedKeys(cur.date, s.outlet);
         if (closed.has(item.key)) {
-          await sendText(phone, `${item.name} is already closed for today. Pick another product.`);
+          await sendText(phone, `${item.name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT");
           await saveSession(phone, { state: "CLOSING_PICK", ...cur });
           const prods = await getAssignedProducts(s.code || "");
           const remaining = prods.filter((p) => !closed.has(p.key));
-          await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+          await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
           return;
         }
       }
       item.closing = val;
       await saveSession(phone, { state: "CLOSING_QTY", ...cur });
-      await sendInteractive(buttonsWasteOrSkip(phone, item.name));
+      await sendInteractive(buttonsWasteOrSkip(phone, item.name), "AI_DISPATCH_INTERACTIVE");
     } else {
-      await sendText(phone, "Numbers only, e.g. 9.5");
+      await sendText(phone, "Numbers only, e.g. 9.5", "AI_DISPATCH_TEXT");
     }
     return;
   }
@@ -379,14 +381,14 @@ export async function handleInboundText(phone: string, text: string) {
       const val = Number(t);
       const item = cur.currentItem;
       if (!item) {
-        await sendText(phone, "Pick a product first.");
+        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
         return;
       }
       // Guard: day-level lock
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
         await saveSession(phone, { state: "MENU", ...cur });
-        await sendInteractive(menuMain(phone, s.outlet || undefined));
+        await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
       }
       item.waste = val;
@@ -402,7 +404,7 @@ export async function handleInboundText(phone: string, text: string) {
       delete cur.currentItem;
       await nextPickOrSummary(phone, s, cur);
     } else {
-      await sendText(phone, "Numbers only, e.g. 1.0");
+      await sendText(phone, "Numbers only, e.g. 1.0", "AI_DISPATCH_TEXT");
     }
     return;
   }
@@ -411,24 +413,24 @@ export async function handleInboundText(phone: string, text: string) {
   if (s.state === "EXPENSE_NAME") {
     cur.expenseName = t;
     await saveSession(phone, { state: "EXPENSE_AMOUNT", ...cur });
-    await sendText(phone, `Enter amount for ${t}. Numbers only, e.g. 250`);
+    await sendText(phone, `Enter amount for ${t}. Numbers only, e.g. 250`, "AI_DISPATCH_TEXT");
     return;
   }
   if (s.state === "EXPENSE_AMOUNT") {
     if (!isNumericText(t)) {
-      await sendText(phone, "Numbers only, e.g. 250");
+      await sendText(phone, "Numbers only, e.g. 250", "AI_DISPATCH_TEXT");
       return;
     }
     const amount = Number(t);
     if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.");
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return;
     }
     await (prisma as any).attendantExpense.create({ data: { date: cur.date, outletName: s.outlet, name: cur.expenseName || "Expense", amount } });
     // Notify supervisors/admins
     await notifySupAdm(`Expense recorded at ${s.outlet} (${cur.date}): ${cur.expenseName || "Expense"}  KSh ${amount}`);
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
-    await sendInteractive(expenseFollowupButtons(phone));
+    await sendInteractive(expenseFollowupButtons(phone), "AI_DISPATCH_INTERACTIVE");
     return;
   }
 
@@ -437,12 +439,12 @@ export async function handleInboundText(phone: string, text: string) {
     const parsed = parseMpesaText(t);
     if (parsed) {
       if (!s.outlet) {
-        await sendText(phone, "No outlet bound. Ask supervisor.");
+        await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
         return;
       }
   await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
   await notifySupAdm(`Deposit recorded at ${s.outlet} (${cur.date}): KSh ${parsed.amount} (ref ${parsed.ref}).`);
-      await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`);
+      await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`, "AI_DISPATCH_TEXT");
       await sendInteractive({
         messaging_product: "whatsapp",
         to: phone.replace(/^\+/, ""),
@@ -458,16 +460,16 @@ export async function handleInboundText(phone: string, text: string) {
             ],
           },
         },
-      } as any);
+      } as any, "AI_DISPATCH_INTERACTIVE");
       return;
     }
-    await sendText(phone, "Paste the original M-Pesa SMS (no edits).");
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT");
     return;
   }
 
   // Default: compact help
-  if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.");
-  else await sendText(phone, "Try MENU or HELP.");
+  if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT");
+  else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT");
 }
 
 export async function handleInteractiveReply(phone: string, payload: any) {
@@ -480,31 +482,31 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   // Quick path: show the extended list menu
   if (id === "MENU") {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You're not logged in. Use the login link to continue.");
+      await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT");
       await promptLogin(phone);
       return;
     }
     await saveSession(phone, { state: "MENU", ...cur });
-    await sendInteractive(menuMain(phone, s.outlet || undefined));
+    await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
     return;
   }
 
   // Login link resend handler
   if (id === "SEND_LOGIN_LINK") {
     const link = await createLoginLink(toDbPhone(phone));
-    await sendText(phone, `Tap to log in via the website:\n${link.url}`);
+    await sendText(phone, `Tap to log in via the website:\n${link.url}`, "AI_DISPATCH_TEXT");
     return;
   }
 
   // Interpret menu choices
   if (id === "MENU_SUBMIT_CLOSING" || id === "ATD_CLOSING" || id === "ATT_CLOSING") {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "Login first (send your code).");
+      await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
       return;
     }
     // Guard: day-level lock
     if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       return;
     }
     // Filter already closed products
@@ -512,56 +514,56 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     const closed = await getClosedKeys(cur.date, s.outlet);
     const prods = prodsAll.filter((p) => !closed.has(p.key));
     if (!prods.length) {
-      await sendText(phone, "All products are already closed for today.");
+      await sendText(phone, "All products are already closed for today.", "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "SUMMARY", ...cur });
-  await sendInteractive(await summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
+      await sendInteractive(await summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
       return;
     }
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    await sendInteractive(listProducts(phone, prods, s.outlet));
+    await sendInteractive(listProducts(phone, prods, s.outlet), "AI_DISPATCH_INTERACTIVE");
     return;
   }
   if (id === "ATD_DEPOSIT" || id === "ATT_DEPOSIT" || id === "MENU_DEPOSIT") {
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    await sendText(phone, "Paste the original M-Pesa SMS (no edits). We will extract the amount and reference.");
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits). We will extract the amount and reference.", "AI_DISPATCH_TEXT");
     return;
   }
   if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE" || id === "ATT_EXPENSE") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
-    await sendInteractive(expenseNamePrompt(phone));
+    await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     return;
   }
   if (id === "MENU_TXNS" || id === "ATD_TXNS") {
     const rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
-    if (!rows.length) await sendText(phone, "No till payments recorded yet today.");
-    else await sendText(phone, rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"));
+    if (!rows.length) await sendText(phone, "No till payments recorded yet today.", "AI_DISPATCH_TEXT");
+    else await sendText(phone, rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"), "AI_DISPATCH_TEXT");
     return;
   }
 
   if (id === "MENU_SUPPLY") {
-    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor."); return; }
+    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT"); return; }
     const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { itemKey: "asc" } });
     if (!rows.length) {
       // Fall back to yesterday's closing as opening baseline
       const y = prevDateISO(cur.date);
       const prev = await (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y }, orderBy: { itemKey: "asc" } });
-      if (!prev.length) { await sendText(phone, "No opening stock found yet."); return; }
+      if (!prev.length) { await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT"); return; }
       const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r:any)=>r.itemKey) } } });
       const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
       const text = prev.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`).join("\n");
-      await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`);
+      await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
       return;
     } else {
       const plist = await (prisma as any).product.findMany({ where: { key: { in: rows.map((r:any)=>r.itemKey) } } });
       const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
       const text = rows.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.qty} ${r.unit}`).join("\n");
-      await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`);
+      await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
     }
     return;
   }
 
   if (id === "MENU_SUMMARY") {
-    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor."); return; }
+    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT"); return; }
     try {
       const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
       const lines = [
@@ -570,9 +572,9 @@ export async function handleInteractiveReply(phone: string, payload: any) {
         `Expenses: Ksh ${totals.expenses}`,
         `Expected deposit: Ksh ${totals.expectedDeposit}`,
       ];
-      await sendText(phone, lines.join("\n"));
+      await sendText(phone, lines.join("\n"), "AI_DISPATCH_TEXT");
     } catch (e) {
-      await sendText(phone, "Summary is unavailable right now. Try again later.");
+      await sendText(phone, "Summary is unavailable right now. Try again later.", "AI_DISPATCH_TEXT");
     }
     return;
   }
@@ -582,9 +584,9 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     const key = id.replace(/^PROD_/, "");
     // Guard: day-level lock
     if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "MENU", ...cur });
-    await sendInteractive(await menuMain(phone, s.outlet || undefined));
+      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
       return;
     }
     const prods = await getAssignedProducts(s.code || "");
@@ -593,32 +595,32 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     if (s.outlet) {
       const closed = await getClosedKeys(cur.date, s.outlet);
       if (closed.has(key)) {
-        await sendText(phone, `${name} is already closed for today. Pick another product.`);
+        await sendText(phone, `${name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT");
         const remaining = prods.filter((p) => !closed.has(p.key));
         await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+        await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
         return;
       }
     }
     cur.currentItem = { key, name };
     await saveSession(phone, { state: "CLOSING_QTY", ...cur });
-    await sendInteractive(promptQty(phone, name));
+    await sendInteractive(promptQty(phone, name), "AI_DISPATCH_INTERACTIVE");
     return;
   }
 
   // Waste/Skip buttons
   if (id === "WASTE_YES") {
     if (!cur.currentItem) {
-      await sendText(phone, "Pick a product first.");
+      await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
       return;
     }
     await saveSession(phone, { state: "CLOSING_WASTE_QTY", ...cur });
-    await sendInteractive(promptWaste(phone, cur.currentItem.name));
+    await sendInteractive(promptWaste(phone, cur.currentItem.name), "AI_DISPATCH_INTERACTIVE");
     return;
   }
   if (id === "WASTE_SKIP") {
     if (!cur.currentItem) {
-      await sendText(phone, "Pick a product first.");
+      await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
       return;
     }
     cur.currentItem.waste = 0;
@@ -631,11 +633,11 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   // Summary actions
   if (id === "SUMMARY_SUBMIT") {
     if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.");
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`);
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       return;
     }
     // Guard against duplicates is handled by DB unique constraint
@@ -649,8 +651,8 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     // Mark submitted items as inactive for this session
     const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur, inactiveKeys: newInactive });
-    await sendText(phone, `Thanks, ${s.code || "Attendant"} (${s.outlet}).`);
-    await sendText(phone, `Expected deposit today: Ksh ${totals.expectedDeposit}. Paste your M-Pesa message here when paid.`);
+    await sendText(phone, `Thanks, ${s.code || "Attendant"} (${s.outlet}).`, "AI_DISPATCH_TEXT");
+    await sendText(phone, `Expected deposit today: Ksh ${totals.expectedDeposit}. Paste your M-Pesa message here when paid.`, "AI_DISPATCH_TEXT");
     await sendInteractive({
       messaging_product: "whatsapp",
       to: phone.replace(/^\+/, ""),
@@ -666,16 +668,16 @@ export async function handleInteractiveReply(phone: string, payload: any) {
           ],
         },
       },
-    } as any);
+    } as any, "AI_DISPATCH_INTERACTIVE");
     return;
   }
   if (id === "SUMMARY_LOCK") {
     if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.");
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`);
+      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
       return;
     }
     // Save any staged rows then lock the day
@@ -690,30 +692,30 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     await notifySupAdm(`Attendant day locked for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`);
+    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
     return;
   }
   if (id === "SUMMARY_MODIFY") {
     if (!cur.rows.length) {
-      await sendText(phone, "No rows yet. Pick a product first.");
+      await sendText(phone, "No rows yet. Pick a product first.", "AI_DISPATCH_TEXT");
       return;
     }
     const items = cur.rows.map((r) => ({ key: r.key, name: r.name }));
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    await sendInteractive(listProducts(phone, items, s.outlet || "Outlet"));
+    await sendInteractive(listProducts(phone, items, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
     return;
   }
 
   // Expense follow-ups
   if (id === "EXP_ADD_ANOTHER") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
-    await sendInteractive(expenseNamePrompt(phone));
+    await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     return;
   }
   if (id === "EXP_FINISH") {
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     const to = phone.replace(/^\+/, "");
-    await sendAttendantMenu(to, s.outlet || "your outlet");
+    await sendSixTabs(to, "attendant", s.outlet || undefined);
     return;
   }
 }
@@ -729,9 +731,9 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
   }
   if (!remaining.length) {
     await saveSession(phone, { state: "SUMMARY", ...cur });
-    await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"));
+    await sendInteractive(summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
   } else {
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"));
+    await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
   }
 }

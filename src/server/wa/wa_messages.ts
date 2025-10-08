@@ -2,12 +2,16 @@
 // Server-only builders for Supplier WhatsApp flows (interactive bodies)
 
 export function buildSupplierMenu() {
+  if (process.env.WA_GPT_ONLY === "true") {
+    // Avoid legacy builders in GPT-only; caller should use six-tabs instead.
+    return { type: "list", body: { text: "" }, action: { button: "Tabs", sections: [{ title: "Menu", rows: [] }] } } as const;
+  }
   return {
     type: "list",
     header: { type: "text", text: "BarakaOps — Supplier" },
-    body: { text: "Pick an action:" },
+    body: { text: "Use the tabs:" },
     action: {
-      button: "Choose",
+      button: "Tabs",
       sections: [
         {
           title: "Menu",
@@ -26,7 +30,7 @@ export function buildSupplierMenu() {
 export function buildBackCancel() {
   return {
     type: "button",
-    body: { text: "Choose:" },
+    body: { text: "Pick one:" },
     action: {
       buttons: [
         { type: "reply", reply: { id: "SPL_BACK", title: "Back" } },
@@ -48,9 +52,9 @@ export function buildAfterSaveButtons(opts: { canLock: boolean }) {
 export function buildOutletList(outlets: { name: string }[]) {
   return {
     type: "list",
-    body: { text: "Choose outlet" },
+    body: { text: "Pick outlet" },
     action: {
-      button: "Select",
+      button: "Tabs",
       sections: [
         {
           title: "Outlets",
@@ -64,9 +68,9 @@ export function buildOutletList(outlets: { name: string }[]) {
 export function buildProductList(products: { key: string; name: string }[]) {
   return {
     type: "list",
-    body: { text: "Choose product" },
+    body: { text: "Pick product" },
     action: {
-      button: "Select",
+      button: "Tabs",
       sections: [
         {
           title: "Products",

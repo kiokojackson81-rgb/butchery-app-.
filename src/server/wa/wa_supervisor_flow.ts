@@ -50,7 +50,7 @@ function isSessionValid(sess: any) {
 }
 
 async function sendLoginLink(phoneGraph: string) {
-  await sendText(phoneGraph, `You're not logged in. Tap to log in: ${process.env.APP_ORIGIN}/login`);
+  await sendText(phoneGraph, `You're not logged in. Tap to log in: ${process.env.APP_ORIGIN}/login`, "AI_DISPATCH_TEXT");
 }
 
 async function saveSession(sessId: string, patch: Partial<{ state: string; cursor: SupervisorCursor }>) {

@@ -41,7 +41,7 @@ async function sendBulk(phones: string[], message: string) {
   if (!phones.length) return;
   if (process.env.WA_AUTOSEND_ENABLED === "true") {
     // old path (temporary)
-    await Promise.allSettled(phones.map((phone) => sendText(phone, message)));
+  await Promise.allSettled(phones.map((phone) => sendText(phone, message, "AI_DISPATCH_TEXT")));
   } else {
     await Promise.allSettled(phones.map((phone) => sendOpsMessage(phone, { kind: "free_text", text: message })));
   }
@@ -93,7 +93,7 @@ If disputed by the outlet, Supervisor will contact you.`;
   await sendBulk(uniquePhones(admins), msgAdmin);
   if (supplier?.phoneE164) {
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(supplier.phoneE164, msgSupplier);
+  await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT");
     } else {
       await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
     }
@@ -132,7 +132,7 @@ Please review in the dashboard.`;
 
   const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
   if (process.env.WA_AUTOSEND_ENABLED === "true") {
-    await sendText(opts.attendantPhone, ack);
+  await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
   } else {
     await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
   }
