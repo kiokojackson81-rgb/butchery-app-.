@@ -23,6 +23,37 @@ function normalizeGraphPhone(to: string): string {
 
 export type SendResult = { ok: true; waMessageId?: string; response?: any } | { ok: false; error: string };
 
+// Simple 10s cache for window checks
+const windowCache = new Map<string, { at: number; open: boolean }>();
+
+async function isWindowOpen(phoneE164: string): Promise<boolean> {
+  try {
+    const now = Date.now();
+    const cached = windowCache.get(phoneE164);
+    if (cached && now - cached.at < 10_000) return cached.open;
+    const noPlus = phoneE164.replace(/^\+/, "");
+    // Consider multiple shapes: meta.phoneE164, payload.phone, and Graph 'from'
+    const rows = await (prisma as any).$queryRawUnsafe(
+      `SELECT MAX("createdAt") AS last_in
+       FROM "WaMessageLog"
+       WHERE direction='in' AND (
+         payload->'meta'->>'phoneE164' = $1 OR payload->>'phone' = $1 OR payload->>'from' = $2
+       )`,
+      phoneE164,
+      noPlus
+    );
+    const last = Array.isArray(rows) && rows[0] ? (rows[0] as any).last_in : null;
+    const lastTs = last ? new Date(last).getTime() : 0;
+    const open = lastTs > 0 && (now - lastTs) <= 24 * 60 * 60 * 1000;
+    windowCache.set(phoneE164, { at: now, open });
+    return open;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+
 export async function sendTemplate(opts: {
   to: string;
   template: string;
@@ -44,7 +75,7 @@ export async function sendTemplate(opts: {
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -78,12 +109,12 @@ export async function sendTemplate(opts: {
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     throw new Error(`WA send failed: ${res.status}`);
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -108,7 +139,7 @@ export async function warmUpSession(to: string): Promise<boolean> {
 /**
  * Send plain text over WhatsApp.
  */
-export async function sendText(to: string, text: string, contextType?: string): Promise<SendResult> {
+async function _sendTextRaw(to: string, text: string, contextType?: string, inReplyTo?: string): Promise<SendResult> {
   // Feature-flag legacy senders: allow AI dispatcher paths only
   const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
   const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
@@ -116,14 +147,14 @@ export async function sendText(to: string, text: string, contextType?: string): 
     const toNorm = normalizeGraphPhone(to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "autosend.disabled.context", _type: contextType || "AI_DISPATCH_TEXT" }, via: "feature-flag-noop", text }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -144,16 +175,16 @@ export async function sendText(to: string, text: string, contextType?: string): 
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_TEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
 /** Send a generic interactive message body (list/buttons) */
-export async function sendInteractive(body: any, contextType?: string): Promise<SendResult> {
+async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: string): Promise<SendResult> {
   // Feature-flag legacy senders: allow AI dispatcher paths only
   const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
   const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
@@ -161,7 +192,7 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
     const toNorm = normalizeGraphPhone(body?.to || "");
     const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "autosend.disabled.context" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "autosend.disabled.context", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   // Global kill-switch for interactive payloads (pure GPT text mode)
@@ -169,7 +200,7 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
     const toNorm = normalizeGraphPhone(body?.to || "");
     const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
     const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: "interactive.disabled" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "INTERACTIVE_DISABLED" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "interactive.disabled", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "INTERACTIVE_DISABLED" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
   const toNorm = normalizeGraphPhone(body?.to || "");
@@ -177,7 +208,7 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     // Ensure phoneE164 is present under meta for test filters
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -192,12 +223,55 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
   return { ok: true, waMessageId, response: json } as const;
+}
+
+export async function sendWithReopen(opts: {
+  toE164: string;
+  kind: "text" | "interactive";
+  text?: string;
+  body?: any;
+  ctxType: "AI_DISPATCH_TEXT" | "AI_DISPATCH_INTERACTIVE";
+  inReplyTo?: string;
+}): Promise<SendResult> {
+  const to = opts.toE164;
+  const open = await isWindowOpen(to);
+  if (!open) {
+    // Attempt to reopen using configured template
+    try {
+      const tmpl = (process.env.WA_TEMPLATE_NAME || "ops_nudge").trim();
+      await logOutbound({ direction: "out", templateName: tmpl, payload: { phone: to, meta: { phoneE164: to, reopen_reason: "window_closed", _type: "TEMPLATE_REOPEN_ATTEMPT" } }, status: "INFO", type: "TEMPLATE_REOPEN_ATTEMPT" });
+      await sendTemplate({ to, template: tmpl, contextType: "TEMPLATE_REOPEN" });
+      await sleep(250);
+    } catch {
+      // proceed anyway; the next send may fail if window remained closed
+    }
+  }
+  if (opts.kind === "text") {
+    return _sendTextRaw(to, opts.text || "", opts.ctxType, opts.inReplyTo);
+  } else {
+    const body = { ...(opts.body || {}), to: normalizeGraphPhone(to) };
+    return _sendInteractiveRaw(body, opts.ctxType, opts.inReplyTo);
+  }
+}
+
+export async function sendText(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string }): Promise<SendResult> {
+  const ctx = (contextType as any) || "AI_DISPATCH_TEXT";
+  return sendWithReopen({ toE164: to.startsWith("+") ? to : "+" + to, kind: "text", text, ctxType: ctx, inReplyTo: meta?.inReplyTo });
+}
+
+/** Send a generic interactive message body (list/buttons) */
+export async function sendInteractive(body: any, contextType?: string, meta?: { inReplyTo?: string }): Promise<SendResult> {
+  const ctx = (contextType as any) || "AI_DISPATCH_INTERACTIVE";
+  const toRaw = body?.to || "";
+  const to = String(toRaw || "");
+  const e164 = to.startsWith("+") ? to : "+" + to;
+  return sendWithReopen({ toE164: e164, kind: "interactive", body, ctxType: ctx, inReplyTo: meta?.inReplyTo });
 }
 
 /**

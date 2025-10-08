@@ -7,7 +7,7 @@ import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
-import { sendText, sendInteractive, sendTemplate } from "@/lib/wa";
+import { sendText, sendInteractive } from "@/lib/wa";
 // Legacy role menus are disabled under GPT-only; use six-tabs helper instead
 import { sendSixTabs } from "@/lib/wa_buttons";
 import { runGptForIncoming } from "@/lib/gpt_router";
@@ -178,7 +178,7 @@ export async function POST(req: Request) {
           const markSent = () => { __sentOnce = true; };
           const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT") => {
             try { console.info("[WA] SENDING", { type: "text", ctx }); } catch {}
-            const r = await sendText(to, text, ctx);
+            const r = await sendText(to, text, ctx, { inReplyTo: wamid });
             markSent();
             return r;
           };
@@ -227,20 +227,7 @@ export async function POST(req: Request) {
             await logMessage({ direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type });
           } catch {}
 
-          // Before any outbound: ensure 24h window is open by sending a lightweight template when stale
-          try {
-            const last = await (prisma as any).waMessageLog.findFirst({
-              where: { direction: "in", payload: { path: ["from"], equals: fromGraph } as any },
-              orderBy: { createdAt: "desc" },
-              select: { createdAt: true },
-            }).catch(() => null);
-            const lastIn = (last?.createdAt as Date | undefined) || null;
-            const ageMs = lastIn ? (Date.now() - new Date(lastIn).getTime()) : Infinity;
-            if (ageMs >= 23.5 * 60 * 60 * 1000) {
-              const tmpl = process.env.WA_TEMPLATE_NAME || "ops_nudge";
-              await sendTemplate({ to: toGraphPhone(phoneE164!), template: tmpl, contextType: "TEMPLATE_REOPEN" });
-            }
-          } catch {}
+          // Reopen handled centrally in transport via sendWithReopen
 
           // Helper button: resend login link
           const maybeButtonId = (m as any)?.button?.payload || (m as any)?.button?.text || m?.interactive?.button_reply?.id;

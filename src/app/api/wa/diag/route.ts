@@ -67,6 +67,10 @@ export async function GET(req: Request) {
       interactiveDisabled,
       dryRun,
       templateReopen,
+      templateReopenAttempt,
+      templateReopenSuccess,
+      aiDispatchCount,
+      oocInfoCount,
       inboundDedup,
       loginPrompt,
     ] = await Promise.all([
@@ -77,6 +81,10 @@ export async function GET(req: Request) {
       count(`AND type = 'INTERACTIVE_DISABLED'`),
       count(`AND payload::text ILIKE '%"via":"dry-run"%'`),
       count(`AND "templateName" IS NOT NULL`),
+      count(`AND type = 'TEMPLATE_REOPEN_ATTEMPT'`),
+      count(`AND type = 'TEMPLATE_REOPEN' AND status = 'SENT'`),
+      count(`AND type IN ('AI_DISPATCH_TEXT','AI_DISPATCH_INTERACTIVE','AI_DISPATCH')`),
+      count(`AND type IN ('OOC_INFO','OOC_MPESA_PARSED')`),
       count(`AND status = 'INBOUND_DEDUP'`),
       count(`AND status = 'LOGIN_PROMPT'`),
     ]);
@@ -117,6 +125,18 @@ export async function GET(req: Request) {
         ).catch(() => [])
       : [];
 
+    // recency metrics
+    async function lastTime(where: string) {
+      const rows = await (prisma as any).$queryRawUnsafe(
+        `SELECT MAX("createdAt") AS t FROM "WaMessageLog" WHERE ${where} ${phoneClause ? " " + phoneClause : ""}`,
+        ...params
+      );
+      return (Array.isArray(rows) && rows[0] && (rows[0] as any).t) || null;
+    }
+    const lastInboundAt = await lastTime(`direction='in'`);
+    const lastOutboundAt = await lastTime(`direction='out'`);
+    const lastTemplateAt = await lastTime(`"templateName" IS NOT NULL`);
+
     // Helpful copy-paste queries for Neon UI (with proper quoting)
     const neonSql = {
       badSignature: `SELECT "createdAt", status, type, payload->>'error' AS error\nFROM "WaMessageLog"\nWHERE "createdAt" > now() - interval '${hours} hours'\n  AND status = 'ERROR'\n  AND payload->>'error' = 'bad signature'\nORDER BY "createdAt" DESC\nLIMIT 10;`,
@@ -152,9 +172,16 @@ export async function GET(req: Request) {
         inboundDedup: samples[5],
         loginPrompt: samples[6],
       },
+      metrics: {
+        templateReopenAttempts24h: templateReopenAttempt,
+        templateReopenSuccess24h: templateReopenSuccess,
+        aiDispatchCount24h: aiDispatchCount,
+        oocInfoCount24h: oocInfoCount,
+      },
       session: sessionRows,
       phoneMapping: mappingRows,
       reminder: reminderRows,
+      recency: { lastInboundAt, lastOutboundAt, lastTemplateAt },
       neonSql,
     });
   } catch (e: any) {
