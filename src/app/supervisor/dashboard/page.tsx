@@ -428,27 +428,7 @@ export default function SupervisorDashboard() {
               </option>
             ))}
           </select>
-          {/* Thin persistence controls (optional) */}
-          <button
-            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
-            title="Reload Admin settings from DB"
-            onClick={async () => {
-              try { await hydrateLocalStorageFromDB(); alert("Hydrated Admin settings from DB ✅"); }
-              catch { alert("Failed to hydrate from DB."); }
-            }}
-          >
-            Refresh Admin
-          </button>
-          <button
-            className="btn-mobile px-3 py-2 rounded-xl border text-sm"
-            title="Push Admin settings from this browser to DB"
-            onClick={async () => {
-              try { await pushAllToDB(); alert("Pushed Admin settings to DB ✅"); }
-              catch { alert("Failed to push to DB."); }
-            }}
-          >
-            Sync to DB
-          </button>
+          {/* Thin persistence controls removed: now automatic */}
           <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
             Download PDF
           </button>
@@ -661,9 +641,7 @@ export default function SupervisorDashboard() {
               <label className="text-xs text-gray-700 inline-flex items-center gap-1">
                 <input type="checkbox" checked={showInactive} onChange={(e)=>setShowInactive(e.target.checked)} /> Show inactive
               </label>
-              <button className="btn-mobile border rounded-xl px-3 py-1 text-sm" onClick={refreshPricesView} disabled={pricesLoading}>
-                {pricesLoading ? "Loading…" : "↻ Refresh"}
-              </button>
+              {/* Manual Refresh removed; relies on auto-refresh every 5s */}
             </div>
           </div>
           {pricesError && <div className="text-red-700 text-sm mb-2">{pricesError}</div>}

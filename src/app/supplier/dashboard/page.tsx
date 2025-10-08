@@ -981,9 +981,6 @@ export default function SupplierDashboard(): JSX.Element {
         <section id="supplier-pricebook" className="rounded-2xl border p-4 mb-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Outlet Pricebook — {selectedOutletName || "—"}</h2>
-            <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={refreshPrices} disabled={pricesLoading}>
-              {pricesLoading ? "Loading…" : "↻ Refresh"}
-            </button>
           </div>
           <div className="table-wrap">
             <table className="w-full text-sm">
