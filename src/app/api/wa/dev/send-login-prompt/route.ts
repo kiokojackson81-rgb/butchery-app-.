@@ -13,8 +13,12 @@ export const revalidate = 0;
 export async function POST(req: Request) {
   try {
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-    if (!DRY) return NextResponse.json({ ok: false, error: "DISABLED" }, { status: 403 });
-    const { phoneE164, reason } = (await req.json()) as { phoneE164?: string; reason?: string };
+    const { phoneE164, reason, key } = (await req.json()) as { phoneE164?: string; reason?: string; key?: string };
+    const adminKey = process.env.ADMIN_DIAG_KEY || "";
+    // In production, allow only when ADMIN_DIAG_KEY matches; otherwise require DRY
+    if (!DRY && (!adminKey || key !== adminKey)) {
+      return NextResponse.json({ ok: false, error: "DISABLED" }, { status: 403 });
+    }
     if (!phoneE164) return NextResponse.json({ ok: false, error: "phoneE164 required" }, { status: 400 });
     await promptWebLogin(phoneE164, reason);
     // Return the latest outbound log for this phone to aid tests
@@ -45,5 +49,27 @@ export async function POST(req: Request) {
     }
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "send-login-prompt failed" }, { status: 500 });
+  }
+}
+
+// Production-safe GET variant gated by ADMIN_DIAG_KEY
+// /api/wa/dev/send-login-prompt?phone=+2547...&reason=...&key=ADMIN_DIAG_KEY
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const phone = searchParams.get("phone") || searchParams.get("phoneE164") || "";
+    const reason = searchParams.get("reason") || undefined;
+    const key = searchParams.get("key") || "";
+    const adminKey = process.env.ADMIN_DIAG_KEY || "";
+    if (!adminKey || key !== adminKey) {
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+    const digits = phone.replace(/[^0-9+]/g, "");
+    const e164 = digits.startsWith("+") ? digits : "+" + digits;
+    if (!e164 || e164.length < 10) return NextResponse.json({ ok: false, error: "phone required" }, { status: 400 });
+    await promptWebLogin(e164, reason);
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "send-login-prompt GET failed" }, { status: 500 });
   }
 }
