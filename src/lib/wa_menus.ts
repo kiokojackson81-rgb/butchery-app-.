@@ -22,11 +22,11 @@ export async function sendAttendantMenu(to: string, outlet: string) {
           {
             title: "Attendant Tabs",
             rows: [
-              { id: "ATT_TAB_STOCK", title: "Stock" },
-              { id: "ATT_TAB_SUPPLY", title: "Supply" },
-              { id: "ATT_TAB_DEPOSITS", title: "Deposits" },
-              { id: "ATT_TAB_EXPENSES", title: "Expenses" },
-              { id: "ATT_TAB_TILL", title: "Till" },
+              { id: "ATT_TAB_STOCK", title: "Enter Closing" },
+              { id: "ATT_TAB_SUPPLY", title: "Supply (view)" },
+              { id: "ATT_TAB_DEPOSITS", title: "Deposit (paste SMS)" },
+              { id: "ATT_TAB_EXPENSES", title: "Expense" },
+              { id: "ATT_TAB_TILL", title: "Till Count" },
               { id: "ATT_TAB_SUMMARY", title: "Summary" },
             ],
           },
@@ -38,12 +38,12 @@ export async function sendAttendantMenu(to: string, outlet: string) {
   } catch {}
   const cfg = await getAttendantConfig();
   const rows: any[] = [];
-  // Canonical 6-tab menu (always shown)
-  rows.push({ id: "ATT_TAB_STOCK", title: "Stock", description: "Enter closing & waste" });
-  rows.push({ id: "MENU_SUPPLY", title: "Supply", description: "Opening math & add lines" });
-  rows.push({ id: "ATT_DEPOSIT", title: "Deposits", description: "Paste M-PESA SMS" });
-  rows.push({ id: "ATT_EXPENSE", title: "Expenses", description: "Quick categories" });
-  rows.push({ id: "MENU_TXNS", title: "Till", description: "Payments / TXNS" });
+  // Canonical 6-tab menu (always shown) — titles exactly match dashboard copy
+  rows.push({ id: "ATT_TAB_STOCK", title: "Enter Closing", description: "Enter closing & waste" });
+  rows.push({ id: "MENU_SUPPLY", title: "Supply (view)", description: "Opening math & add lines" });
+  rows.push({ id: "ATT_DEPOSIT", title: "Deposit (paste SMS)", description: "Paste M-PESA SMS" });
+  rows.push({ id: "ATT_EXPENSE", title: "Expense", description: "Quick categories" });
+  rows.push({ id: "MENU_TXNS", title: "Till Count", description: "Payments / TXNS" });
   rows.push({ id: "MENU_SUMMARY", title: "Summary", description: cfg.enableSubmitAndLock ? "Lock day when ready" : "Totals" });
 
   const payload = buildInteractiveListPayload({
@@ -60,10 +60,10 @@ export async function sendSupplierMenu(to: string) {
   // Legacy sender hard-guard in GPT-only mode
   if (process.env.WA_GPT_ONLY === "true") return;
   const rows: any[] = [
-    { id: "SUP_TAB_SUPPLY_TODAY", title: "Deliveries today", description: "Add or view lines" },
-    { id: "SUP_TAB_VIEW", title: "View deliveries", description: "Recent activity" },
-    { id: "SUP_TAB_DISPUTE", title: "Disputes", description: "Open items" },
-    { id: "SUP_TAB_HELP", title: "Help / Logout", description: "Get help or exit" },
+    { id: "SUPL_DELIVERY", title: "Submit Delivery", description: "Add or view lines" },
+    { id: "SUPL_VIEW_OPENING", title: "View Opening", description: "Recent activity" },
+    { id: "SUPL_DISPUTES", title: "Disputes", description: "Open items" },
+    { id: "SUPL_HELP", title: "Help / Logout", description: "Get help or exit" },
   ];
   const payload = buildInteractiveListPayload({
     to,
@@ -79,10 +79,10 @@ export async function sendSupervisorMenu(to: string) {
   // Legacy sender hard-guard in GPT-only mode
   if (process.env.WA_GPT_ONLY === "true") return;
   const rows: any[] = [
-    { id: "SV_TAB_REVIEW_QUEUE", title: "Review queue" },
-    { id: "SV_TAB_SUMMARIES", title: "Summaries" },
-    { id: "SV_TAB_UNLOCK", title: "Unlock / Adjust" },
-    { id: "SV_TAB_HELP", title: "Help / Logout" },
+    { id: "SV_REVIEW_CLOSINGS", title: "Review Closings" },
+    { id: "SV_REVIEW_DEPOSITS", title: "Review Deposits" },
+    { id: "SV_REVIEW_EXPENSES", title: "Review Expenses" },
+    { id: "SV_HELP", title: "Help / Logout" },
   ];
   const payload = buildInteractiveListPayload({
     to,
