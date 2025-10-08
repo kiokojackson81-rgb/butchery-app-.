@@ -124,7 +124,7 @@ async function notifySupAdm(message: string) {
     ]);
     const list = [...sup, ...adm].map((r: any) => r.phoneE164).filter(Boolean) as string[];
     if (!list.length) return;
-  await Promise.allSettled(list.map((to) => sendText(to, message)));
+  await Promise.allSettled(list.map((to) => sendText(to, message, "AI_DISPATCH_TEXT")));
   } catch (e) {
     console.warn("notifySupAdm failed", e);
   }
@@ -177,7 +177,7 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
         update: { code: pc.code, role: finalRole, state: "LOGIN" },
         create: { phoneE164, code: pc.code, role: finalRole, state: "LOGIN", cursor: { date: today(), rows: [] } },
       });
-      await sendText(phoneE164.replace(/^\+/, ""), "Your outlet is not set. Ask Supervisor to assign your outlet.");
+  await sendText(phoneE164.replace(/^\+/, ""), "Your outlet is not set. Ask Supervisor to assign your outlet.", "AI_DISPATCH_TEXT");
       return true;
     }
   }

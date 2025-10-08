@@ -82,7 +82,7 @@ async function sendLoginSuccessDM(opts: { to: string; name: string; role: string
   }
   const toGraph = toGraphPhone(opts.to);
   try { await warmUpSession(toGraph); } catch {}
-  const res = await sendText(toGraph, lines.join("\n"));
+  const res = await sendText(toGraph, lines.join("\n"), "AI_DISPATCH_TEXT");
   // Immediately send role-specific interactive menu
   if (opts.role === "attendant") await sendAttendantMenu(toGraph, opts.outlet || "your outlet");
   else if (opts.role === "supplier") await sendSupplierMenu(toGraph);
@@ -95,7 +95,7 @@ async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string
   const loginUrl = `${APP_ORIGIN}/login?wa=${encodeURIComponent(opts.to)}&src=wa`;
   const body = `Login unsuccessful.\nPlease verify your code and try again: ${loginUrl}\nIf it still fails, contact Admin.`;
   const toGraph = toGraphPhone(opts.to);
-  const res = await sendText(toGraph, body);
+  const res = await sendText(toGraph, body, "AI_DISPATCH_TEXT");
   await logOutbound({ direction: "out", templateName: "login-fail", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
   return (res as any)?.ok === true;
 }

@@ -58,9 +58,9 @@ export async function POST(req: Request) {
       ].filter(Boolean).join(", ");
       const msg = `Closing updated: ${itemKey} at ${outlet} (${date}) — ${changed}. ${reason ? "Reason: " + reason : ""}`.trim();
       await Promise.allSettled([
-        ...attendants.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg)),
-        ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg)),
-        ...admins.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg)),
+        ...attendants.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg, "AI_DISPATCH_TEXT")),
+        ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg, "AI_DISPATCH_TEXT")),
+        ...admins.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msg, "AI_DISPATCH_TEXT")),
       ]);
     } catch {}
 

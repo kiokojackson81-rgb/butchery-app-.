@@ -77,9 +77,9 @@ export async function POST(req: Request) {
     const msgTo = `Hello. ${item} ${qtyTxt} has been transferred to your outlet (${toOutletName}) from ${fromOutletName}. If any issue, raise a dispute with your supervisor.`;
     const msgSup = `Transfer recorded: ${item} ${qtyTxt} from ${fromOutletName} to ${toOutletName} (${date}).`;
     await Promise.allSettled([
-      ...attendantsFrom.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgFrom)),
-      ...attendantsTo.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgTo)),
-      ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgSup)),
+      ...attendantsFrom.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgFrom, "AI_DISPATCH_TEXT")),
+      ...attendantsTo.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgTo, "AI_DISPATCH_TEXT")),
+      ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgSup, "AI_DISPATCH_TEXT")),
     ]);
   } catch {}
 

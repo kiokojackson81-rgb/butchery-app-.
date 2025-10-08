@@ -29,15 +29,15 @@ export async function POST(req: Request) {
 
       const notice = `\uD83D\uDCE6 Supply request: ${outlet} needs ${qty} ${productKey}.`;
       await Promise.all([
-        ...suppliers.map((s: any) => sendText(s.phoneE164, notice)),
-        ...supervisors.map((s: any) => sendText(s.phoneE164, notice)),
-        sendText(from, `\u2705 Request received for ${qty} ${productKey}. Supervisor will confirm.`),
+        ...suppliers.map((s: any) => sendText(s.phoneE164, notice, "AI_DISPATCH_TEXT")),
+        ...supervisors.map((s: any) => sendText(s.phoneE164, notice, "AI_DISPATCH_TEXT")),
+        sendText(from, `\u2705 Request received for ${qty} ${productKey}. Supervisor will confirm.`, "AI_DISPATCH_TEXT"),
       ]);
 
       return NextResponse.json({ ok: true });
     }
 
-    await sendText(from, `\uD83D\uDC4B Hi! To request supply, send: "request <itemKey> <qty>". Example: request beef 20`);
+  await sendText(from, `\uD83D\uDC4B Hi! To request supply, send: "request <itemKey> <qty>". Example: request beef 20`, "AI_DISPATCH_TEXT");
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });

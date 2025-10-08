@@ -38,9 +38,9 @@ export async function POST(req: Request) {
       const msgA = `Supplier requested adjustment: ${item} from ${currentQty} to ${newQty} at ${outlet}. Reason: ${reason}`;
       const msgS = `Adjustment request pending: ${item} ${outlet} ${date}. ${currentQty} → ${newQty}. Reason: ${reason}`;
       await Promise.allSettled([
-        ...attendants.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgA)),
-        ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS)),
-        ...admins.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS)),
+        ...attendants.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgA, "AI_DISPATCH_TEXT")),
+        ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS, "AI_DISPATCH_TEXT")),
+        ...admins.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS, "AI_DISPATCH_TEXT")),
       ]);
     } catch {}
 

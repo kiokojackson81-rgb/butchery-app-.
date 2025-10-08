@@ -336,7 +336,7 @@ export async function handleSupplierText(sess: any, text: string, phoneE164: str
       } as any, "AI_DISPATCH_INTERACTIVE");
     }
     default:
-      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
   }
 }
 

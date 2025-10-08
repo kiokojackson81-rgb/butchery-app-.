@@ -78,8 +78,14 @@ export default function AttendantDashboardPage() {
   const [expenses, setExpenses] = useState<Array<{ id: string; name: string; amount: number | string | ""; saved?: boolean }>>([]);
   const [countedTill, setCountedTill] = useState<number | "">("");
 
-  const [tab, setTab] = useState<"stock" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
+  const [tab, setTab] = useState<"stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
   const [submitted, setSubmitted] = useState(false);
+
+  // Products tab state
+  const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
+  const [productsOutlet, setProductsOutlet] = useState<string | null>(null);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
 
   // Thin persistence: ensure admin settings are hydrated from DB first
   useEffect(() => {
@@ -177,6 +183,67 @@ export default function AttendantDashboardPage() {
       });
     } catch {}
   }, [outlet]);
+
+  /** ===== Products tab: fetch and live refresh ===== */
+  async function refreshProducts() {
+    try {
+      setProductsLoading(true);
+      setProductsError(null);
+      const res = await getJSON<{ ok: boolean; outlet: string; attendantCode?: string; products: Array<{ key: string; name: string; price: number; updatedAt?: string }> }>(
+        "/api/attendant/products"
+      );
+      if (res && res.ok) {
+        setProducts(res.products || []);
+        setProductsOutlet(res.outlet || null);
+        // Sync prices into catalog so computed totals reflect latest pricebook
+        if (Array.isArray(res.products)) {
+          setCatalog((prev) => {
+            const next: Record<ItemKey, AdminProduct> = { ...prev } as any;
+            for (const p of res.products) {
+              const k = p.key as ItemKey;
+              if (next[k]) {
+                if (Number(next[k].sellPrice) !== Number(p.price)) {
+                  next[k] = { ...next[k], sellPrice: Number(p.price) };
+                }
+              } else {
+                // Add missing product to catalog with sensible defaults
+                // Note: assumes union ItemKey covers admin keys in practice
+                try {
+                  next[k] = {
+                    key: k,
+                    name: (p.name || String(k)) as any,
+                    unit: (((next as any)[k]?.unit) || "kg") as Unit,
+                    sellPrice: Number(p.price || 0),
+                    active: true,
+                  } as any;
+                } catch {}
+              }
+            }
+            return next;
+          });
+        }
+      } else {
+        setProducts([]);
+        setProductsOutlet(null);
+        setProductsError("Failed to load products");
+      }
+    } catch (e: any) {
+      setProductsError(typeof e?.message === "string" ? e.message : "Failed to load products");
+      setProducts([]);
+      setProductsOutlet(null);
+    } finally {
+      setProductsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab !== "products") return;
+    refreshProducts();
+    const id = setInterval(() => {
+      refreshProducts();
+    }, 5000); // lightweight polling for immediate admin changes
+    return () => clearInterval(id);
+  }, [tab]);
 
   /** ===== Load opening + saved data ===== */
   useEffect(() => {
@@ -535,12 +602,71 @@ export default function AttendantDashboardPage() {
       {/* Tabs */}
       <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2">
         <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>
+        <TabBtn active={tab==="products"} onClick={()=>setTab("products")}>Products</TabBtn>
         <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
         <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
         <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>
         <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
       </nav>
+
+      {/* ===== PRODUCTS (Assigned + Prices) ===== */}
+      {tab === "products" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Products & Prices</h2>
+            <div className="flex items-center gap-2">
+              <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>refreshProducts()} disabled={productsLoading}>
+                {productsLoading ? "Loading…" : "↻ Refresh"}
+              </button>
+            </div>
+          </div>
+          <div className="text-sm text-gray-600 mb-3">
+            {productsOutlet ? (
+              <>
+                Assigned to outlet: <span className="font-medium">{productsOutlet}</span>
+              </>
+            ) : (
+              <>Assigned products for your outlet</>
+            )}
+          </div>
+
+          <div className="table-wrap">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Product</th>
+                  <th>Key</th>
+                  <th>Price (Ksh)</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productsError && (
+                  <tr>
+                    <td className="py-2 text-red-700" colSpan={4}>{productsError}</td>
+                  </tr>
+                )}
+                {!productsError && products.length === 0 && (
+                  <tr>
+                    <td className="py-2 text-gray-500" colSpan={4}>No products assigned.</td>
+                  </tr>
+                )}
+                {products.map((p, i) => (
+                  <tr key={`${p.key}-${i}`} className="border-b">
+                    <td className="py-2">{p.name}</td>
+                    <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                    <td>Ksh {fmt(Number(p.price) || 0)}</td>
+                    <td className="text-xs text-gray-500">{p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-xs text-gray-500 mt-3">Prices auto-refresh every 5s while this tab is open.</p>
+        </section>
+      )}
 
       {/* ===== STOCK ===== */}
       {tab === "stock" && (
