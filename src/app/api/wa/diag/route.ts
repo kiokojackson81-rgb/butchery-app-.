@@ -165,7 +165,16 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      meta: { phone: e164, hours, limit, tables: Array.from(tableSet) },
+      meta: {
+        phone: e164,
+        hours,
+        limit,
+        tables: Array.from(tableSet),
+        waEnv: {
+          phoneId: Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID),
+          token: Boolean(process.env.WHATSAPP_TOKEN),
+        },
+      },
       counts: {
         inboundTotal,
         outboundTotal,
