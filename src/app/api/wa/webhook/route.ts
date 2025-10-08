@@ -246,6 +246,14 @@ export async function POST(req: Request) {
             if (!recent) {
               await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
               await promptWebLogin(phoneE164, auth.reason);
+            } else {
+              // Suppressed duplicate login prompt → still send a lightweight reminder to avoid silence
+              try {
+                const to = toGraphPhone(phoneE164);
+                const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
+                const msg = `You're not logged in. Open ${origin}/login to continue.`;
+                await sendText(to, msg, "AI_DISPATCH_TEXT");
+              } catch {}
             }
             try { await touchWaSession(phoneE164); } catch {}
             continue;
@@ -332,6 +340,11 @@ export async function POST(req: Request) {
             } catch {}
             if (display) {
               try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
+            } else {
+              // Avoid silence when GPT returns an empty display; send a clarifier if tabs are disabled
+              if (!TABS_ENABLED) {
+                try { await sendText(to, "I didn't quite get that.", "AI_DISPATCH_TEXT"); } catch {}
+              }
             }
             try { await sendRoleTabs(); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
