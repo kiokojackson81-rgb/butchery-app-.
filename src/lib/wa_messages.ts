@@ -179,10 +179,10 @@ import { getAttendantConfig } from "@/lib/wa_config";
 export async function menuMain(to: string, outletName?: string) {
   const cfg = await getAttendantConfig();
   const rows: InteractiveRow[] = [
-    { id: "MENU_SUBMIT_CLOSING", title: "Submit today’s closing", description: cfg.enableWaste ? "Enter closing & waste" : "Enter closing only" },
+    { id: "ATT_CLOSING", title: "Submit today’s closing", description: cfg.enableWaste ? "Enter closing & waste" : "Enter closing only" },
   ];
-  if (cfg.enableExpense) rows.push({ id: "MENU_EXPENSE", title: "Capture an expense", description: "Name and amount" });
-  if (cfg.enableDeposit) rows.push({ id: "MENU_DEPOSIT", title: "Record Deposit", description: "Paste M-Pesa SMS" });
+  if (cfg.enableExpense) rows.push({ id: "ATT_EXPENSE", title: "Capture an expense", description: "Name and amount" });
+  if (cfg.enableDeposit) rows.push({ id: "ATT_DEPOSIT", title: "Record Deposit", description: "Paste M-Pesa SMS" });
   if (cfg.enableTxns) rows.push({ id: "MENU_TXNS", title: "View till payments (10)", description: "Recent deposits" });
   if (cfg.enableSupplyView) rows.push({ id: "MENU_SUPPLY", title: "View today’s supply", description: "Opening stock by item" });
   if (cfg.enableSummary) rows.push({ id: "MENU_SUMMARY", title: "View summary", description: cfg.enableSubmitAndLock ? "Expected deposit & lock" : "Expected deposit" });

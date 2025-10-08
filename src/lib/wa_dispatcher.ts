@@ -95,7 +95,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
             body: { text: `Please sign in to continue.` },
             action: {
               buttons: [
-                { type: "url", url: deep, title: "LOGIN" },
+                { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "LOGIN" } },
                 { type: "reply", reply: { id: "HELP", title: "HELP" } },
               ],
             },

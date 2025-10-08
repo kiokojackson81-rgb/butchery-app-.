@@ -40,11 +40,11 @@ export async function sendAttendantMenu(to: string, outlet: string) {
   const rows: any[] = [];
   // Canonical 6-tab menu (always shown)
   rows.push({ id: "ATT_TAB_STOCK", title: "Stock", description: "Enter closing & waste" });
-  rows.push({ id: "ATT_TAB_SUPPLY", title: "Supply", description: "Opening math & add lines" });
-  rows.push({ id: "ATT_TAB_DEPOSITS", title: "Deposits", description: "Paste M-PESA SMS" });
-  rows.push({ id: "ATT_TAB_EXPENSES", title: "Expenses", description: "Quick categories" });
-  rows.push({ id: "ATT_TAB_TILL", title: "Till", description: "Payments / TXNS" });
-  rows.push({ id: "ATT_TAB_SUMMARY", title: "Summary", description: cfg.enableSubmitAndLock ? "Lock day when ready" : "Totals" });
+  rows.push({ id: "MENU_SUPPLY", title: "Supply", description: "Opening math & add lines" });
+  rows.push({ id: "ATT_DEPOSIT", title: "Deposits", description: "Paste M-PESA SMS" });
+  rows.push({ id: "ATT_EXPENSE", title: "Expenses", description: "Quick categories" });
+  rows.push({ id: "MENU_TXNS", title: "Till", description: "Payments / TXNS" });
+  rows.push({ id: "MENU_SUMMARY", title: "Summary", description: cfg.enableSubmitAndLock ? "Lock day when ready" : "Totals" });
 
   const payload = buildInteractiveListPayload({
     to,
