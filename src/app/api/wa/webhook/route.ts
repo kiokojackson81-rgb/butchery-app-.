@@ -85,6 +85,9 @@ export async function POST(req: Request) {
                 "SUP_TAB_VIEW": "SPL_RECENT",
                 "SUP_TAB_DISPUTE": "SPL_DISPUTES",
                 "SUP_TAB_HELP": "SPL_MENU",
+                // Action intents → concrete flow steps
+                "SUP_SUPPLY_ADD": "SPL_ADD_MORE",
+                "SUP_SUPPLY_CONFIRM": "SPL_SAVE",
               };
               return map[u] || u;
             }
@@ -536,6 +539,16 @@ export async function POST(req: Request) {
             }
             continue;
           }
+
+          // Safety net: avoid silence for any other types (images, audio, unknown)
+          try {
+            const to = toGraphPhone(phoneE164);
+            if (!TABS_ENABLED) {
+              await sendText(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT");
+            }
+            await sendSixTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+            await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "fallback.unknown_type", type }, status: "INFO", type: "FALLBACK_UNKNOWN" });
+          } catch {}
         }
       }
     }
