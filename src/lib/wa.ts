@@ -245,7 +245,7 @@ export async function sendWithReopen(opts: {
   if (!open) {
     // Attempt to reopen using configured template
     try {
-      const tmpl = (process.env.WA_TEMPLATE_NAME || "ops_nudge").trim();
+      const tmpl = (process.env.WA_TEMPLATE_NAME || "ops_role_notice").trim();
       await logOutbound({ direction: "out", templateName: tmpl, payload: { phone: to, meta: { phoneE164: to, reopen_reason: "window_closed", _type: "TEMPLATE_REOPEN_ATTEMPT" } }, status: "INFO", type: "TEMPLATE_REOPEN_ATTEMPT" });
       await sendTemplate({ to, template: tmpl, contextType: "TEMPLATE_REOPEN" });
       await sleep(250);

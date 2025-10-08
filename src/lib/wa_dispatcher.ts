@@ -30,7 +30,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   const ttlMin = Number(process.env.WA_SESSION_TTL_MIN || 60);
   const to = toE164.startsWith("+") ? toE164 : "+" + toE164;
 
-  // If outside the 24h window: send ops_nudge template first to reopen
+  // If outside the 24h window: send ops_role_notice (or WA_TEMPLATE_NAME) to reopen
   let stale = true;
   try {
     const at = await lastInboundAt(to);
@@ -42,13 +42,13 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   try { deepLink = (await createLoginLink(to)).url; } catch { deepLink = null; }
 
   if (stale) {
-    const name = process.env.WA_TEMPLATE_NAME || "ops_nudge";
+  const name = process.env.WA_TEMPLATE_NAME || "ops_role_notice";
     const p1 = "BarakaOps needs your attention";
     const p2 = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
     // Throttle: ReminderSend unique per day/phone/type
     const today = new Date();
     const keyDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    const type = "ops_nudge_v1";
+  const type = "ops_role_notice_v1";
     const exists = await (prisma as any).reminderSend.findUnique({ where: { type_phoneE164_date: { type, phoneE164: to, date: keyDate } } }).catch(() => null);
     if (!exists) {
       try {
@@ -63,7 +63,13 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
 
   let result: any = null;
   if (composed.interactive) {
-    result = await sendInteractive(composed.interactive, "AI_DISPATCH_INTERACTIVE");
+    // If interactive is globally disabled via flag, fall back to a concise text summary
+    if (process.env.WA_INTERACTIVE_ENABLED === "true") {
+      result = await sendInteractive(composed.interactive, "AI_DISPATCH_INTERACTIVE");
+    } else {
+      const summary = composed.text || "Please open the Main Menu to proceed.";
+      result = await sendText(to, summary, "AI_DISPATCH_TEXT");
+    }
   } else if (composed.text) {
     result = await sendText(to, composed.text, "AI_DISPATCH_TEXT");
   }
