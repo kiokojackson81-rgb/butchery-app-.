@@ -45,7 +45,9 @@ try {
   (base as any).waMessageLog.create = async (args: any) => {
     try {
       const data = (args && args.data) || {};
+      const id = String(data.id || crypto.randomUUID());
       const cols: string[] = [
+        "id",
         "attendantId",
         "direction",
         "templateName",
@@ -54,31 +56,33 @@ try {
         "status",
         "createdAt",
       ];
+      const createdAt = data.createdAt ? new Date(data.createdAt) : new Date();
       const vals: any[] = [
+        id,
         data.attendantId ?? null,
         data.direction ?? "out",
         data.templateName ?? null,
         data.payload ?? {},
         data.waMessageId ?? null,
         data.status ?? null,
-        data.createdAt ?? new Date(),
+        createdAt,
       ];
       const hasType = await detectTypeColumn();
       if (hasType) {
-        cols.splice(6, 0, "type");
-        vals.splice(6, 0, data.type ?? null);
+        cols.splice(8, 0, "type");
+        vals.splice(8, 0, data.type ?? null);
       } else if (data.type) {
         try {
-          const p = vals[3] && typeof vals[3] === "object" ? { ...(vals[3] as any) } : {};
+          const p = vals[4] && typeof vals[4] === "object" ? { ...(vals[4] as any) } : {};
           (p as any).meta = (p as any).meta || {};
           (p as any).meta._type = data.type;
-          vals[3] = p;
+          vals[4] = p;
         } catch {}
       }
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(",");
       const sql = `INSERT INTO "public"."WaMessageLog" (${cols.map((c) => `"${c}"`).join(",")}) VALUES (${placeholders})`;
-  await (base as any).$executeRawUnsafe(sql, ...vals);
-      return { ok: true };
+      await (base as any).$executeRawUnsafe(sql, ...vals);
+      return { ok: true, id };
     } catch (e) {
       if (__original.create) return __original.create(args);
       throw e;
@@ -112,7 +116,9 @@ try {
     if (params?.model === "WaMessageLog" && params?.action === "create") {
       try {
         const data = params.args?.data || {};
+        const id = String(data.id || crypto.randomUUID());
         const cols: string[] = [
+          "id",
           "attendantId",
           "direction",
           "templateName",
@@ -121,31 +127,33 @@ try {
           "status",
           "createdAt",
         ];
+        const createdAt = data.createdAt ? new Date(data.createdAt) : new Date();
         const vals: any[] = [
+          id,
           data.attendantId ?? null,
           data.direction ?? "out",
           data.templateName ?? null,
           data.payload ?? {},
           data.waMessageId ?? null,
           data.status ?? null,
-          data.createdAt ?? new Date(),
+          createdAt,
         ];
         const hasType = await detectTypeColumn();
         if (hasType) {
-          cols.splice(6, 0, "type");
-          vals.splice(6, 0, data.type ?? null);
+          cols.splice(8, 0, "type");
+          vals.splice(8, 0, data.type ?? null);
         } else if (data.type) {
           try {
-            const p = vals[3] && typeof vals[3] === "object" ? { ...(vals[3] as any) } : {};
+            const p = vals[4] && typeof vals[4] === "object" ? { ...(vals[4] as any) } : {};
             (p as any).meta = (p as any).meta || {};
             (p as any).meta._type = data.type;
-            vals[3] = p;
+            vals[4] = p;
           } catch {}
         }
         const placeholders = cols.map((_: any, i: number) => `$${i + 1}`).join(",");
         const sql = `INSERT INTO "public"."WaMessageLog" (${cols.map((c) => `"${c}"`).join(",")}) VALUES (${placeholders})`;
-  await (base as any).$executeRawUnsafe(sql, ...vals);
-        return { ok: true };
+        await (base as any).$executeRawUnsafe(sql, ...vals);
+        return { ok: true, id };
       } catch {
         // If raw insert fails, fall back to normal path
         return next(params);

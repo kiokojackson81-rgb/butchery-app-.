@@ -16,6 +16,7 @@ Set these in Vercel → Settings → Environment Variables:
   - NEXT_PUBLIC_WA_PUBLIC_E164 e.g. +2547...
   - WA_DRY_RUN=true|false
   - WA_SESSION_TTL_MIN e.g. 10
+  - WA_DISABLE_RAW_LOG=true|false (optional safety hot-flag to no-op DB logging during incidents)
 
 - Database
   - DATABASE_URL (Postgres)
