@@ -217,7 +217,8 @@ export async function POST(req: Request) {
                   continue;
                 }
                 // Mark this window so repeats will be ignored
-                await logMessage({ direction: "in", templateName: null, waMessageId: wamid || null, status: "INBOUND_DEDUP", type: "INBOUND_DEDUP", payload: { phone: phoneE164, key, bucket, preview: textBody.slice(0, 80) } });
+                // Do NOT set waMessageId for dedup marker to avoid unique constraint collisions
+                await logMessage({ direction: "in", templateName: null, waMessageId: null, status: "INBOUND_DEDUP", type: "INBOUND_DEDUP", payload: { phone: phoneE164, key, bucket, preview: textBody.slice(0, 80) } });
               }
             } catch {}
           }
