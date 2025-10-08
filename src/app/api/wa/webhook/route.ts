@@ -14,6 +14,7 @@ import { runGptForIncoming } from "@/lib/gpt_router";
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
+import { parseOOCBlock, stripOOC } from "@/lib/ooc_parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,35 +30,7 @@ function verifySignature(body: string, sig: string | null) {
   }
 }
 
-// Helper: extract OOC JSON from a GPT reply. Supports both "<<<OOC> ... </OOC>>>" and "<OOC> ... </OOC>" variants
-function parseOOCBlock(text: string): any | null {
-  try {
-    const patterns = [
-      /<<<OOC>([\s\S]*?)<\/OOC>>>/m,
-      /<OOC>([\s\S]*?)<\/OOC>/m,
-    ];
-    for (const rx of patterns) {
-      const m = rx.exec(text);
-      if (m && m[1]) {
-        try { return JSON.parse(m[1].trim()); } catch {}
-      }
-    }
-  } catch {}
-  return null;
-}
-
-// Helper: strip OOC blocks from a GPT reply, covering both notations
-function stripOOC(text: string): string {
-  try {
-    return text
-      .replace(/<<<OOC>[\s\S]*?<\/OOC>>>/gm, "")
-      .replace(/<OOC>[\s\S]*?<\/OOC>/gm, "")
-      .replace(/[ \t]+\n/g, "\n")
-      .trim();
-  } catch {
-    return text;
-  }
-}
+// (moved to src/lib/ooc_parse.ts)
 
 // GET: verification
 export async function GET(req: Request) {
@@ -354,7 +327,7 @@ export async function POST(req: Request) {
             const replyText = String(r || "").trim();
 
             // Try OOC parse
-            const ooc = parseOOCBlock(replyText);
+            let ooc = parseOOCBlock(replyText);
 
             try { console.info("[WA] AFTER GPT", { gotText: !!replyText, ooc: !!ooc }); } catch {}
             // Persist OOC sample (sanitized)
@@ -381,6 +354,40 @@ export async function POST(req: Request) {
             }
 
             // Valid OOC intents
+            // Normalize provided prompt IDs to our canonical schema before validation
+            if (ooc) {
+              try {
+                const intentRaw = String(ooc.intent || "");
+                // Map the Prompt-1 IDs to canonical tab/action IDs
+                const idMap: Record<string, string> = {
+                  // Attendant
+                  "ATT_CLOSING": "ATT_TAB_STOCK",
+                  "ATT_DEPOSIT": "ATT_TAB_DEPOSITS",
+                  "ATT_EXPENSE": "ATT_TAB_EXPENSES",
+                  "MENU_SUMMARY": "ATT_TAB_SUMMARY",
+                  "MENU_SUPPLY": "ATT_TAB_SUPPLY",
+                  "TILL_COUNT": "ATT_TAB_TILL",
+                  // Supervisor
+                  "SV_REVIEW_CLOSINGS": "SV_TAB_REVIEW_QUEUE",
+                  "SV_REVIEW_DEPOSITS": "SV_TAB_REVIEW_QUEUE",
+                  "SV_REVIEW_EXPENSES": "SV_TAB_REVIEW_QUEUE",
+                  "SV_APPROVE_UNLOCK": "SV_TAB_UNLOCK",
+                  // Supplier
+                  "SUPL_DELIVERY": "SUP_TAB_SUPPLY_TODAY",
+                  "SUPL_VIEW_OPENING": "SUP_TAB_VIEW",
+                  "SUPL_DISPUTES": "SUP_TAB_DISPUTE",
+                  // Common
+                  "MENU": "MENU",
+                  "LOGIN": "LOGIN",
+                  "HELP": "HELP",
+                  "FREE_TEXT": "FREE_TEXT",
+                };
+                const intentCanon = idMap[intentRaw] || intentRaw;
+                const btns = Array.isArray(ooc.buttons) ? ooc.buttons : [];
+                const buttonsCanon = btns.map((b: string) => idMap[b] || b);
+                ooc = { ...ooc, intent: intentCanon, buttons: buttonsCanon };
+              } catch {}
+            }
             const chk = validateOOC(ooc);
             if (!chk.ok) {
               try {

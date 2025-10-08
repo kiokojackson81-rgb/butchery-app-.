@@ -1,6 +1,7 @@
 // src/lib/gpt_router.ts
 import { prisma } from "@/lib/prisma";
 import WA_MASTER_PROMPT from "@/ai/prompts/wa_master";
+import { planDryResponse } from "@/lib/gpt_dry";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const GPT_TIMEOUT_MS = 15_000;
@@ -38,24 +39,8 @@ export async function runGptForIncoming(phoneE164: string, userText: string): Pr
   // DRY-run or missing API key: return a deterministic stub with valid OOC
   const DRY = (process.env.WA_DRY_RUN === "true") || (process.env.NODE_ENV !== "production");
   if (DRY || !process.env.OPENAI_API_KEY) {
-    const t = String(userText || "");
-    const isStock = /^\s*(1|stock)\s*$/i.test(t);
-    const intent = isStock ? "ATT_TAB_STOCK" : "FREE_TEXT";
-    const text = isStock ? "📦 Stock — quick actions." : "Let’s get you moving. Use the tabs below.";
-    const ooc = {
-      intent,
-      args: {},
-      buttons: [
-        "ATT_TAB_STOCK",
-        "ATT_TAB_SUPPLY",
-        "ATT_TAB_DEPOSITS",
-        "ATT_TAB_EXPENSES",
-        "ATT_TAB_TILL",
-        "ATT_TAB_SUMMARY",
-      ],
-      next_state_hint: "MENU",
-    };
-    return `${text}\n\n<<<OOC>\n${JSON.stringify(ooc)}\n</OOC>>>`;
+    const plan = planDryResponse(String(userText || ""));
+    return `${plan.text}\n\n<<<OOC>\n${JSON.stringify(plan.ooc)}\n</OOC>>>`;
   }
   const convo = await getConversation(phoneE164);
   const messages: ChatTurn[] = [
