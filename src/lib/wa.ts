@@ -123,7 +123,7 @@ export async function sendText(to: string, text: string, contextType?: string): 
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -144,11 +144,11 @@ export async function sendText(to: string, text: string, contextType?: string): 
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "TEXT_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "TEXT_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -177,7 +177,7 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     // Ensure phoneE164 is present under meta for test filters
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -192,11 +192,11 @@ export async function sendInteractive(body: any, contextType?: string): Promise<
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "INTERACTIVE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "INTERACTIVE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
   return { ok: true, waMessageId, response: json } as const;
 }
 

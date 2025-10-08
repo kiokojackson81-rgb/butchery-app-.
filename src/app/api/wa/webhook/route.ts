@@ -7,7 +7,7 @@ import { promptWebLogin } from "@/server/wa_gate";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
-import { sendText, sendInteractive } from "@/lib/wa";
+import { sendText, sendInteractive, sendTemplate } from "@/lib/wa";
 // Legacy role menus are disabled under GPT-only; use six-tabs helper instead
 import { sendSixTabs } from "@/lib/wa_buttons";
 import { runGptForIncoming } from "@/lib/gpt_router";
@@ -173,12 +173,27 @@ export async function POST(req: Request) {
 
         // inbound messages
         for (const m of msgs) {
+          // Per-message instrumentation and no-silence helpers
+          let __sentOnce = false;
+          const markSent = () => { __sentOnce = true; };
+          const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT") => {
+            try { console.info("[WA] SENDING", { type: "text", ctx }); } catch {}
+            const r = await sendText(to, text, ctx);
+            markSent();
+            return r;
+          };
+          const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
+            try { console.info("[WA] SENDING", { type: "interactive.tabs", role }); } catch {}
+            await sendSixTabs(to, role as any, outlet);
+            markSent();
+          };
           const fromGraph = m.from as string | undefined; // 2547...
           const phoneE164 = fromGraph ? `+${fromGraph}` : undefined;
           const type = (m.type as string) || "MESSAGE";
           const wamid = m.id as string | undefined;
 
           if (!phoneE164) continue;
+          try { console.info("[WA] INBOUND start", { wamid, from: fromGraph, kind: type }); } catch {}
 
           // Idempotency: if we've already sent a reply to this wamid, ignore repeats immediately
           if (wamid) {
@@ -210,6 +225,21 @@ export async function POST(req: Request) {
           // Log inbound after idempotency gate
           try {
             await logMessage({ direction: "in", templateName: null, payload: m as any, waMessageId: wamid || null, status: type });
+          } catch {}
+
+          // Before any outbound: ensure 24h window is open by sending a lightweight template when stale
+          try {
+            const last = await (prisma as any).waMessageLog.findFirst({
+              where: { direction: "in", payload: { path: ["from"], equals: fromGraph } as any },
+              orderBy: { createdAt: "desc" },
+              select: { createdAt: true },
+            }).catch(() => null);
+            const lastIn = (last?.createdAt as Date | undefined) || null;
+            const ageMs = lastIn ? (Date.now() - new Date(lastIn).getTime()) : Infinity;
+            if (ageMs >= 23.5 * 60 * 60 * 1000) {
+              const tmpl = process.env.WA_TEMPLATE_NAME || "ops_nudge";
+              await sendTemplate({ to: toGraphPhone(phoneE164!), template: tmpl, contextType: "TEMPLATE_REOPEN" });
+            }
           } catch {}
 
           // Helper button: resend login link
@@ -249,13 +279,14 @@ export async function POST(req: Request) {
             if (!recent) {
               await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
               await promptWebLogin(phoneE164, auth.reason);
+              markSent();
             } else {
               // Suppressed duplicate login prompt → still send a lightweight reminder to avoid silence
               try {
                 const to = toGraphPhone(phoneE164);
                 const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
                 const msg = `You're not logged in. Open ${origin}/login to continue.`;
-                await sendText(to, msg, "AI_DISPATCH_TEXT");
+                  await sendTextSafe(to, msg, "AI_DISPATCH_TEXT");
               } catch {}
             }
             try { await touchWaSession(phoneE164); } catch {}
@@ -280,6 +311,7 @@ export async function POST(req: Request) {
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
 
             // Call GPT
+            try { console.info("[WA] BEFORE GPT", { textLen: text?.length }); } catch {}
             const r = await runGptForIncoming(phoneE164, text);
             const replyText = String(r || "").trim();
 
@@ -297,13 +329,14 @@ export async function POST(req: Request) {
               return null;
             })();
 
+            try { console.info("[WA] AFTER GPT", { gotText: !!replyText, ooc: !!ooc }); } catch {}
             // Persist OOC sample (sanitized)
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
-            const sendRoleTabs = async () => {
+            const sendRoleTabsLocal = async () => {
               if (!TABS_ENABLED) return;
               const to = toGraphPhone(phoneE164);
-              await sendSixTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+              await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
             };
 
             const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
@@ -313,9 +346,9 @@ export async function POST(req: Request) {
               try {
                 const to = toGraphPhone(phoneE164);
                 const msg = TABS_ENABLED ? "I didn't quite get that. Use the tabs below." : "I didn't quite get that.";
-                await sendText(to, msg, "AI_DISPATCH_TEXT");
+                await sendTextSafe(to, msg, "AI_DISPATCH_TEXT");
               } catch {}
-              try { await sendRoleTabs(); } catch {}
+              try { await sendRoleTabsLocal(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
             }
@@ -326,7 +359,7 @@ export async function POST(req: Request) {
               try {
                 await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", reason: chk.reason, details: (chk as any).details, ooc: sanitizeForLog(ooc) }, status: "WARN", type: "OOC_INVALID" });
               } catch {}
-              try { await sendRoleTabs(); } catch {}
+              try { await sendRoleTabsLocal(); } catch {}
               continue;
             }
 
@@ -342,19 +375,19 @@ export async function POST(req: Request) {
               else await handleAuthenticatedInteractive(auth.sess, flowId);
             } catch {}
             if (display) {
-              try { await sendText(to, display, "AI_DISPATCH_TEXT"); } catch {}
+              try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT"); } catch {}
             } else {
               // Avoid silence when GPT returns an empty display; send a clarifier if tabs are disabled
               if (!TABS_ENABLED) {
-                try { await sendText(to, "I didn't quite get that.", "AI_DISPATCH_TEXT"); } catch {}
+                try { await sendTextSafe(to, "I didn't quite get that.", "AI_DISPATCH_TEXT"); } catch {}
               }
             }
-            try { await sendRoleTabs(); } catch {}
+            try { await sendRoleTabsLocal(); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
 
             // FREE_TEXT or other → send clarifier with full role tabs
-            try { await sendRoleTabs(); } catch {}
+            try { await sendRoleTabsLocal(); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback.free_text" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
             continue;
           }
@@ -383,7 +416,7 @@ export async function POST(req: Request) {
                 if (isVague) {
                   const role = String(auth.sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                  await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -431,7 +464,7 @@ export async function POST(req: Request) {
                 if (!ooc || !intent) {
                   const role = String(auth.sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                  await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "ooc.invalid", phone: phoneE164, text: r }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -463,20 +496,20 @@ export async function POST(req: Request) {
                       }
                     } catch {}
                     await handleAuthenticatedInteractive(auth.sess, mapped);
-                    await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                    await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
                     await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164, ooc } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                     continue;
                   }
                 }
 
                 // Default: just send the GPT text and fall back to menu if vague
-                await sendText(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                 continue;
               } else {
                 const role = String(auth.sess?.role || "attendant");
                 const to = toGraphPhone(phoneE164);
-                await sendSixTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text, reason: "gpt-empty" }, status: "SENT", type: "INTENT_UNRESOLVED" });
                 continue;
               }
@@ -523,7 +556,7 @@ export async function POST(req: Request) {
             else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
             else await handleAuthenticatedInteractive(auth.sess, flowId);
             // Always follow with tabs menu for role (six tabs)
-            try { await sendSixTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
+            try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
           }
@@ -544,10 +577,30 @@ export async function POST(req: Request) {
           try {
             const to = toGraphPhone(phoneE164);
             if (!TABS_ENABLED) {
-              await sendText(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT");
+              await sendTextSafe(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT");
             }
-            await sendSixTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+            await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
             await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "fallback.unknown_type", type }, status: "INFO", type: "FALLBACK_UNKNOWN" });
+          } catch {}
+          // Final basic guard for this message (best-effort; may be skipped if earlier paths continued)
+          try {
+            if (!__sentOnce) {
+              console.warn("[WA] SILENCE_GUARD fired", { wamid, phone: phoneE164 });
+              const to = toGraphPhone(phoneE164);
+              if (!TABS_ENABLED) {
+                await sendTextSafe(to, "I didn't quite get that.", "AI_DISPATCH_TEXT");
+              }
+              let role: string = "attendant";
+              let outlet: string | undefined = undefined;
+              try {
+                const a: any = await ensureAuthenticated(phoneE164);
+                if (a && a.ok && a.sess) {
+                  role = String(a.sess.role || role);
+                  outlet = a.sess.outlet || undefined;
+                }
+              } catch {}
+              await sendRoleTabs(to, role as any, outlet);
+            }
           } catch {}
         }
       }

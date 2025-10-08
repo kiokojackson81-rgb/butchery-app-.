@@ -148,7 +148,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       if (!c.outlet) {
   await sendText(gp, "Select an outlet first.", "AI_DISPATCH_TEXT");
-        return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any });
+  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
       }
       const cnt = await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: c.outlet } });
       if (!cnt) {
