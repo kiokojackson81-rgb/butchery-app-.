@@ -152,6 +152,11 @@ export default function SupplierDashboard(): JSX.Element {
   /* Disputes list for viewing/comment */
   const [amends, setAmends] = useState<AnyAmend[]>([]);
 
+  /* Prices view (per selected outlet) */
+  const [prices, setPrices] = useState<Array<{ key: string; name: string; price: number; active: boolean }>>([]);
+  const [pricesLoading, setPricesLoading] = useState(false);
+  const [pricesError, setPricesError] = useState<string | null>(null);
+
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
 
@@ -307,6 +312,30 @@ export default function SupplierDashboard(): JSX.Element {
       ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName)));
     setAmends(list);
   }, [dateStr, selectedOutletName, productByKey]);
+
+  // Load outlet pricebook for info (supplier can compare against buy price)
+  async function refreshPrices() {
+    if (!selectedOutletName) return;
+    try {
+      setPricesLoading(true);
+      setPricesError(null);
+      const r = await fetch(`/api/pricebook/outlet?outlet=${encodeURIComponent(selectedOutletName)}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      setPrices(Array.isArray(j?.products) ? j.products : []);
+    } catch (e: any) {
+      setPrices([]);
+      setPricesError(typeof e?.message === "string" ? e.message : "Failed to load prices");
+    } finally {
+      setPricesLoading(false);
+    }
+  }
+  useEffect(() => {
+    if (!selectedOutletName) return;
+    refreshPrices();
+    const id = setInterval(() => refreshPrices(), 5000);
+    return () => clearInterval(id);
+  }, [selectedOutletName]);
 
   /* ===== Row operations ===== */
   const addRow = (itemKey: string): void => {
@@ -731,6 +760,45 @@ export default function SupplierDashboard(): JSX.Element {
           </button>
         </div>
       </header>
+
+      {/* Outlet Pricebook (info) */}
+      <section className="rounded-2xl border p-4 mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold">Outlet Pricebook — {selectedOutletName || "—"}</h2>
+          <button className="btn-mobile border rounded-xl px-3 py-1 text-xs" onClick={refreshPrices} disabled={pricesLoading}>
+            {pricesLoading ? "Loading…" : "↻ Refresh"}
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2">Product</th>
+                <th>Key</th>
+                <th>Sell Price (Ksh)</th>
+                <th>Active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pricesError && (
+                <tr><td className="py-2 text-red-700" colSpan={4}>{pricesError}</td></tr>
+              )}
+              {!pricesError && prices.length === 0 && (
+                <tr><td className="py-2 text-gray-500" colSpan={4}>No products.</td></tr>
+              )}
+              {prices.map((p, i) => (
+                <tr key={`${p.key}-${i}`} className="border-b">
+                  <td className="py-2">{p.name}</td>
+                  <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                  <td>Ksh {fmt(Number(p.price) || 0)}</td>
+                  <td>{p.active ? "Yes" : "No"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">Auto-refreshes every 5s.</p>
+      </section>
 
       {/* Supply Editor */}
       <section className="rounded-2xl border p-4 mb-6">

@@ -67,7 +67,7 @@ export default function SupervisorDashboard() {
 
   /* ========= Tabs (added "supply") ========= */
   const [tab, setTab] = useState<
-    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply"
+    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply" | "prices"
   >("waste");
 
   /* ========= Review lists (existing) ========= */
@@ -76,6 +76,10 @@ export default function SupervisorDashboard() {
   const [excess, setExcess] = useState<ReviewItem[]>([]);
   const [deficit, setDeficit] = useState<ReviewItem[]>([]);
   const [deposits, setDeposits] = useState<ReviewItem[]>([]);
+  // Prices view
+  const [pricesByOutlet, setPricesByOutlet] = useState<Record<string, Array<{ key: string; name: string; price: number; active: boolean }>>>({});
+  const [pricesLoading, setPricesLoading] = useState(false);
+  const [pricesError, setPricesError] = useState<string | null>(null);
 
   // Load review lists + outlets
   useEffect(() => {
@@ -323,6 +327,42 @@ export default function SupervisorDashboard() {
     return rows;
   }, [date, outletNames]);
 
+  // Load pricebooks for selected scope
+  async function refreshPricesView() {
+    try {
+      setPricesLoading(true);
+      setPricesError(null);
+      const targets = selectedOutlet === "__ALL__" ? outlets.map(o => o.name) : outletNames;
+      const res = await Promise.all(
+        targets.map(async (outletName) => {
+          if (!outletName) return [outletName, []] as const;
+          try {
+            const r = await fetch(`/api/pricebook/outlet?outlet=${encodeURIComponent(outletName)}`, { cache: "no-store" });
+            if (!r.ok) throw new Error(await r.text());
+            const j = await r.json();
+            return [outletName, (Array.isArray(j?.products) ? j.products : [])] as const;
+          } catch {
+            return [outletName, []] as const;
+          }
+        })
+      );
+      const map: Record<string, Array<{ key: string; name: string; price: number; active: boolean }>> = {};
+      for (const [outletName, list] of res) map[outletName] = list as any;
+      setPricesByOutlet(map);
+    } catch (e: any) {
+      setPricesError(typeof e?.message === "string" ? e.message : "Failed to load prices");
+      setPricesByOutlet({});
+    } finally {
+      setPricesLoading(false);
+    }
+  }
+  useEffect(() => {
+    if (tab !== "prices") return;
+    refreshPricesView();
+    const id = setInterval(() => refreshPricesView(), 5000);
+    return () => clearInterval(id);
+  }, [tab, selectedOutlet, JSON.stringify(outlets.map(o => o.name))]);
+
   const agg = useMemo(
     () =>
       kpis.reduce(
@@ -495,6 +535,9 @@ export default function SupervisorDashboard() {
         <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>
           Supply View
         </TabBtn>
+        <TabBtn active={tab === "prices"} onClick={() => setTab("prices")}>
+          Prices
+        </TabBtn>
       </nav>
 
       {tab === "waste" && (
@@ -603,6 +646,82 @@ export default function SupervisorDashboard() {
               <QuickClosingUpdate date={date} outlet={selectedOutlet} />
             </div>
           )}
+        </section>
+      )}
+
+      {/* ===== Prices (per outlet) ===== */}
+      {tab === "prices" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Outlet Prices — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet}</h2>
+            <button className="btn-mobile border rounded-xl px-3 py-1 text-sm" onClick={refreshPricesView} disabled={pricesLoading}>
+              {pricesLoading ? "Loading…" : "↻ Refresh"}
+            </button>
+          </div>
+          {pricesError && <div className="text-red-700 text-sm mb-2">{pricesError}</div>}
+          {selectedOutlet === "__ALL__" ? (
+            <div className="space-y-5">
+              {outlets.map((o) => (
+                <div key={o.name}>
+                  <div className="text-sm font-medium mb-1">{o.name}</div>
+                  <div className="table-wrap">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left border-b">
+                          <th className="py-2">Product</th>
+                          <th>Key</th>
+                          <th>Price (Ksh)</th>
+                          <th>Active</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(pricesByOutlet[o.name] || []).length === 0 ? (
+                          <tr><td className="py-2 text-gray-500" colSpan={4}>No products.</td></tr>
+                        ) : (
+                          (pricesByOutlet[o.name] || []).map((p, i) => (
+                            <tr key={`${o.name}-${p.key}-${i}`} className="border-b">
+                              <td className="py-2">{p.name}</td>
+                              <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                              <td>Ksh {fmt(Number(p.price) || 0)}</td>
+                              <td>{p.active ? "Yes" : "No"}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Product</th>
+                    <th>Key</th>
+                    <th>Price (Ksh)</th>
+                    <th>Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(pricesByOutlet[selectedOutlet] || []).length === 0 ? (
+                    <tr><td className="py-2 text-gray-500" colSpan={4}>No products.</td></tr>
+                  ) : (
+                    (pricesByOutlet[selectedOutlet] || []).map((p, i) => (
+                      <tr key={`${selectedOutlet}-${p.key}-${i}`} className="border-b">
+                        <td className="py-2">{p.name}</td>
+                        <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                        <td>Ksh {fmt(Number(p.price) || 0)}</td>
+                        <td>{p.active ? "Yes" : "No"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs text-gray-500 mt-2">Auto-refreshes every 5s.</p>
         </section>
       )}
     </main>
