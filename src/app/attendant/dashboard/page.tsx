@@ -615,11 +615,9 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Products & Prices</h2>
-            <div className="flex items-center gap-2">
-              <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>refreshProducts()} disabled={productsLoading}>
-                {productsLoading ? "Loading…" : "↻ Refresh"}
-              </button>
-            </div>
+            {productsLoading && (
+              <span className="text-xs text-gray-500">Loading…</span>
+            )}
           </div>
           <div className="text-sm text-gray-600 mb-3">
             {productsOutlet ? (
@@ -655,7 +653,7 @@ export default function AttendantDashboardPage() {
                 {products.map((p, i) => (
                   <tr key={`${p.key}-${i}`} className="border-b">
                     <td className="py-2">{p.name}</td>
-                    <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                    <td><code className="text-xs px-1 py-0.5 rounded bg-white/10 text-white">{p.key}</code></td>
                     <td>Ksh {fmt(Number(p.price) || 0)}</td>
                     <td className="text-xs text-gray-500">{p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "—"}</td>
                   </tr>

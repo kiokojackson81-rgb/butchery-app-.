@@ -790,7 +790,7 @@ export default function SupplierDashboard(): JSX.Element {
               {prices.map((p, i) => (
                 <tr key={`${p.key}-${i}`} className="border-b">
                   <td className="py-2">{p.name}</td>
-                  <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
+                  <td><code className="text-xs px-1 py-0.5 rounded bg-white/10 text-white">{p.key}</code></td>
                   <td>Ksh {fmt(Number(p.price) || 0)}</td>
                   <td>{p.active ? "Yes" : "No"}</td>
                 </tr>
