@@ -29,6 +29,36 @@ function verifySignature(body: string, sig: string | null) {
   }
 }
 
+// Helper: extract OOC JSON from a GPT reply. Supports both "<<<OOC> ... </OOC>>>" and "<OOC> ... </OOC>" variants
+function parseOOCBlock(text: string): any | null {
+  try {
+    const patterns = [
+      /<<<OOC>([\s\S]*?)<\/OOC>>>/m,
+      /<OOC>([\s\S]*?)<\/OOC>/m,
+    ];
+    for (const rx of patterns) {
+      const m = rx.exec(text);
+      if (m && m[1]) {
+        try { return JSON.parse(m[1].trim()); } catch {}
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Helper: strip OOC blocks from a GPT reply, covering both notations
+function stripOOC(text: string): string {
+  try {
+    return text
+      .replace(/<<<OOC>[\s\S]*?<\/OOC>>>/gm, "")
+      .replace(/<OOC>[\s\S]*?<\/OOC>/gm, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .trim();
+  } catch {
+    return text;
+  }
+}
+
 // GET: verification
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -304,18 +334,7 @@ export async function POST(req: Request) {
             const replyText = String(r || "").trim();
 
             // Try OOC parse
-            const ooc = (() => {
-              try {
-                const start = replyText.lastIndexOf("<<<OOC>");
-                const end = replyText.lastIndexOf("</OOC>>>");
-                if (start >= 0 && end > start) {
-                  const jsonPart = replyText.substring(start + 7, end).trim();
-                  const parsed = JSON.parse(jsonPart);
-                  return parsed;
-                }
-              } catch {}
-              return null;
-            })();
+            const ooc = parseOOCBlock(replyText);
 
             try { console.info("[WA] AFTER GPT", { gotText: !!replyText, ooc: !!ooc }); } catch {}
             // Persist OOC sample (sanitized)
@@ -356,7 +375,7 @@ export async function POST(req: Request) {
             const flowId = canonicalToFlowId(sessRole, canonical);
             // Route to role-specific handlers
             const to = toGraphPhone(phoneE164);
-            const display = replyText.replace(/<<?OOC>[\s\S]*?<\/OOC>>>/g, "").trim();
+            const display = stripOOC(replyText);
             try {
               if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
               else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
@@ -415,18 +434,7 @@ export async function POST(req: Request) {
               const r = String(reply || "").trim();
               if (r) {
                 // Try to parse OOC from the tail of the message
-                const ooc = (() => {
-                  try {
-                    const start = r.lastIndexOf("<<<OOC>");
-                    const end = r.lastIndexOf("</OOC>>>");
-                    if (start >= 0 && end > start) {
-                      const jsonPart = r.substring(start + 7, end).trim();
-                      const parsed = JSON.parse(jsonPart);
-                      return parsed;
-                    }
-                  } catch {}
-                  return null;
-                })();
+                const ooc = parseOOCBlock(r);
 
                 // Log OOC for observability
                 try {
@@ -491,7 +499,7 @@ export async function POST(req: Request) {
                 }
 
                 // Default: just send the GPT text and fall back to menu if vague
-                await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                await sendTextSafe(toGraphPhone(phoneE164), stripOOC(r), "AI_DISPATCH_TEXT");
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                 continue;
               } else {
