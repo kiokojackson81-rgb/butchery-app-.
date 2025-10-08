@@ -726,36 +726,59 @@ export default function SupplierDashboard(): JSX.Element {
 
   return (
     <main className="mobile-container p-6 max-w-6xl mx-auto">
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Supplier Dashboard</h1>
-          <p className="text-sm text-gray-600">
-            {welcomeName ? <>Welcome <span className="font-medium">{welcomeName}</span>. </> : null}
-            Enter opening supply, manage transfers, and respond to disputes.
-          </p>
+      <header className="mb-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Supplier Dashboard</h1>
+            <p className="text-sm text-gray-600">
+              {welcomeName ? <>Welcome <span className="font-medium">{welcomeName}</span>. </> : null}
+              Enter opening supply, manage transfers, and respond to disputes.
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 mobile-scroll-x">
-          <input
-            className="input-mobile border rounded-xl p-2 text-sm"
-            type="date"
-            value={dateStr}
-            readOnly
-            disabled
-          />
-          <select
-            className="input-mobile border rounded-xl p-2 text-sm"
-            value={outletId}
-            onChange={(e) => setOutletId(e.target.value)}
-          >
-            {outlets.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-          {/* Removed Refresh Admin/Sync to DB for simplified UX */}
-          {/* NEW: Logout next to date/select */}
+        {/* Menu bar */}
+        <div className="mt-3 rounded-2xl border p-3 flex items-center gap-3 flex-wrap mobile-scroll-x">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600">Outlet</label>
+            <select
+              className="input-mobile border rounded-xl p-2 text-sm"
+              value={outletId}
+              onChange={(e) => setOutletId(e.target.value)}
+            >
+              {outlets.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600">Date</label>
+            <input
+              className="input-mobile border rounded-xl p-2 text-sm"
+              type="date"
+              value={dateStr}
+              readOnly
+              disabled
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+              onClick={() => {
+                const el = document.getElementById("supplier-pricebook");
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              Pricebook
+            </button>
+          </div>
+
+          <div className="flex-1" />
+
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
           </button>
@@ -802,7 +825,7 @@ export default function SupplierDashboard(): JSX.Element {
       </section>
 
       {/* Supply Editor */}
-      <section className="rounded-2xl border p-4 mb-6">
+      <section id="supplier-pricebook" className="rounded-2xl border p-4 mb-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Opening Supply — {selectedOutletName || "—"} ({dateStr})</h2>
           <div className="flex gap-2">
