@@ -2,6 +2,26 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "dev (wa gpt-only + tabs, pwsh)",
+			"type": "shell",
+			"command": "$env:WA_DRY_RUN=\"true\"; $env:WA_GPT_ONLY=\"true\"; $env:WA_AI_ENABLED=\"true\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; $env:WA_TABS_ENABLED=\"true\"; npm run dev",
+			"isBackground": true,
+			"group": "build",
+			"problemMatcher": []
+		},
+		{
+			"label": "playwright: GPT-only suite (BASE_URL=localhost:3000)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3000\"; npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1",
+			"group": "build",
+			"problemMatcher": []
+		}
+	]
+}
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
 			"label": "Build app after auth updates",
 			"type": "shell",
 			"command": "npm run -s build",
