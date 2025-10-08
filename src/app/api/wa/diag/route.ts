@@ -16,8 +16,22 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const { e164, noPlus } = normPhone(searchParams.get("phone") || searchParams.get("to"));
-    const hours = Math.max(1, Math.min(168, Number(searchParams.get("hours") || 24)));
-    const limit = Math.max(1, Math.min(50, Number(searchParams.get("limit") || 10)));
+    // Sanitize numeric params (support inputs like "24/" → 24)
+    const hoursRaw = String(searchParams.get("hours") ?? "24");
+    const hoursParsed = (() => {
+      const m = hoursRaw.match(/\d+/);
+      const n = m ? parseInt(m[0], 10) : 24;
+      return Number.isFinite(n) ? n : 24;
+    })();
+    const hours = Math.max(1, Math.min(168, hoursParsed));
+
+    const limitRaw = String(searchParams.get("limit") ?? "10");
+    const limitParsed = (() => {
+      const m = limitRaw.match(/\d+/);
+      const n = m ? parseInt(m[0], 10) : 10;
+      return Number.isFinite(n) ? n : 10;
+    })();
+    const limit = Math.max(1, Math.min(50, limitParsed));
 
     // Optional key gate in production (set ADMIN_DIAG_KEY to enable gating)
     const needKey = process.env.NODE_ENV === "production" && !!process.env.ADMIN_DIAG_KEY;
