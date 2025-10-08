@@ -80,6 +80,8 @@ export default function SupervisorDashboard() {
   const [pricesByOutlet, setPricesByOutlet] = useState<Record<string, Array<{ key: string; name: string; price: number; active: boolean }>>>({});
   const [pricesLoading, setPricesLoading] = useState(false);
   const [pricesError, setPricesError] = useState<string | null>(null);
+  const [pricesFilter, setPricesFilter] = useState<string>("");
+  const [showInactive, setShowInactive] = useState<boolean>(false);
 
   // Load review lists + outlets
   useEffect(() => {
@@ -337,7 +339,7 @@ export default function SupervisorDashboard() {
         targets.map(async (outletName) => {
           if (!outletName) return [outletName, []] as const;
           try {
-            const r = await fetch(`/api/pricebook/outlet?outlet=${encodeURIComponent(outletName)}`, { cache: "no-store" });
+            const r = await fetch(`/api/pricebook/outlet?outlet=${encodeURIComponent(outletName)}&activeOnly=${showInactive ? "false" : "true"}`, { cache: "no-store" });
             if (!r.ok) throw new Error(await r.text());
             const j = await r.json();
             return [outletName, (Array.isArray(j?.products) ? j.products : [])] as const;
@@ -361,7 +363,7 @@ export default function SupervisorDashboard() {
     refreshPricesView();
     const id = setInterval(() => refreshPricesView(), 5000);
     return () => clearInterval(id);
-  }, [tab, selectedOutlet, JSON.stringify(outlets.map(o => o.name))]);
+  }, [tab, selectedOutlet, showInactive, JSON.stringify(outlets.map(o => o.name))]);
 
   const agg = useMemo(
     () =>
@@ -652,11 +654,17 @@ export default function SupervisorDashboard() {
       {/* ===== Prices (per outlet) ===== */}
       {tab === "prices" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 mobile-scroll-x gap-2">
             <h2 className="font-semibold">Outlet Prices — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet}</h2>
-            <button className="btn-mobile border rounded-xl px-3 py-1 text-sm" onClick={refreshPricesView} disabled={pricesLoading}>
-              {pricesLoading ? "Loading…" : "↻ Refresh"}
-            </button>
+            <div className="flex items-center gap-2">
+              <input className="input-mobile border rounded-xl p-2 text-sm w-48" placeholder="Filter product/key" value={pricesFilter} onChange={(e)=>setPricesFilter(e.target.value)} />
+              <label className="text-xs text-gray-700 inline-flex items-center gap-1">
+                <input type="checkbox" checked={showInactive} onChange={(e)=>setShowInactive(e.target.checked)} /> Show inactive
+              </label>
+              <button className="btn-mobile border rounded-xl px-3 py-1 text-sm" onClick={refreshPricesView} disabled={pricesLoading}>
+                {pricesLoading ? "Loading…" : "↻ Refresh"}
+              </button>
+            </div>
           </div>
           {pricesError && <div className="text-red-700 text-sm mb-2">{pricesError}</div>}
           {selectedOutlet === "__ALL__" ? (
@@ -675,10 +683,12 @@ export default function SupervisorDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(pricesByOutlet[o.name] || []).length === 0 ? (
+                        {(pricesByOutlet[o.name] || []).filter(p => !pricesFilter || p.name.toLowerCase().includes(pricesFilter.toLowerCase()) || p.key.toLowerCase().includes(pricesFilter.toLowerCase())).length === 0 ? (
                           <tr><td className="py-2 text-gray-500" colSpan={4}>No products.</td></tr>
                         ) : (
-                          (pricesByOutlet[o.name] || []).map((p, i) => (
+                          (pricesByOutlet[o.name] || [])
+                            .filter(p => !pricesFilter || p.name.toLowerCase().includes(pricesFilter.toLowerCase()) || p.key.toLowerCase().includes(pricesFilter.toLowerCase()))
+                            .map((p, i) => (
                             <tr key={`${o.name}-${p.key}-${i}`} className="border-b">
                               <td className="py-2">{p.name}</td>
                               <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>
@@ -705,10 +715,12 @@ export default function SupervisorDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(pricesByOutlet[selectedOutlet] || []).length === 0 ? (
+                  {(pricesByOutlet[selectedOutlet] || []).filter(p => !pricesFilter || p.name.toLowerCase().includes(pricesFilter.toLowerCase()) || p.key.toLowerCase().includes(pricesFilter.toLowerCase())).length === 0 ? (
                     <tr><td className="py-2 text-gray-500" colSpan={4}>No products.</td></tr>
                   ) : (
-                    (pricesByOutlet[selectedOutlet] || []).map((p, i) => (
+                    (pricesByOutlet[selectedOutlet] || [])
+                      .filter(p => !pricesFilter || p.name.toLowerCase().includes(pricesFilter.toLowerCase()) || p.key.toLowerCase().includes(pricesFilter.toLowerCase()))
+                      .map((p, i) => (
                       <tr key={`${selectedOutlet}-${p.key}-${i}`} className="border-b">
                         <td className="py-2">{p.name}</td>
                         <td><code className="text-xs bg-gray-50 px-1 py-0.5 rounded">{p.key}</code></td>

@@ -156,6 +156,7 @@ export default function SupplierDashboard(): JSX.Element {
   const [prices, setPrices] = useState<Array<{ key: string; name: string; price: number; active: boolean }>>([]);
   const [pricesLoading, setPricesLoading] = useState(false);
   const [pricesError, setPricesError] = useState<string | null>(null);
+  const sellPriceByKey = useMemo(() => Object.fromEntries(prices.map(p => [p.key, Number(p.price) || 0])), [prices]);
 
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
@@ -872,6 +873,8 @@ export default function SupplierDashboard(): JSX.Element {
                 const name = p?.name ?? r.itemKey.toUpperCase();
                 const unit = p?.unit ?? r.unit;
                 const line = r.qty * r.buyPrice;
+                const sell = sellPriceByKey[r.itemKey] || 0;
+                const marginPerUnit = sell - (r.buyPrice || 0);
                 return (
                   <tr key={r.id} className="border-b">
                     <td className="py-2">{name}</td>
@@ -902,7 +905,14 @@ export default function SupplierDashboard(): JSX.Element {
                         disabled={submitted}
                       />
                     </td>
-                    <td className="font-medium">{fmt(line)}</td>
+                    <td className="font-medium">
+                      {fmt(line)}
+                      {sell > 0 && (
+                        <div className={`text-xs mt-0.5 ${marginPerUnit < 0 ? "text-red-700" : "text-gray-500"}`}>
+                          Sell: Ksh {fmt(sell)} • Margin/unit: {marginPerUnit >= 0 ? "+" : ""}{fmt(marginPerUnit)}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <div className="flex gap-2">
                         <button
