@@ -325,6 +325,26 @@ export async function POST(req: Request) {
               const id = lr || br || "";
               return `[button:${id}] ${title || ""}`.trim();
             })();
+
+            // Direct digit mapping (1-7) to flows to reduce GPT dependency for menus
+            const digit = String(text || "").trim();
+            if (/^[1-7]$/.test(digit)) {
+              try {
+                const id = mapDigitToId(sessRole, digit);
+                const flowId = canonicalToFlowId(sessRole, id);
+                if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
+                else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
+                else await handleAuthenticatedInteractive(auth.sess, flowId);
+                const to = toGraphPhone(phoneE164);
+                // Brief ack; tabs if enabled
+                if (!TABS_ENABLED) {
+                  try { await sendTextSafe(to, "OK.", "AI_DISPATCH_TEXT"); } catch {}
+                }
+                await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                continue;
+              } catch {}
+            }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
 
