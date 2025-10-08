@@ -274,15 +274,17 @@ export async function POST(req: Request) {
                 await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
                 // send template/reopen via centralized gate (debounced)
                 await promptWebLogin(phoneE164, auth.reason);
-                // Also send the strict short nudge + OOC as required
+                // Send the strict short nudge (OOC is logged server-side only)
                 const reply = buildUnauthenticatedReply(url, false);
                 const to = toGraphPhone(phoneE164);
-                try { await sendTextSafe(to, `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT"); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
               } else {
-                // Suppressed duplicate login prompt → still send a lightweight reminder (deduped) with OOC
+                // Suppressed duplicate login prompt → still send a lightweight reminder (deduped). OOC logged only.
                 const reply = buildUnauthenticatedReply(url, true);
                 const to = toGraphPhone(phoneE164);
-                try { await sendTextSafe(to, `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT"); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
               }
             } catch {}
             try { await touchWaSession(phoneE164); } catch {}
@@ -307,18 +309,21 @@ export async function POST(req: Request) {
             // Direct digit mapping (1-7) to flows to reduce GPT dependency for menus
             const digit = String(text || "").trim();
             if (/^[1-7]$/.test(digit)) {
-              try {
+                    try {
                 const id = mapDigitToId(sessRole, digit);
                 const flowId = canonicalToFlowId(sessRole, id);
                 if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
                 else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
                 else await handleAuthenticatedInteractive(auth.sess, flowId);
                 const to = toGraphPhone(phoneE164);
-                // Brief ack; tabs if enabled
-                if (!TABS_ENABLED) {
-                  try { await sendTextSafe(to, "OK.", "AI_DISPATCH_TEXT"); } catch {}
-                }
-                await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+                // Do not send a bare 'OK.' ack — follow with role tabs (if enabled).
+                // If the handler didn't emit any outbound message, send a brief friendly follow-up (only when tabs are disabled).
+                try {
+                  if (!__sentOnce && !TABS_ENABLED) {
+                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                  }
+                } catch {}
+                try { await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                 continue;
               } catch {}
@@ -591,6 +596,12 @@ export async function POST(req: Request) {
             if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
             else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
             else await handleAuthenticatedInteractive(auth.sess, flowId);
+            // If handler didn't send anything, provide a tiny human follow-up when tabs are disabled
+            try {
+              if (!__sentOnce && !TABS_ENABLED) {
+                try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+              }
+            } catch {}
             // Always follow with tabs menu for role (six tabs)
             try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
