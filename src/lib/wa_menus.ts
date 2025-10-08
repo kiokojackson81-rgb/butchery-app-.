@@ -93,3 +93,5 @@ export async function sendSupervisorMenu(to: string) {
   });
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }
+
+export type { };

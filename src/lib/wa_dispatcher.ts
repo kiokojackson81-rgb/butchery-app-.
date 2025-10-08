@@ -2,6 +2,8 @@
 import { prisma } from "@/lib/prisma";
 import { sendTemplate, sendText, sendInteractive, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
+import { menuMain } from "@/lib/wa_messages";
+import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
 import { createLoginLink } from "@/server/wa_links";
 
 function minutesSince(date?: Date | string | null): number {
@@ -62,16 +64,65 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   const composed = await composeWaMessage(ctx, { deepLink: deepLink || undefined });
 
   let result: any = null;
-  if (composed.interactive) {
-    // If interactive is globally disabled via flag, fall back to a concise text summary
+
+  // Special-case interactive builders for login flows to reduce typing
+  try {
     if (process.env.WA_INTERACTIVE_ENABLED === "true") {
-      result = await sendInteractive(composed.interactive, "AI_DISPATCH_INTERACTIVE");
-    } else {
-      const summary = composed.text || "Please open the Main Menu to proceed.";
-      result = await sendText(to, summary, "AI_DISPATCH_TEXT");
+      if (ctx.kind === "login_welcome") {
+        // Send role-specific interactive menu then append OOC as text
+        const role = (ctx as any).role as string;
+        if (role === "attendant") {
+          await sendAttendantMenu(to, (ctx as any).outlet || "Outlet");
+        } else if (role === "supervisor") {
+          await sendSupervisorMenu(to);
+        } else if (role === "supplier") {
+          await sendSupplierMenu(to);
+        }
+        // OOC must be sent as text (graph interactive payloads can't contain the OOC block reliably)
+        if (typeof composed.text === "string") {
+          await sendText(to, composed.text, "AI_DISPATCH_TEXT");
+        }
+        result = { ok: true };
+      } else if (ctx.kind === "login_prompt") {
+        // Send a compact interactive button prompting to open the deep link, then append OOC text
+        const deep = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
+        const payload = {
+          messaging_product: "whatsapp",
+          to,
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: { text: `Please sign in to continue.` },
+            action: {
+              buttons: [
+                { type: "url", url: deep, title: "LOGIN" },
+                { type: "reply", reply: { id: "HELP", title: "HELP" } },
+              ],
+            },
+          },
+        };
+        try { await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE"); } catch { }
+        if (typeof composed.text === "string") {
+          await sendText(to, composed.text, "AI_DISPATCH_TEXT");
+        }
+        result = { ok: true };
+      }
     }
-  } else if (composed.text) {
-    result = await sendText(to, composed.text, "AI_DISPATCH_TEXT");
+  } catch (e) {}
+
+  // Fallback: if not handled above, send composed as before
+  if (!result) {
+    if (composed.interactive) {
+      // If interactive is globally disabled via flag, fall back to a concise text summary
+      if (process.env.WA_INTERACTIVE_ENABLED === "true") {
+        result = await sendInteractive(composed.interactive, "AI_DISPATCH_INTERACTIVE");
+      } else {
+        const summary = composed.text || "Please open the Main Menu to proceed.";
+        result = await sendText(to, summary, "AI_DISPATCH_TEXT");
+      }
+    } else if (composed.text) {
+      result = await sendText(to, composed.text, "AI_DISPATCH_TEXT");
+    }
   }
 
   try {
