@@ -58,11 +58,11 @@ export async function GET() {
     // Fetch outlet pricebook rows, filter to active only
     const pbRows = await (prisma as any).pricebookRow.findMany({
       where: { outletName, productKey: { in: productKeys } },
-      select: { productKey: true, sellPrice: true, active: true, updatedAt: true },
+      select: { productKey: true, sellPrice: true, active: true },
     });
     const priceByKey = new Map<string, { price: number; active: boolean; updatedAt: Date | null }>();
     for (const r of pbRows as any[]) {
-      priceByKey.set(String(r.productKey), { price: Number(r.sellPrice || 0), active: !!r.active, updatedAt: r.updatedAt ? new Date(r.updatedAt) : null });
+      priceByKey.set(String(r.productKey), { price: Number(r.sellPrice || 0), active: !!r.active, updatedAt: null });
     }
 
     const rows: ProductOut[] = productKeys
