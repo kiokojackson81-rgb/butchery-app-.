@@ -60,6 +60,7 @@ export async function sendTemplate(opts: {
   params?: string[];
   langCode?: string;
   contextType?: string; // e.g., ASSIGNMENT | REMINDER | TEMPLATE_OUTBOUND
+  meta?: Record<string, any>;
 }) {
   // Feature-flag legacy senders: allow through only AI dispatcher and reopen templates
   const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
@@ -75,7 +76,7 @@ export async function sendTemplate(opts: {
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}) }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -109,12 +110,12 @@ export async function sendTemplate(opts: {
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}) }, request: body, response: json, status: res.status }, status: "ERROR", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     throw new Error(`WA send failed: ${res.status}`);
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND" }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}) }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
