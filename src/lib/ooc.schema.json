@@ -80,7 +80,7 @@
     },
     "next_state_hint": {
       "type": "string",
-      "enum": ["STOCK","SUPPLY","DEPOSITS","EXPENSES","TILL","SUMMARY","REVIEW","UNLOCK","LOCK_CONFIRM","MENU"]
+      "enum": ["STOCK","SUPPLY","DEPOSITS","EXPENSES","TILL","SUMMARY","REVIEW","UNLOCK","LOCK_CONFIRM","MENU", "CLOSING_PICK", "WAIT_DEPOSIT", "EXPENSE_PICK"]
     }
   }
 }
