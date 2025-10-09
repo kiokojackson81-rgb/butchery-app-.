@@ -10,20 +10,26 @@ export async function createLoginLink(phoneE164: string) {
   const sess = await (prisma as any).waSession.findFirst({ where: { phoneE164 } });
 
   if (sess) {
-    await (prisma as any).waSession.update({
-      where: { id: sess.id },
-      data: {
-        state: "LOGIN",
-        code: null,
-        outlet: null,
-        cursor: {
-          ...(sess.cursor as any),
-          loginNonce: nonce,
-          loginNonceAt: new Date().toISOString(),
-          ttlMinutes: TTL_MIN,
-        } as any,
-      },
-    });
+    // If there's already an active MENU session with credentials, avoid flipping it back
+    // to LOGIN (this was causing login loops where the portal finalized then the
+    // webhook created a login link which clobbered the MENU state). Instead, write
+    // the loginNonce into the cursor while preserving code/outlet/state for active
+    // sessions. For sessions that are not in MENU or lack credentials, fall back to
+    // the previous behaviour and move them to LOGIN state.
+    const cursorUpdate: any = {
+      ...(sess.cursor as any),
+      loginNonce: nonce,
+      loginNonceAt: new Date().toISOString(),
+      ttlMinutes: TTL_MIN,
+    };
+    const updateData: any = { cursor: cursorUpdate };
+    if (!(sess.state === "MENU" && sess.code)) {
+      // preserve previous behaviour for non-MENU or unauthenticated sessions
+      updateData.state = "LOGIN";
+      updateData.code = null;
+      updateData.outlet = null;
+    }
+    await (prisma as any).waSession.update({ where: { id: sess.id }, data: updateData });
   } else {
     await (prisma as any).waSession.create({
       data: {
