@@ -278,8 +278,18 @@ export async function sendWithReopen(opts: {
   }
 }
 
-export async function sendText(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string }): Promise<SendResult> {
+export async function sendText(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string; gpt_sent?: boolean }): Promise<SendResult> {
   const ctx = (contextType as any) || "AI_DISPATCH_TEXT";
+  // Strict enforcement: if enabled, only allow text sends that are explicitly
+  // marked as originating from GPT (meta.gpt_sent === true).
+  const STRICT = String(process.env.WA_STRICT_GPT_ONLY || "").toLowerCase() === "true";
+  if (STRICT && !(meta && (meta as any).gpt_sent === true)) {
+    const toNorm = normalizeGraphPhone(to);
+    const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
+    const waMessageId = `NOOP-${Date.now()}`;
+    try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: 'strict_gpt_only.blocked', requestedContext: ctx } , request: { to, text } }, waMessageId, status: 'NOOP', type: 'STRICT_GPT_BLOCK' }); } catch {}
+    return { ok: true, waMessageId, response: { noop: true } } as const;
+  }
   return sendWithReopen({ toE164: to.startsWith("+") ? to : "+" + to, kind: "text", text, ctxType: ctx, inReplyTo: meta?.inReplyTo });
 }
 
@@ -296,7 +306,7 @@ export async function sendInteractive(body: any, contextType?: string, meta?: { 
  * Safe wrappers that callers should prefer. They centralize error logging and
  * ensure failures are recorded via logOutbound so callers can still mark sent-state.
  */
-export async function sendTextSafe(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string }) {
+export async function sendTextSafe(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string; gpt_sent?: boolean }) {
   try {
     const res = await sendText(to, text, contextType, meta);
     if (!res.ok) {

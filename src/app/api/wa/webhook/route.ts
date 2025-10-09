@@ -258,11 +258,11 @@ export async function POST(req: Request) {
             try { return String(s || "").slice(0, 400); } catch { return String(s || "").slice(0, 400); }
           };
 
-          const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT") => {
+          const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT", meta?: { gpt_sent?: boolean }) => {
             try { console.info("[WA] SENDING", { type: "text", ctx, toPreview: String(to).slice(-12), textPreview: String(text || "").slice(0, 120) }); } catch {}
             try {
               const truncated = truncateDisplay(text);
-              const r = await sendText(to, truncated, ctx, { inReplyTo: wamid });
+              const r = await sendText(to, truncated, ctx, { inReplyTo: wamid, gpt_sent: meta?.gpt_sent === true });
               markSent();
               try { console.info("[WA] SEND_RESULT", { ok: !!(r as any)?.ok, waMessageId: (r as any)?.waMessageId || null, error: (r as any)?.error || null }); } catch {}
               return r;
@@ -407,13 +407,13 @@ export async function POST(req: Request) {
                   const reply = buildUnauthenticatedReply(url, false);
                   const to = toGraphPhone(phoneE164);
                   try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
+                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 } else {
                   // Suppressed duplicate login prompt → still send a lightweight reminder (deduped). OOC logged only.
                   const reply = buildUnauthenticatedReply(url, true);
                   const to = toGraphPhone(phoneE164);
                   try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
+                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
               } catch {}
               try { await touchWaSession(phoneE164); } catch {}
@@ -440,7 +440,7 @@ export async function POST(req: Request) {
                 const to = toGraphPhone(phoneE164);
                 try {
                   if (!__sentOnce && !TABS_ENABLED) {
-                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                   }
                 } catch {}
                 try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
@@ -484,7 +484,7 @@ export async function POST(req: Request) {
                   // If handler didn't emit outbound, send a tiny ack when tabs disabled
                   try {
                     if (!__sentOnce && !TABS_ENABLED) {
-                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                     }
                   } catch {}
                   try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
@@ -547,7 +547,7 @@ export async function POST(req: Request) {
               try {
                 const to = toGraphPhone(phoneE164);
                 const msg = TABS_ENABLED ? "I didn't quite get that. Use the tabs below." : "I didn't quite get that.";
-                await sendTextSafe(to, msg, "AI_DISPATCH_TEXT");
+                await sendTextSafe(to, msg, "AI_DISPATCH_TEXT", { gpt_sent: true });
               } catch {}
               try { await sendRoleTabsLocal(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
@@ -611,7 +611,7 @@ export async function POST(req: Request) {
                 // If the intent is not allowed, treat as invalid OOC and fallback
                 if (!ALLOWED.has(normalizedIntent)) {
                   try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phoneE164, event: 'ooc.invalid.intent', preview: intentCanon, ooc: sanitizeForLog(ooc) }, status: 'WARN', type: 'OOC_INVALID' }); } catch {}
-                  try { const to = toGraphPhone(phoneE164); await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT'); } catch {}
+                  try { const to = toGraphPhone(phoneE164); await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT', { gpt_sent: true }); } catch {}
                   try { await sendRoleTabsLocal(); } catch {}
                   continue;
                 }
@@ -642,7 +642,7 @@ export async function POST(req: Request) {
                     // call review service (idempotent within)
                     const svcRes = await reviewItem({ id: args.id, action: args.approve ? "approve" : "reject", note: args.note || undefined }, _sess?.code || "SUPERVISOR");
                     await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SV_REVIEW_OK", svcRes }, status: "OK", type: "SV_REVIEW_OK" });
-                    try { await sendTextSafe(to, args.approve ? "Approved ✅" : "Rejected ❌", "AI_DISPATCH_TEXT"); } catch {}
+                    try { await sendTextSafe(to, args.approve ? "Approved ✅" : "Rejected ❌", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                     try { await sendRoleTabs(to, "supervisor", undefined); } catch {}
                     continue;
                   } catch (e) {
@@ -668,7 +668,7 @@ export async function POST(req: Request) {
                     // notify attendants and supervisors
                     try { await notifyAttendantsSupervisor(args.outletId, `Delivery dispatched — items: ${args.items.map((i:any)=>i.productKey).join(', ')}`); } catch {}
                     try { await notifySupplierSupervisor(args.outletId, `Delivery created for ${args.outletId}`); } catch {}
-                    try { await sendTextSafe(to, "Delivery created.", "AI_DISPATCH_TEXT"); } catch {}
+                    try { await sendTextSafe(to, "Delivery created.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                     try { await sendRoleTabs(to, "supplier", undefined); } catch {}
                     continue;
                   } catch (e) {
@@ -748,16 +748,16 @@ export async function POST(req: Request) {
                   try {
                     // Friendly, short confirmations per kind
                     if (/CLOSING|STOCK/.test(flowId)) {
-                      await sendTextSafe(to, "Closings saved. Thanks!", "AI_DISPATCH_TEXT");
+                      await sendTextSafe(to, "Closings saved. Thanks!", "AI_DISPATCH_TEXT", { gpt_sent: true });
                     } else if (/DEPOSIT/.test(flowId)) {
                       // try to include amount when available
                       const amt = (args && (args.mpesaText && parseMpesaText(String(args.mpesaText || ""))?.amount)) || (args && args.amount) || null;
                       const txt = amt ? `Deposit recorded: Ksh ${amt}.` : "Deposit recorded.";
-                      await sendTextSafe(to, txt, "AI_DISPATCH_TEXT");
+                      await sendTextSafe(to, txt, "AI_DISPATCH_TEXT", { gpt_sent: true });
                     } else if (/EXPENSE/.test(flowId)) {
-                      await sendTextSafe(to, "Expense recorded.", "AI_DISPATCH_TEXT");
+                      await sendTextSafe(to, "Expense recorded.", "AI_DISPATCH_TEXT", { gpt_sent: true });
                     } else {
-                      await sendTextSafe(to, "Saved.", "AI_DISPATCH_TEXT");
+                      await sendTextSafe(to, "Saved.", "AI_DISPATCH_TEXT", { gpt_sent: true });
                     }
                   } catch {}
                   try { await sendRoleTabs(to, "attendant", _sess?.outlet || undefined); } catch {}
@@ -767,10 +767,10 @@ export async function POST(req: Request) {
             } catch {}
             // Send the human-facing display text (must be short)
             if (display) {
-              try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT"); } catch {}
+              try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
             } else {
               // If GPT returned no visible text, generate a clarifier
-              try { const clar = generateDefaultClarifier(sessRole); await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT"); } catch {}
+              try { const clar = generateDefaultClarifier(sessRole); await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
             }
             // Send buttons from OOC if provided; strip OOC is already applied to display
             try {
@@ -790,7 +790,7 @@ export async function POST(req: Request) {
                 try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, event: "SILENCE_GUARD" }, status: "WARN", type: "SILENCE_GUARD" }); } catch {}
                 const clar = generateDefaultClarifier(sessRole);
                 const to = toGraphPhone(phoneE164);
-                await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT");
+                await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
                 await sendButtonsFor(to, clar.buttons);
               }
             } catch (e) { try { console.warn('[WA] SILENCE_GUARD error', String(e)); } catch {} }
@@ -879,11 +879,11 @@ export async function POST(req: Request) {
                         const reply = buildUnauthenticatedReply(url, false);
                         // Log OOC server-side, do not send to user
                         try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT");
+                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
                       } else {
                         const reply = buildUnauthenticatedReply(url, true);
                         try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT");
+                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
                       }
                     } catch {}
                     continue;
@@ -927,14 +927,14 @@ export async function POST(req: Request) {
                       }
                     } catch {}
                     await handleAuthenticatedInteractive(_sess, mapped);
-                    await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
+                    await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT", { gpt_sent: true });
                     await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164, ooc } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                     continue;
                   }
                 }
 
                 // Default: just send the GPT text and fall back to menu if vague
-                await sendTextSafe(toGraphPhone(phoneE164), stripOOC(r), "AI_DISPATCH_TEXT");
+                await sendTextSafe(toGraphPhone(phoneE164), stripOOC(r), "AI_DISPATCH_TEXT", { gpt_sent: true });
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                 continue;
               } else {
@@ -971,7 +971,7 @@ export async function POST(req: Request) {
                 const to = toGraphPhone(phoneE164);
                 const display = stripOOC(replyText);
                 if (display) {
-                  try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT"); } catch {}
+                  try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
                 // If GPT returned buttons via OOC, send them; otherwise use role tabs
                 try {
@@ -1000,7 +1000,7 @@ export async function POST(req: Request) {
             // If handler didn't send anything, provide a tiny human follow-up when tabs are disabled
             try {
               if (!__sentOnce && !TABS_ENABLED) {
-                try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
               }
             } catch {}
             // Always follow with tabs menu for role (six tabs)
@@ -1025,7 +1025,7 @@ export async function POST(req: Request) {
           try {
             const to = toGraphPhone(phoneE164);
             if (!TABS_ENABLED) {
-              await sendTextSafe(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT");
+                await sendTextSafe(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
             }
             await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
             await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "fallback.unknown_type", type }, status: "INFO", type: "FALLBACK_UNKNOWN" });
@@ -1036,7 +1036,7 @@ export async function POST(req: Request) {
               console.warn("[WA] SILENCE_GUARD fired", { wamid, phone: phoneE164 });
               const to = toGraphPhone(phoneE164);
               if (!TABS_ENABLED) {
-                await sendTextSafe(to, "I didn't quite get that.", "AI_DISPATCH_TEXT");
+                await sendTextSafe(to, "I didn't quite get that.", "AI_DISPATCH_TEXT", { gpt_sent: true });
               }
               let role: string = "attendant";
               let outlet: string | undefined = undefined;

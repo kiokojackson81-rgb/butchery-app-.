@@ -80,8 +80,8 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         } else if (role === "supplier") {
           await sendSupplierMenu(to);
         }
-        // Send human-facing text only
-        try { await sendText(to, built.text, "AI_DISPATCH_TEXT"); } catch {}
+          // Send human-facing text only (mark as GPT-originated for strict mode)
+          try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
         // Log the OOC for observability (do not expose to user)
         try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
         result = { ok: true };
@@ -105,7 +105,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         };
         try { await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE"); } catch { }
         const built = buildUnauthenticatedReply(deep, false);
-        try { await sendText(to, built.text, "AI_DISPATCH_TEXT"); } catch {}
+          try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
         try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
         result = { ok: true };
       }
@@ -123,7 +123,8 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         result = await sendText(to, summary, "AI_DISPATCH_TEXT");
       }
     } else if (composed.text) {
-      result = await sendText(to, composed.text, "AI_DISPATCH_TEXT");
+        // Composed.text often comes from the AI; mark it so strict transport allows it
+        result = await sendText(to, composed.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
   }
 

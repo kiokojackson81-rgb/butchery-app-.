@@ -1,0 +1,922 @@
+{
+  "generatedAt": "2025-10-09T14:28:45.078Z",
+  "artifacts": {
+    "1760016870803_A1_unmapped_login_prompt": {
+      "counts": {
+        "inboundTotal": 361,
+        "outboundTotal": 228,
+        "badSignature": 0,
+        "noop": 46,
+        "interactiveDisabled": 42,
+        "dryRun": 0,
+        "templateReopen": 33,
+        "inboundDedup": 76,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 113,
+        "oocInfoCount24h": 62
+      },
+      "helloWorldErrors": 6,
+      "templatesSuccess": 2,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "session": {
+        "role": "attendant",
+        "state": "LOGIN",
+        "code": null
+      },
+      "loginPrompt": 1
+    },
+    "1760016874179_A2_authenticated_welcome": {
+      "counts": {
+        "inboundTotal": 363,
+        "outboundTotal": 231,
+        "badSignature": 0,
+        "noop": 46,
+        "interactiveDisabled": 42,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 76,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 114,
+        "oocInfoCount24h": 62
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016876510_B1_silence_guard": {
+      "counts": {
+        "inboundTotal": 363,
+        "outboundTotal": 233,
+        "badSignature": 0,
+        "noop": 46,
+        "interactiveDisabled": 42,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 76,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 115,
+        "oocInfoCount24h": 62
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016878821_B2_ooc_presence": {
+      "counts": {
+        "inboundTotal": 363,
+        "outboundTotal": 233,
+        "badSignature": 0,
+        "noop": 46,
+        "interactiveDisabled": 42,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 76,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 115,
+        "oocInfoCount24h": 62
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016881719_C1_closing_single_line": {
+      "counts": {
+        "inboundTotal": 367,
+        "outboundTotal": 233,
+        "badSignature": 0,
+        "noop": 46,
+        "interactiveDisabled": 42,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 115,
+        "oocInfoCount24h": 62
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016886443_C2_deposit_parse": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016891154_C3_expense_create": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016894676_D1_supplier_new_delivery": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016898633_D2_attendant_confirms": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016902130_E1_supervisor_approve_deposit": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016905623_E2_supervisor_adjust_closing": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760016909158_F1_24h_reopen_template": {
+      "counts": {
+        "inboundTotal": 371,
+        "outboundTotal": 236,
+        "badSignature": 0,
+        "noop": 47,
+        "interactiveDisabled": 43,
+        "dryRun": 0,
+        "templateReopen": 34,
+        "inboundDedup": 77,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 117,
+        "oocInfoCount24h": 63
+      },
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "noop": 47,
+      "interactiveDisabled": 43,
+      "session": {
+        "role": "attendant",
+        "state": "MENU",
+        "code": "jacksona"
+      },
+      "loginPrompt": 1
+    },
+    "1760019456682_A1_unmapped_login_prompt": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019460467_A2_authenticated_welcome": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019463228_B1_silence_guard": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019465727_B2_ooc_presence": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019468723_C1_closing_single_line": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019473227_C2_deposit_parse": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019477921_C3_expense_create": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019481328_D1_supplier_new_delivery": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019485260_D2_attendant_confirms": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019488676_E1_supervisor_approve_deposit": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019492087_E2_supervisor_adjust_closing": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    },
+    "1760019495433_F1_24h_reopen_template": {
+      "counts": {
+        "inboundTotal": 441,
+        "outboundTotal": 259,
+        "badSignature": 0,
+        "noop": 52,
+        "interactiveDisabled": 48,
+        "dryRun": 0,
+        "templateReopen": 36,
+        "inboundDedup": 87,
+        "loginPrompt": 1
+      },
+      "metrics": {
+        "templateReopenAttempts24h": 0,
+        "templateReopenSuccess24h": 0,
+        "aiDispatchCount24h": 129,
+        "oocInfoCount24h": 73
+      },
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "noop": 52,
+      "interactiveDisabled": 48,
+      "session": {
+        "role": "supplier",
+        "state": "MENU",
+        "code": "testsupply"
+      },
+      "loginPrompt": 1
+    }
+  },
+  "totals": {
+    "files": 24
+  },
+  "matrix": {
+    "1760016870803_A1_unmapped_login_prompt": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 6,
+      "templatesSuccess": 2,
+      "sessionState": "LOGIN",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 113,
+      "oocInfo24h": 62
+    },
+    "1760016874179_A2_authenticated_welcome": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 114,
+      "oocInfo24h": 62
+    },
+    "1760016876510_B1_silence_guard": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 115,
+      "oocInfo24h": 62
+    },
+    "1760016878821_B2_ooc_presence": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 115,
+      "oocInfo24h": 62
+    },
+    "1760016881719_C1_closing_single_line": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 115,
+      "oocInfo24h": 62
+    },
+    "1760016886443_C2_deposit_parse": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016891154_C3_expense_create": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016894676_D1_supplier_new_delivery": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016898633_D2_attendant_confirms": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016902130_E1_supervisor_approve_deposit": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016905623_E2_supervisor_adjust_closing": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760016909158_F1_24h_reopen_template": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 7,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 117,
+      "oocInfo24h": 63
+    },
+    "1760019456682_A1_unmapped_login_prompt": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019460467_A2_authenticated_welcome": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019463228_B1_silence_guard": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019465727_B2_ooc_presence": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019468723_C1_closing_single_line": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019473227_C2_deposit_parse": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019477921_C3_expense_create": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019481328_D1_supplier_new_delivery": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019485260_D2_attendant_confirms": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019488676_E1_supervisor_approve_deposit": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019492087_E2_supervisor_adjust_closing": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    },
+    "1760019495433_F1_24h_reopen_template": {
+      "interactiveBlocked": true,
+      "helloWorldErrors": 8,
+      "templatesSuccess": 2,
+      "sessionState": "MENU",
+      "loginPromptCount": 1,
+      "aiDispatch24h": 129,
+      "oocInfo24h": 73
+    }
+  }
+}

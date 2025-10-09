@@ -7,6 +7,13 @@ import process from 'process';
 import fs from 'fs';
 import path from 'path';
 
+// For smoke-run we want to enable interactive sends and autosend behavior so the
+// test exercises real interactive payload paths. Also disable the warm-up
+// template to avoid noisy hello_world template errors during the run.
+process.env.WA_INTERACTIVE_ENABLED = process.env.WA_INTERACTIVE_ENABLED || 'true';
+process.env.WA_AUTOSEND_ENABLED = process.env.WA_AUTOSEND_ENABLED || 'true';
+process.env.WHATSAPP_WARMUP_TEMPLATE = process.env.WHATSAPP_WARMUP_TEMPLATE || 'none';
+
 function usage() {
   console.log('Usage: node run-staging-smoke.mjs --base <baseUrl> --phone <E164> [--diag-key <key>]');
   process.exit(1);

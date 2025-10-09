@@ -1,0 +1,505 @@
+{
+  "steps": [
+    {
+      "ok": true,
+      "status": 200,
+      "body": "{\"ok\":true}"
+    },
+    {
+      "ok": true,
+      "status": 200,
+      "body": "{\"ok\":true}"
+    },
+    {
+      "ok": true,
+      "status": 200,
+      "body": "{\"ok\":true}"
+    }
+  ],
+  "diag": {
+    "ok": true,
+    "meta": {
+      "phone": "+254705663175",
+      "hours": 24,
+      "limit": 10,
+      "tables": [
+        "PhoneMapping",
+        "WaMessageLog",
+        "WaSession"
+      ],
+      "waEnv": {
+        "phoneId": true,
+        "token": true
+      }
+    },
+    "counts": {
+      "inboundTotal": 367,
+      "outboundTotal": 233,
+      "badSignature": 0,
+      "noop": 46,
+      "interactiveDisabled": 42,
+      "dryRun": 0,
+      "templateReopen": 34,
+      "inboundDedup": 77,
+      "loginPrompt": 1
+    },
+    "samples": {
+      "badSignature": [],
+      "noop": [
+        {
+          "id": "7c1fc6a9-1c90-4b32-9aa5-6ef121c58d33",
+          "createdAt": "2025-10-09T11:08:13.090Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "a76b24d9-bd02-4bb4-99d0-f38429cc69a5",
+          "createdAt": "2025-10-09T10:57:35.084Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "6f695741-a287-4d99-9f10-0233aba98ec9",
+          "createdAt": "2025-10-09T10:57:34.345Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"BrakaTest — choose product\"}, \"type\": \"list\", \"action\": {\"button\": \"Tabs\", \"sections\": [{\"rows\": [{\"id\": \"PROD_Beef\", \"title\": \"Beef\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Kuku\", \"title\": \"Kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Liver\", \"title\": \"Liver\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Matumbo\", \"title\": \"Matumbo\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_kuku\", \"title\": \"kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_matumbo\", \"title\": \"matumbo\", \"description\": \"Enter closing & waste\"}], \"title\": \"Products\"}]}, \"footer\": {\"text\": \"BarakaOps\"}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "12428df8-f4b8-4f0d-bff0-3aaf9477579e",
+          "createdAt": "2025-10-09T10:56:50.394Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "959ad154-ebcc-4026-895f-4c166622dfa7",
+          "createdAt": "2025-10-09T10:56:49.760Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"BrakaTest — choose product\"}, \"type\": \"list\", \"action\": {\"button\": \"Tabs\", \"sections\": [{\"rows\": [{\"id\": \"PROD_Beef\", \"title\": \"Beef\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Kuku\", \"title\": \"Kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Liver\", \"title\": \"Liver\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Matumbo\", \"title\": \"Matumbo\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_kuku\", \"title\": \"kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_matumbo\", \"title\": \"matumbo\", \"description\": \"Enter closing & waste\"}], \"title\": \"Products\"}]}, \"footer\": {\"text\": \"BarakaOps\"}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "40541675-8591-4b28-ae05-d81624bc6f2c",
+          "createdAt": "2025-10-09T10:46:44.023Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "ef33205c-d4b6-4ea7-92c4-ca30b6cccf73",
+          "createdAt": "2025-10-09T10:34:11.751Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_STOCK\", \"title\": \"ATT TAB STOCK\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_DEPOSITS\", \"title\": \"ATT TAB DEPOSITS\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_SUMMARY\", \"title\": \"Summary\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "34b6321b-56cf-49bc-98ec-e9d9604354a4",
+          "createdAt": "2025-10-09T10:02:42.083Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "3abed588-1fee-4ac3-83ea-ff1c5576849d",
+          "createdAt": "2025-10-09T09:51:17.250Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"LOGIN\", \"title\": \"Login\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "f6ba9c36-b913-4bea-baa7-1008fa391767",
+          "createdAt": "2025-10-09T09:50:25.647Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"LOGIN\", \"title\": \"Login\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        }
+      ],
+      "interactiveDisabled": [
+        {
+          "id": "7c1fc6a9-1c90-4b32-9aa5-6ef121c58d33",
+          "createdAt": "2025-10-09T11:08:13.090Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "a76b24d9-bd02-4bb4-99d0-f38429cc69a5",
+          "createdAt": "2025-10-09T10:57:35.084Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "6f695741-a287-4d99-9f10-0233aba98ec9",
+          "createdAt": "2025-10-09T10:57:34.345Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"BrakaTest — choose product\"}, \"type\": \"list\", \"action\": {\"button\": \"Tabs\", \"sections\": [{\"rows\": [{\"id\": \"PROD_Beef\", \"title\": \"Beef\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Kuku\", \"title\": \"Kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Liver\", \"title\": \"Liver\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Matumbo\", \"title\": \"Matumbo\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_kuku\", \"title\": \"kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_matumbo\", \"title\": \"matumbo\", \"description\": \"Enter closing & waste\"}], \"title\": \"Products\"}]}, \"footer\": {\"text\": \"BarakaOps\"}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "12428df8-f4b8-4f0d-bff0-3aaf9477579e",
+          "createdAt": "2025-10-09T10:56:50.394Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "959ad154-ebcc-4026-895f-4c166622dfa7",
+          "createdAt": "2025-10-09T10:56:49.760Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"BrakaTest — choose product\"}, \"type\": \"list\", \"action\": {\"button\": \"Tabs\", \"sections\": [{\"rows\": [{\"id\": \"PROD_Beef\", \"title\": \"Beef\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Kuku\", \"title\": \"Kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Liver\", \"title\": \"Liver\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_Matumbo\", \"title\": \"Matumbo\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_goat\", \"title\": \"Goat\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_kuku\", \"title\": \"kuku\", \"description\": \"Enter closing & waste\"}, {\"id\": \"PROD_matumbo\", \"title\": \"matumbo\", \"description\": \"Enter closing & waste\"}], \"title\": \"Products\"}]}, \"footer\": {\"text\": \"BarakaOps\"}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "40541675-8591-4b28-ae05-d81624bc6f2c",
+          "createdAt": "2025-10-09T10:46:44.023Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "ef33205c-d4b6-4ea7-92c4-ca30b6cccf73",
+          "createdAt": "2025-10-09T10:34:11.751Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_STOCK\", \"title\": \"ATT TAB STOCK\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_DEPOSITS\", \"title\": \"ATT TAB DEPOSITS\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"ATT_TAB_SUMMARY\", \"title\": \"Summary\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "34b6321b-56cf-49bc-98ec-e9d9604354a4",
+          "createdAt": "2025-10-09T10:02:42.083Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"body\": {\"text\": \"Tap a button to continue\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"SEND_CODE\", \"title\": \"Send Code\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"MENU\", \"title\": \"Main Menu\"}}]}}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "3abed588-1fee-4ac3-83ea-ff1c5576849d",
+          "createdAt": "2025-10-09T09:51:17.250Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"LOGIN\", \"title\": \"Login\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        },
+        {
+          "id": "f6ba9c36-b913-4bea-baa7-1008fa391767",
+          "createdAt": "2025-10-09T09:50:25.647Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "INTERACTIVE_DISABLED",
+          "templateName": null,
+          "payload": "{\"via\": \"feature-flag-noop\", \"body\": {\"to\": \"254705663175\", \"type\": \"interactive\", \"interactive\": {\"body\": {\"text\": \"Choose an action:\"}, \"type\": \"button\", \"action\": {\"buttons\": [{\"type\": \"reply\", \"reply\": {\"id\": \"LOGIN\", \"title\": \"Login\"}}, {\"type\": \"reply\", \"reply\": {\"id\": \"HELP\", \"title\": \"Help\"}}]}}, \"messaging_product\": \"whatsapp\"}, \"meta\": {\"_type\": \"AI_DISPATCH_INTERACTIVE\", \"reason\": \"interactive.disabled\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"in_reply_to\": null}"
+        }
+      ],
+      "dryRun": [],
+      "templateReopen": [
+        {
+          "id": "698cb9fa-70a6-43a7-9e78-afdc79303c11",
+          "createdAt": "2025-10-09T13:34:36.751Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"Aea7Zae_3sx3h8hFN83Tl3H\"}}}"
+        },
+        {
+          "id": "b6c80281-03e7-4b2d-966e-293af74abc1a",
+          "createdAt": "2025-10-09T12:56:28.526Z",
+          "direction": "out",
+          "status": "READ",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "closing_stock_submitted",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"closing_stock_submitted\", \"language\": {\"code\": \"en\"}, \"components\": [{\"type\": \"body\", \"parameters\": [{\"text\": \"kioko20\", \"type\": \"text\"}, {\"text\": \"1\", \"type\": \"text\"}]}]}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"contacts\": [{\"input\": \"254705663175\", \"wa_id\": \"254705663175\"}], \"messages\": [{\"id\": \"wamid.HBgMMjU0NzA1NjYzMTc1FQIAERgSMThDMkREMTdBQzIxNUM2RTlDAA==\", \"message_status\": \"accepted\"}], \"messaging_product\": \"whatsapp\"}}"
+        },
+        {
+          "id": "e2b8d017-63eb-4e8f-b8ed-ef4609797a26",
+          "createdAt": "2025-10-09T12:50:53.886Z",
+          "direction": "out",
+          "status": "READ",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "closing_stock_submitted",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"closing_stock_submitted\", \"language\": {\"code\": \"en\"}, \"components\": [{\"type\": \"body\", \"parameters\": [{\"text\": \"kioko20\", \"type\": \"text\"}, {\"text\": \"2\", \"type\": \"text\"}]}]}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"contacts\": [{\"input\": \"254705663175\", \"wa_id\": \"254705663175\"}], \"messages\": [{\"id\": \"wamid.HBgMMjU0NzA1NjYzMTc1FQIAERgSRjg0MDlCMDJFMTZEMDFBOTcyAA==\", \"message_status\": \"accepted\"}], \"messaging_product\": \"whatsapp\"}}"
+        },
+        {
+          "id": "99561d24-3068-4a67-9b62-28ca679b5a14",
+          "createdAt": "2025-10-09T10:56:33.625Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"AlXxy0DUNLtRNOSuC8GDa-d\"}}}"
+        },
+        {
+          "id": "e751c66a-621f-44bf-b843-7e8fedf877e9",
+          "createdAt": "2025-10-09T10:22:21.199Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"AI_qzSC3SRSlRerLt9vNnYt\"}}}"
+        },
+        {
+          "id": "124a3b15-8858-44bb-aca0-3dbb3015afd8",
+          "createdAt": "2025-10-09T09:50:02.930Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"A1oHwsaYn-glhUwQR9TNEs9\"}}}"
+        },
+        {
+          "id": "87be0c05-70f2-4629-a1ba-5995e1ac0aef",
+          "createdAt": "2025-10-09T09:25:33.905Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"AQO-vmmjq_je7bjXOGTCIaN\"}}}"
+        },
+        {
+          "id": "ebd0092a-f24e-4d06-bde4-ba249e061c28",
+          "createdAt": "2025-10-09T08:51:43.875Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"AJFsOXKqyD-5KiIbsq5HdPl\"}}}"
+        },
+        {
+          "id": "3b292cc2-52d3-41bd-a0e8-298df7683eab",
+          "createdAt": "2025-10-09T08:31:17.392Z",
+          "direction": "out",
+          "status": "ERROR",
+          "type": "TEMPLATE_OUTBOUND",
+          "templateName": "hello_world",
+          "payload": "{\"meta\": {\"_type\": \"TEMPLATE_OUTBOUND\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"status\": 404, \"request\": {\"to\": \"254705663175\", \"type\": \"template\", \"template\": {\"name\": \"hello_world\", \"language\": {\"code\": \"en\"}}, \"messaging_product\": \"whatsapp\"}, \"response\": {\"error\": {\"code\": 132001, \"type\": \"OAuthException\", \"message\": \"(#132001) Template name does not exist in the translation\", \"error_data\": {\"details\": \"template name (hello_world) does not exist in en\", \"messaging_product\": \"whatsapp\"}, \"fbtrace_id\": \"AL_G5uNE28l256vDx14TkBW\"}}}"
+        },
+        {
+          "id": "2a595212-ce65-4cdd-abdc-a3cfb8e0446d",
+          "createdAt": "2025-10-09T08:24:18.789Z",
+          "direction": "out",
+          "status": "NOOP",
+          "type": "NO_AI_DISPATCH_CONTEXT",
+          "templateName": "barakaops_supplier_assignment_v1",
+          "payload": "{\"meta\": {\"reason\": \"autosend.disabled.context\", \"phoneE164\": \"+254705663175\"}, \"phone\": \"+254705663175\", \"request\": {\"to\": \"+254705663175\", \"via\": \"feature-flag-noop\", \"params\": [\"\", \"https://barakafresh.com/login\"], \"template\": \"barakaops_supplier_assignment_v1\", \"contextType\": \"ASSIGNMENT\"}}"
+        }
+      ],
+      "inboundDedup": [
+        {
+          "id": "9a49228a-d9bb-4364-b220-29c3699f7f53",
+          "createdAt": "2025-10-09T13:34:45.913Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"65853c092060437d06c5dc4829a401058dd9c5b3\", \"phone\": \"+254705663175\", \"bucket\": 58667229, \"preview\": \"1\"}"
+        },
+        {
+          "id": "4bf62663-d184-4c65-a874-8bd7e7db378c",
+          "createdAt": "2025-10-09T13:34:23.763Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"b61c90ed77142baf04dbe8d7d6151d19d40cf4e3\", \"phone\": \"+254705663175\", \"bucket\": 58667228, \"preview\": \"Hi\"}"
+        },
+        {
+          "id": "6769373f-0bd3-49ab-a46a-7d2f5cc83d05",
+          "createdAt": "2025-10-09T10:57:42.621Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"1e2b86bcae1e116c8ceffb59295c6bc5f1f77be0\", \"phone\": \"+254705663175\", \"bucket\": 58666915, \"preview\": \"10\"}"
+        },
+        {
+          "id": "c6c24e9b-2805-4445-9746-e792a8ff1168",
+          "createdAt": "2025-10-09T10:57:31.826Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"2148c440ea148cdb43949c89fabad692dd5bab6b\", \"phone\": \"+254705663175\", \"bucket\": 58666915, \"preview\": \"Beef\"}"
+        },
+        {
+          "id": "f84b5fb4-a2d0-4f61-b185-fabc5ac6a488",
+          "createdAt": "2025-10-09T10:56:47.244Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"a6554ef0c5082ecfd18f9a5e35751af85b43a980\", \"phone\": \"+254705663175\", \"bucket\": 58666913, \"preview\": \"1\"}"
+        },
+        {
+          "id": "693e8547-16c1-4ab9-8a48-c3a007b7781d",
+          "createdAt": "2025-10-09T10:56:23.219Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"26221e504ead58d9c8a988bc739d4b918a242f5c\", \"phone\": \"+254705663175\", \"bucket\": 58666912, \"preview\": \"Hi\"}"
+        },
+        {
+          "id": "0441ced8-f4b8-4365-8503-87ee1a82fbeb",
+          "createdAt": "2025-10-09T10:34:54.659Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"4c97b3da93650910e274a4769f38444669d3c615\", \"phone\": \"+254705663175\", \"bucket\": 58666869, \"preview\": \"3\"}"
+        },
+        {
+          "id": "8536b1dd-6eb3-4dc0-8bcf-d6624023227e",
+          "createdAt": "2025-10-09T10:34:41.443Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"bceb2f67eacb8770b377d4e1e97d73439a551569\", \"phone\": \"+254705663175\", \"bucket\": 58666869, \"preview\": \"2\"}"
+        },
+        {
+          "id": "8e4fc7ac-a809-4107-9e40-6103c290b778",
+          "createdAt": "2025-10-09T10:34:18.579Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"ffef91a62501d6b50bb3a4d339e9e4b145f4caca\", \"phone\": \"+254705663175\", \"bucket\": 58666868, \"preview\": \"1\"}"
+        },
+        {
+          "id": "86a96cf3-6ad7-40d6-990d-813b47a755b1",
+          "createdAt": "2025-10-09T10:34:04.964Z",
+          "direction": "in",
+          "status": "INBOUND_DEDUP",
+          "type": "INBOUND_DEDUP",
+          "templateName": null,
+          "payload": "{\"key\": \"1401b0c2fbc033220d5b96c0059ec9f65c54a3ae\", \"phone\": \"+254705663175\", \"bucket\": 58666868, \"preview\": \"Hi\"}"
+        }
+      ],
+      "loginPrompt": [
+        {
+          "id": "176081ad-96e8-4b52-96e3-0e47effd8ce3",
+          "createdAt": "2025-10-08T16:05:47.376Z",
+          "direction": "in",
+          "status": "LOGIN_PROMPT",
+          "type": "WARN",
+          "templateName": null,
+          "payload": "{\"type\": \"LOGIN_PROMPT\", \"phone\": \"+254705663175\", \"reason\": \"logged-out\"}"
+        }
+      ]
+    },
+    "metrics": {
+      "templateReopenAttempts24h": 0,
+      "templateReopenSuccess24h": 0,
+      "aiDispatchCount24h": 115,
+      "oocInfoCount24h": 62
+    },
+    "session": [
+      {
+        "id": "cmgcjj22x0001l9042b315984",
+        "phoneE164": "+254705663175",
+        "role": "attendant",
+        "code": "jacksona",
+        "outlet": "BrakaTest",
+        "state": "MENU",
+        "cursor": {
+          "status": "ACTIVE",
+          "lastMsgAt": "2025-10-09T13:34:37.387Z",
+          "loginNonce": "b4326408447e",
+          "ttlMinutes": 60,
+          "lastMsgType": "welcome_sent",
+          "lastActiveAt": "2025-10-09T13:34:36.218Z",
+          "loginNonceAt": "2025-10-09T13:34:37.423Z",
+          "tradingPeriodId": null
+        },
+        "sessionVersion": 21,
+        "lastFinalizeAt": "2025-10-09T13:34:36.223Z",
+        "updatedAt": "2025-10-09T13:34:45.957Z",
+        "createdAt": "2025-10-04T17:22:03.466Z"
+      }
+    ],
+    "phoneMapping": [
+      {
+        "id": "cmgg180nk0028kt041dipqdhp",
+        "code": "jacksona",
+        "role": "attendant",
+        "phoneE164": "+254705663175",
+        "outlet": "BrakaTest",
+        "createdAt": "2025-10-07T04:00:40.017Z",
+        "updatedAt": "2025-10-09T13:34:36.211Z"
+      },
+      {
+        "id": "cmgix30260000ji04kl8pujpt",
+        "code": "kioko20",
+        "role": "attendant",
+        "phoneE164": "+254705663175",
+        "outlet": "WA_nxxv8g",
+        "createdAt": "2025-10-09T04:28:06.031Z",
+        "updatedAt": "2025-10-09T12:56:26.268Z"
+      },
+      {
+        "id": "cmgj5iw2f0005l204q7xlza53",
+        "code": "testsupply",
+        "role": "supplier",
+        "phoneE164": "254705663175",
+        "outlet": null,
+        "createdAt": "2025-10-09T08:24:24.280Z",
+        "updatedAt": "2025-10-09T08:24:29.135Z"
+      }
+    ],
+    "reminder": [],
+    "recency": {
+      "lastInboundAt": "2025-10-09T13:34:45.970Z",
+      "lastOutboundAt": "2025-10-09T13:34:38.332Z",
+      "lastTemplateAt": "2025-10-09T13:34:36.751Z"
+    },
+    "neonSql": {
+      "badSignature": "SELECT \"createdAt\", status, type, payload->>'error' AS error\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND status = 'ERROR'\n  AND payload->>'error' = 'bad signature'\nORDER BY \"createdAt\" DESC\nLIMIT 10;",
+      "noop": "SELECT \"createdAt\", status, type, payload::text\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND (status = 'NOOP' OR type = 'NO_AI_DISPATCH_CONTEXT')\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "interactiveDisabled": "SELECT \"createdAt\", status, type, payload::text\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND type = 'INTERACTIVE_DISABLED'\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "dryRun": "SELECT \"createdAt\", status, type, payload::text\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND payload::text ILIKE '%\"via\":\"dry-run\"%'\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "templateReopen": "SELECT \"createdAt\", \"templateName\", status, type\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND \"templateName\" IS NOT NULL\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "inboundDedup": "SELECT \"createdAt\", status, type, payload->>'preview' AS preview\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND status = 'INBOUND_DEDUP'\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "loginPrompt": "SELECT \"createdAt\", status, type, payload::text\nFROM \"WaMessageLog\"\nWHERE \"createdAt\" > now() - interval '24 hours'\n  AND status = 'LOGIN_PROMPT'\nORDER BY \"createdAt\" DESC\nLIMIT 20;",
+      "reminder": "SELECT * FROM \"ReminderSend\" WHERE \"phoneE164\" IN ('+254705663175', '254705663175') ORDER BY \"createdAt\" DESC LIMIT 10;"
+    }
+  }
+}

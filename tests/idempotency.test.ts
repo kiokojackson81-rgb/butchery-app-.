@@ -1,33 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Test parseMpesaText (pure function)
-import { parseMpesaText, addDeposit as realAddDeposit } from '@/server/deposits';
-import { saveClosings as realSaveClosings } from '@/server/closings';
+// Declare the prisma mock at module scope so vitest's hoisted vi.mock factory
+// can reference it. We'll assign/reset implementations in beforeEach.
+var prismaMock: any = {
+  attendantDeposit: { findFirst: vi.fn(), create: vi.fn() },
+};
+
+// Hoisted mock factory must be declared before any import that loads modules
+// which in turn import '@/lib/prisma'. This ensures the mocked prisma is used.
+vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+
+// We'll dynamically import functions from modules that use prisma after the
+// mocks are installed to avoid ESM import hoisting issues.
 
 describe('parseMpesaText', () => {
   it('parses common M-Pesa SMS', () => {
     const s = 'Your M-PESA payment of Ksh 1,200.00 received. STAN: ABCDEFGHIJ';
-    const p = parseMpesaText(s);
-    expect(p).not.toBeNull();
-    expect(p?.amount).toBe(1200);
-    expect(typeof p?.ref).toBe('string');
+    // import dynamically to avoid hoisted mock interference
+    return import('@/server/deposits').then(({ parseMpesaText }) => {
+      const p = parseMpesaText(s);
+      expect(p).not.toBeNull();
+      expect(p?.amount).toBe(1200);
+      expect(typeof p?.ref).toBe('string');
+    });
   });
 });
 
 describe('addDeposit idempotency (mocked prisma)', () => {
-  let prismaMock: any;
   beforeEach(() => {
-    prismaMock = {
-      attendantDeposit: {
-        findFirst: vi.fn(),
-        create: vi.fn(),
-      },
-    };
-    // Replace the real prisma import with our mock for the module under test
-    vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
-    // We must re-import the module under test to pick up the mock
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // Note: using require here to avoid static ESM import binding issues when mocking
+    // Reset mocks before each test
+    prismaMock.attendantDeposit.findFirst = vi.fn();
+    prismaMock.attendantDeposit.create = vi.fn();
   });
 
   it('creates when none exists, and returns existing on second call', async () => {
@@ -51,8 +54,8 @@ describe('addDeposit idempotency (mocked prisma)', () => {
 describe('saveClosings (mocked transaction)', () => {
   it('calls upsert for each row', async () => {
     const upsert = vi.fn().mockResolvedValue(true);
-    const prismaMock: any = { $transaction: vi.fn(async (fn: any) => fn({ attendantClosing: { upsert } })) };
-    vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+    // Reuse the top-level prismaMock by setting its $transaction method.
+    prismaMock.$transaction = vi.fn(async (fn: any) => fn({ attendantClosing: { upsert } }));
     const { saveClosings } = await import('@/server/closings');
     const rows = [{ productKey: 'X', closingQty: 2, wasteQty: 0 }, { productKey: 'Y', closingQty: 3, wasteQty: 1 }];
     await saveClosings({ date: '2025-10-09', outletName: 'OutletA', rows });

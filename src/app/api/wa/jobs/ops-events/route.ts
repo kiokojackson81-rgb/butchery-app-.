@@ -51,7 +51,8 @@ export async function GET() {
             const body = { messaging_product: 'whatsapp', to: phone, type: 'interactive', interactive: { type: 'button', body: { text: dispatch.text }, action: { buttons: dispatch.buttons.map((b: any) => ({ type: 'reply', reply: { id: b.id, title: b.title } })) } } };
             await sendInteractiveSafe(body, 'AI_DISPATCH_INTERACTIVE');
           } else {
-            await sendTextSafe(e164, dispatch.text, 'AI_DISPATCH_TEXT');
+            // gptDispatch produced this text — mark as GPT-originated
+            await sendTextSafe(e164, dispatch.text, 'AI_DISPATCH_TEXT', { gpt_sent: true });
           }
           sentCounts[role] = (sentCounts[role] || 0) + 1;
           // write back result metadata into WaMessageLog for observability
