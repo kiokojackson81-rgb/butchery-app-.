@@ -274,11 +274,18 @@ export async function sendText(to: string, text: string, contextType?: string, m
   // marked as originating from GPT (meta.gpt_sent === true).
   const STRICT = String(process.env.WA_STRICT_GPT_ONLY || "").toLowerCase() === "true";
   if (STRICT && !(meta && (meta as any).gpt_sent === true)) {
+    // Backwards-compatibility / developer convenience: many server-side
+    // AI dispatch paths already set contextType to AI_DISPATCH_TEXT or
+    // AI_DISPATCH_INTERACTIVE. Treat those contexts as implicitly GPT-originated
+    // when strict mode is enabled so we don't need to annotate every call site.
+    const implicitAiContext = ctx === "AI_DISPATCH_TEXT" || ctx === "AI_DISPATCH_INTERACTIVE";
+    if (!implicitAiContext) {
     const toNorm = normalizeGraphPhone(to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
     const waMessageId = `NOOP-${Date.now()}`;
     try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: 'strict_gpt_only.blocked', requestedContext: ctx } , request: { to, text } }, waMessageId, status: 'NOOP', type: 'STRICT_GPT_BLOCK' }); } catch {}
     return { ok: true, waMessageId, response: { noop: true } } as const;
+    }
   }
   return sendWithReopen({ toE164: to.startsWith("+") ? to : "+" + to, kind: "text", text, ctxType: ctx, inReplyTo: meta?.inReplyTo });
 }

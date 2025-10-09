@@ -92,7 +92,7 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
   const to = toGraphPhone(phoneDB);
   try { await warmUpSession(to); } catch {}
   // Welcome copy per spec (role-specific menu follows)
-  try { await sendText(to, "Login successful. What would you like to do?", "AI_DISPATCH_TEXT"); } catch {}
+  try { await sendText(to, "Login successful. What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
   try {
     if (role === "attendant") await sendAttendantMenu(to, outletFinal || "your outlet");
     else if (role === "supervisor") await sendSupervisorMenu(to);

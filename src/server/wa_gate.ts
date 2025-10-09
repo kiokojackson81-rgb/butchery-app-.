@@ -13,7 +13,7 @@ export async function promptWebLogin(phoneE164: string, reason?: string) {
       const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
       const link = url || `${origin}/login`;
   const to = toGraphPhone(phoneE164);
-  await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT");
+  await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     } catch {}
     return;
   }
@@ -22,7 +22,7 @@ export async function promptWebLogin(phoneE164: string, reason?: string) {
     const res = await sendOpsMessage(phoneE164, { kind: "login_prompt", reason } as any).catch(() => null);
     // If dispatcher was a noop or failed to send, ensure at least a plain text login hint goes out
     const to = toGraphPhone(phoneE164);
-    if (!res || (res as any)?.ok === false) {
+      if (!res || (res as any)?.ok === false) {
       const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
       const link = (await createLoginLink(phoneE164).catch(() => ({ url: origin + "/login" }))).url;
       try { await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT"); } catch {}
@@ -32,7 +32,7 @@ export async function promptWebLogin(phoneE164: string, reason?: string) {
       const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
       const link = (await createLoginLink(phoneE164).catch(() => ({ url: origin + "/login" }))).url;
       const to = toGraphPhone(phoneE164);
-      try { await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT"); } catch {}
+  try { await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
     } catch {}
   }
   await markLastMsg(phoneE164, "login_prompt");

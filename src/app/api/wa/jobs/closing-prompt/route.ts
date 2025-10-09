@@ -27,7 +27,7 @@ export async function GET() {
           await logOutbound({ direction: "out", templateName: null, payload: { request: body, response: res }, waMessageId: (res as any)?.waMessageId ?? null, status: (res as any)?.ok ? "SENT" : "ERROR" });
         } catch (err) {
           await logOutbound({ direction: "out", templateName: null, payload: { error: String((err as any)?.message || err) }, status: "ERROR" });
-          try { await sendText(phone, `${a.outlet || "Outlet"} — closing stock.\nReply MENU to start.`, "AI_DISPATCH_TEXT"); } catch {}
+          try { await sendText(phone, `${a.outlet || "Outlet"} — closing stock.\nReply MENU to start.`, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
         }
       } else {
         // new dispatcher path

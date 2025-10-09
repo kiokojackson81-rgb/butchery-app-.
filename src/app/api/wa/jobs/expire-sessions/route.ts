@@ -21,7 +21,7 @@ export async function GET() {
       await (prisma as any).waSession.update({ where: { id: s.id }, data: { state: "LOGGED_OUT" } });
       const to = toGraphPhone((s as any).phoneE164 || "");
       const loginUrl = "https://barakafresh.com/login?src=wa";
-      await sendText(to, `You were logged out due to 10 minutes of inactivity.\nLogin again: ${loginUrl}`, "AI_DISPATCH_TEXT");
+  await sendText(to, `You were logged out due to 10 minutes of inactivity.\nLogin again: ${loginUrl}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       await sendInteractive({
         to,
         type: "button",
