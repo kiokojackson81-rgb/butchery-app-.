@@ -308,8 +308,19 @@ export async function POST(req: Request) {
 
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
-          const auth = await ensureAuthenticated(phoneE164);
+          let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: auth && (auth as any).sess ? { role: (auth as any).sess.role, outlet: (auth as any).sess.outlet } : null }); } catch {}
+          // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
+          // a session row exists in MENU state with credentials we treat as authenticated.
+          if (!auth.ok) {
+            try {
+              const sessRow = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+              if (sessRow && sessRow.state === 'MENU' && sessRow.code) {
+                auth = { ok: true, sess: sessRow } as any;
+                try { console.info('[WA] AUTH-FALLBACK ok via direct DB row', { phone: phoneE164, sess: { role: sessRow.role, outlet: sessRow.outlet } }); } catch {}
+              }
+            } catch (e) { try { console.warn('[WA] AUTH-FALLBACK error', String(e)); } catch {} }
+          }
           try {
             await logOutbound({
               direction: "in",
