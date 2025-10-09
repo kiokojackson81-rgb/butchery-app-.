@@ -276,6 +276,38 @@ export async function sendInteractive(body: any, contextType?: string, meta?: { 
 }
 
 /**
+ * Safe wrappers that callers should prefer. They centralize error logging and
+ * ensure failures are recorded via logOutbound so callers can still mark sent-state.
+ */
+export async function sendTextSafe(to: string, text: string, contextType?: string, meta?: { inReplyTo?: string }) {
+  try {
+    const res = await sendText(to, text, contextType, meta);
+    if (!res.ok) {
+      try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: to, in_reply_to: meta?.inReplyTo || null, meta: { phoneE164: to, send_error: res.error } }, status: 'ERROR', type: 'SEND_TEXT_FAIL' }); } catch {}
+    }
+    return res;
+  } catch (e: any) {
+    try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: to, in_reply_to: meta?.inReplyTo || null, meta: { phoneE164: to, send_error: String(e) } }, status: 'ERROR', type: 'SEND_TEXT_EXCEPTION' }); } catch {}
+    return { ok: false, error: String(e) } as SendResult;
+  }
+}
+
+export async function sendInteractiveSafe(body: any, contextType?: string, meta?: { inReplyTo?: string }) {
+  try {
+    const res = await sendInteractive(body, contextType, meta);
+    const to = body?.to || (meta && (meta as any).to) || '';
+    if (!res.ok) {
+      try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: to, in_reply_to: meta?.inReplyTo || null, meta: { phoneE164: to, send_error: res.error } }, status: 'ERROR', type: 'SEND_INTERACTIVE_FAIL' }); } catch {}
+    }
+    return res;
+  } catch (e: any) {
+    const to = body?.to || (meta && (meta as any).to) || '';
+    try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: to, in_reply_to: meta?.inReplyTo || null, meta: { phoneE164: to, send_error: String(e) } }, status: 'ERROR', type: 'SEND_INTERACTIVE_EXCEPTION' }); } catch {}
+    return { ok: false, error: String(e) } as SendResult;
+  }
+}
+
+/**
  * Compatibility wrapper for existing code using sendWaTemplate(phone, name, lang, components)
  */
 export async function sendWaTemplate(

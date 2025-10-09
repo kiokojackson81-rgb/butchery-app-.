@@ -1,6 +1,7 @@
 // src/server/supplier/supplier.notifications.ts
 import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 
 function toGraph(noPlus: string | null | undefined) {
   if (!noPlus) return "";
@@ -21,18 +22,18 @@ async function phonesForOutlet(outlet: string, roles: ("attendant" | "supervisor
 export async function notifyOpeningLocked(outlet: string, date: string, summaryLine: string) {
   const tos = await phonesForOutlet(outlet, ["attendant", "supervisor"]);
   const body = `Opening stock locked for ${outlet} on ${date}:\n${summaryLine}`;
-  await Promise.all(tos.map((to: string) => sendText(to, body, "AI_DISPATCH_TEXT")));
+  await Promise.all(tos.map((to: string) => sendOpsMessage(to, { kind: "free_text", text: body })));
 }
 
 export async function notifyTransferCreated(fromOutlet: string, toOutlet: string, date: string, desc: string) {
   const tosFrom = await phonesForOutlet(fromOutlet, ["attendant", "supervisor"]);
   const tosTo = await phonesForOutlet(toOutlet, ["attendant", "supervisor"]);
   const msg = `Transfer on ${date}: ${desc}`;
-  await Promise.all([...new Set([...tosFrom, ...tosTo])].map((to: string) => sendText(to, msg, "AI_DISPATCH_TEXT")));
+  await Promise.all([...new Set([...tosFrom, ...tosTo])].map((to: string) => sendOpsMessage(to, { kind: "free_text", text: msg })));
 }
 
 export async function notifySupervisorDispute(outlet: string, date: string, desc: string) {
   const tos = await phonesForOutlet(outlet, ["supervisor"]);
   const msg = `Dispute filed (${outlet} • ${date}): ${desc}`;
-  await Promise.all(tos.map((to: string) => sendText(to, msg, "AI_DISPATCH_TEXT")));
+  await Promise.all(tos.map((to: string) => sendOpsMessage(to, { kind: "free_text", text: msg })));
 }

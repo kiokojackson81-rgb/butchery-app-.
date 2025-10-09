@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
+import { enqueueOpsEvent } from "@/lib/opsEvents";
 import { getTodaySupplySummary, SupplySummaryLine } from "@/server/supply";
 import { createReviewItem } from "@/server/review";
 import { format } from "date-fns";
+import crypto from "crypto";
 
 const moneyFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -22,6 +24,13 @@ function buildLines(lines: SupplySummaryLine[]): string {
 
 function totalBuy(lines: SupplySummaryLine[]): number {
   return lines.reduce((sum, line) => sum + line.qty * line.buyPrice, 0);
+}
+
+function makeId() {
+  try {
+    if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+  } catch {}
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
 }
 
 function uniquePhones(rows: Array<{ phoneE164: string | null }>): string[] {
@@ -88,14 +97,21 @@ Recorded in system.`;
 ${linesTxt}
 If disputed by the outlet, Supervisor will contact you.`;
 
-  await sendBulk(uniquePhones(attendants), msgAttendant);
-  await sendBulk(uniquePhones(supervisors), msgSupervisor);
-  await sendBulk(uniquePhones(admins), msgAdmin);
-  if (supplier?.phoneE164) {
-    if (process.env.WA_AUTOSEND_ENABLED === "true") {
-  await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT");
-    } else {
-      await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
+  // Enqueue OpsEvent for the worker to compose and send role-aware GPT messages.
+  // Keep a fallback immediate send for WA_AUTOSEND_ENABLED to not regress rollout.
+  try {
+    await enqueueOpsEvent({ id: makeId(), type: 'SUPPLY_SUBMITTED', entityId: null, outletId: outletName, supplierId: opts.supplierCode || null, actorRole: null, dedupeKey: `SUPPLY_SUBMITTED:${outletName}:${date}` });
+  } catch (e) {
+    // if enqueue fails, fallback to existing direct sends to avoid losing notifications
+    await sendBulk(uniquePhones(attendants), msgAttendant);
+    await sendBulk(uniquePhones(supervisors), msgSupervisor);
+    await sendBulk(uniquePhones(admins), msgAdmin);
+    if (supplier?.phoneE164) {
+      if (process.env.WA_AUTOSEND_ENABLED === "true") {
+        await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT");
+      } else {
+        await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
+      }
     }
   }
 
@@ -124,17 +140,26 @@ export async function handleSupplyDispute(opts: {
 
   await createReviewItem({ type: "supply-dispute", outlet: outletName, date: new Date(), payload });
 
-  const supervisors = await prisma.phoneMapping.findMany({ where: { role: "supervisor" } });
-  const messageSupervisor = `Dispute raised — ${outletName}
-Reason: "${reason}".
-Please review in the dashboard.`;
-  await sendBulk(uniquePhones(supervisors), messageSupervisor);
-
-  const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
-  if (process.env.WA_AUTOSEND_ENABLED === "true") {
-  await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
-  } else {
-    await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
+  // Enqueue a SUPPLY_DISPUTED OpsEvent; worker will notify supervisors/admins.
+  try {
+    await enqueueOpsEvent({ id: makeId(), type: 'SUPPLY_DISPUTED', entityId: null, outletId: outletName, supplierId: null, actorRole: 'attendant', dedupeKey: `SUPPLY_DISPUTED:${outletName}:${date}` });
+    const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
+    } else {
+      await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
+    }
+  } catch (e) {
+    // fallback immediate notify supervisors if enqueue fails
+    const supervisors = await prisma.phoneMapping.findMany({ where: { role: "supervisor" } });
+    const messageSupervisor = `Dispute raised — ${outletName}\nReason: "${reason}".\nPlease review in the dashboard.`;
+    await sendBulk(uniquePhones(supervisors), messageSupervisor);
+    const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
+    if (process.env.WA_AUTOSEND_ENABLED === "true") {
+      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
+    } else {
+      await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
+    }
   }
 
   return { ok: true };

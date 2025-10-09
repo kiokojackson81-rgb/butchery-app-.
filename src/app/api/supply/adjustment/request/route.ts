@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
+import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
 
 // POST /api/supply/adjustment/request
@@ -38,9 +39,9 @@ export async function POST(req: Request) {
       const msgA = `Supplier requested adjustment: ${item} from ${currentQty} to ${newQty} at ${outlet}. Reason: ${reason}`;
       const msgS = `Adjustment request pending: ${item} ${outlet} ${date}. ${currentQty} → ${newQty}. Reason: ${reason}`;
       await Promise.allSettled([
-        ...attendants.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgA, "AI_DISPATCH_TEXT")),
-        ...supervisors.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS, "AI_DISPATCH_TEXT")),
-        ...admins.map((m: any) => m?.phoneE164 && sendText(toGraphPhone(m.phoneE164), msgS, "AI_DISPATCH_TEXT")),
+        ...attendants.map((m: any) => m?.phoneE164 && sendOpsMessage(toGraphPhone(m.phoneE164), { kind: "free_text", text: msgA })),
+        ...supervisors.map((m: any) => m?.phoneE164 && sendOpsMessage(toGraphPhone(m.phoneE164), { kind: "free_text", text: msgS })),
+        ...admins.map((m: any) => m?.phoneE164 && sendOpsMessage(toGraphPhone(m.phoneE164), { kind: "free_text", text: msgS })),
       ]);
     } catch {}
 

@@ -351,27 +351,34 @@ export async function POST(req: Request) {
               return `[button:${id}] ${title || ""}`.trim();
             })();
 
-            // Direct digit mapping (1-7) to flows to reduce GPT dependency for menus
+            // Direct digit mapping (1-7) to flows — when GPT_ONLY is enabled we intentionally
+            // skip the legacy direct-handler path so digits are routed through GPT for consistent
+            // OOC generation and reply composition. When GPT_ONLY is disabled, preserve the
+            // prior faster direct mapping behavior.
             const digit = String(text || "").trim();
             if (/^[1-7]$/.test(digit)) {
-                    try {
-                const id = mapDigitToId(sessRole, digit);
-                const flowId = canonicalToFlowId(sessRole, id);
-                if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
-                else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
-                else await handleAuthenticatedInteractive(auth.sess, flowId);
-                const to = toGraphPhone(phoneE164);
-                // Do not send a bare 'OK.' ack — follow with role tabs (if enabled).
-                // If the handler didn't emit any outbound message, send a brief friendly follow-up (only when tabs are disabled).
+              if (!GPT_ONLY) {
                 try {
-                  if (!__sentOnce && !TABS_ENABLED) {
-                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
-                  }
+                  const id = mapDigitToId(sessRole, digit);
+                  const flowId = canonicalToFlowId(sessRole, id);
+                  if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
+                  else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
+                  else await handleAuthenticatedInteractive(auth.sess, flowId);
+                  const to = toGraphPhone(phoneE164);
+                  // Do not send a bare 'OK.' ack — follow with role tabs (if enabled).
+                  // If the handler didn't emit any outbound message, send a brief friendly follow-up (only when tabs are disabled).
+                  try {
+                    if (!__sentOnce && !TABS_ENABLED) {
+                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                    }
+                  } catch {}
+                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                  continue;
                 } catch {}
-                try { await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
-                continue;
-              } catch {}
+              }
+              // When GPT_ONLY is true we let the digit fallthrough to the GPT path below
+              // so the conversation remains GPT-driven and OOC is produced/validated.
             }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
@@ -379,12 +386,31 @@ export async function POST(req: Request) {
             // Call GPT
             try { console.info("[WA] BEFORE GPT", { textLen: text?.length }); } catch {}
             const r = await runGptForIncoming(phoneE164, text);
-            const replyText = String(r || "").trim();
+            let replyText = String(r || "").trim();
 
             // Try OOC parse
             let ooc = parseOOCBlock(replyText);
 
             try { console.info("[WA] AFTER GPT", { gotText: !!replyText, ooc: !!ooc }); } catch {}
+
+            // If OOC is missing/invalid and OOC is required, attempt a single deterministic retry
+            // by asking GPT to respond with a valid OOC block. This reduces false negatives where
+            // the model forgot to include the OOC in the first reply.
+            const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
+            if ((!ooc || !ooc.intent) && oocRequired) {
+              try {
+                const retryPrompt = `${text}\n\nPlease reply with an OOC JSON block only (no extra text). Example:\n<<<OOC>${JSON.stringify({ intent: "MENU", buttons: ["ATT_CLOSING"] })}</OOC>>>`;
+                const retry = await runGptForIncoming(phoneE164, retryPrompt);
+                const retryText = String(retry || "").trim();
+                const retryOoc = parseOOCBlock(retryText);
+                if (retryOoc && retryOoc.intent) {
+                  ooc = retryOoc;
+                  // prefer the retry text as the canonical GPT reply for logging/strip
+                  replyText = retryText;
+                }
+              } catch {}
+            }
+
             // Persist OOC sample (sanitized)
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
@@ -394,7 +420,7 @@ export async function POST(req: Request) {
               await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
             };
 
-            const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
+            // (oocRequired already computed above)
             if ((!ooc || !ooc.intent) && oocRequired) {
               // Invalid OOC → clarifier fallback (ops compose) without calling legacy menus
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
@@ -441,6 +467,26 @@ export async function POST(req: Request) {
                 const btns = Array.isArray(ooc.buttons) ? ooc.buttons : [];
                 const buttonsCanon = btns.map((b: string) => idMap[b] || b);
                 ooc = { ...ooc, intent: intentCanon, buttons: buttonsCanon };
+
+                // Enforce allow-list for intents and buttons to keep GPT within supported flows
+                const ALLOWED = new Set([
+                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','MENU','MENU_SUMMARY','MENU_SUPPLY','HELP',
+                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES',
+                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_HELP',
+                  'LOGIN','FREE_TEXT'
+                ]);
+                // Normalize and filter buttons to allowed set
+                const normalizedIntent = String(ooc.intent || '').toUpperCase();
+                const allowedButtons = Array.isArray(ooc.buttons) ? (ooc.buttons as string[]).map(b=>String(b||'').toUpperCase()).filter(b=>ALLOWED.has(b)) : [];
+                ooc.buttons = allowedButtons;
+
+                // If the intent is not allowed, treat as invalid OOC and fallback
+                if (!ALLOWED.has(normalizedIntent)) {
+                  try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phoneE164, event: 'ooc.invalid.intent', preview: intentCanon, ooc: sanitizeForLog(ooc) }, status: 'WARN', type: 'OOC_INVALID' }); } catch {}
+                  try { const to = toGraphPhone(phoneE164); await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT'); } catch {}
+                  try { await sendRoleTabsLocal(); } catch {}
+                  continue;
+                }
               } catch {}
             }
             const chk = validateOOC(ooc);

@@ -163,16 +163,12 @@ export async function notifyAttendantAssignmentChange(codeRaw: string, opts?: {
   const outletText = afterSnapshot.outlet ? ` at ${afterSnapshot.outlet}` : "";
   const message = `Welcome ${name} — you’ve been assigned to manage ${productList}${outletText}.\nLogin to start managing: ${url}`;
 
-  if (process.env.WA_AUTOSEND_ENABLED === "true") {
-    if (process.env.WA_AUTOSEND_ENABLED === "true") {
-  const result = await sendText(phoneE164, message, "AI_DISPATCH_TEXT");
-      if (!result.ok) {
-        console.error(`[notifyAssign] send failed for ${code}: ${result.error}`);
-        return { sent: false, reason: "send-failed" };
-      }
-    } else {
-      try { await sendOpsMessage(phoneE164, { kind: "assignment_notice", role: "attendant", outlet: afterSnapshot.outlet || "" }); } catch {}
-    }
+  // Route assignment notification through ops dispatcher for consistent handling.
+  try {
+  await sendOpsMessage(phoneE164, { kind: "assignment_notice", role: "attendant", outlet: afterSnapshot.outlet || "" });
+  } catch (e) {
+    // Best-effort fallback to direct send if ops dispatcher unavailable
+    try { await sendText(phoneE164, message, "AI_DISPATCH_TEXT"); } catch (er) { console.error('[notifyAssign] fallback send failed', String(er)); }
   }
 
   return { sent: true };

@@ -2,7 +2,7 @@ import { createLoginLink } from "@/server/wa_links";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/server/canon";
 import { shouldDebounce, markLastMsg } from "@/lib/waSession";
-import { sendText } from "@/lib/wa";
+import { sendText, sendTextSafe } from "@/lib/wa";
 
 export async function promptWebLogin(phoneE164: string, reason?: string) {
   const { url } = await createLoginLink(phoneE164);
@@ -12,8 +12,8 @@ export async function promptWebLogin(phoneE164: string, reason?: string) {
     try {
       const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
       const link = url || `${origin}/login`;
-      const to = toGraphPhone(phoneE164);
-      await sendText(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT");
+  const to = toGraphPhone(phoneE164);
+  await sendTextSafe(to, `You're not logged in. Open ${link} to continue.`, "AI_DISPATCH_TEXT");
     } catch {}
     return;
   }
