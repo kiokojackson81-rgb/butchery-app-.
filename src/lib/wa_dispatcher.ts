@@ -114,13 +114,13 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
 
   // Fallback: if not handled above, send composed as before
   if (!result) {
-    if (composed.interactive) {
+      if (composed.interactive) {
       // If interactive is globally disabled via flag, fall back to a concise text summary
       if (process.env.WA_INTERACTIVE_ENABLED === "true") {
         result = await sendInteractive(composed.interactive, "AI_DISPATCH_INTERACTIVE");
       } else {
         const summary = composed.text || "Please open the Main Menu to proceed.";
-        result = await sendText(to, summary, "AI_DISPATCH_TEXT");
+        result = await sendText(to, summary, "AI_DISPATCH_TEXT", { gpt_sent: true });
       }
     } else if (composed.text) {
         // Composed.text often comes from the AI; mark it so strict transport allows it

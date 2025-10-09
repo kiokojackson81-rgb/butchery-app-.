@@ -124,7 +124,7 @@ async function notifySupAdm(message: string) {
     ]);
     const list = [...sup, ...adm].map((r: any) => r.phoneE164).filter(Boolean) as string[];
     if (!list.length) return;
-  await Promise.allSettled(list.map((to) => sendText(to, message, "AI_DISPATCH_TEXT")));
+  await Promise.allSettled(list.map((to) => sendText(to, message, "AI_DISPATCH_TEXT", { gpt_sent: true })));
   } catch (e) {
     console.warn("notifySupAdm failed", e);
   }
@@ -136,7 +136,8 @@ async function promptLogin(phone: string) {
   await sendText(
     phone,
     `You're not logged in. Tap this link to log in via the website:\n${urlObj.url}\nAfter verifying your code, we'll greet you here.`,
-    "AI_DISPATCH_TEXT"
+    "AI_DISPATCH_TEXT",
+    { gpt_sent: true }
   );
   // Optional: provide a helper button to re-send the link later
   await sendInteractive({
@@ -177,13 +178,13 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
         update: { code: pc.code, role: finalRole, state: "LOGIN" },
         create: { phoneE164, code: pc.code, role: finalRole, state: "LOGIN", cursor: { date: today(), rows: [] } },
       });
-  await sendText(phoneE164.replace(/^\+/, ""), "Your outlet is not set. Ask Supervisor to assign your outlet.", "AI_DISPATCH_TEXT");
+  await sendText(phoneE164.replace(/^[+]/, ""), "Your outlet is not set. Ask Supervisor to assign your outlet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
   }
 
   // Enter MENU and send menu
-  await (prisma as any).waSession.upsert({
+    await (prisma as any).waSession.upsert({
     where: { phoneE164 },
     update: { code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: today(), rows: [] } },
     create: { phoneE164, code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: today(), rows: [] } },
@@ -245,9 +246,9 @@ export async function handleInboundText(phone: string, text: string) {
   // Global commands
   if (/^(HELP)$/i.test(t)) {
     if (!s.code) {
-      await sendText(phone, "You're not logged in. Use the login link we sent above to continue.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "You're not logged in. Use the login link we sent above to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
-      await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "HELP: MENU, TXNS, LOGOUT. During entry: numbers only (e.g., 9.5). Paste M-Pesa SMS to record deposit.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
@@ -259,19 +260,19 @@ export async function handleInboundText(phone: string, text: string) {
         data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
       });
     } catch {}
-    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT");
+    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await promptLogin(phone);
     return;
   }
   const disputeMatch = t.match(/^DISPUTE\b(?:\s+(.*))?$/i);
   if (disputeMatch) {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You need to be linked to an outlet before raising a dispute. Ask your supervisor.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "You need to be linked to an outlet before raising a dispute. Ask your supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     const reason = (disputeMatch[1] || '').trim();
     if (!reason) {
-      await sendText(phone, "Please include a reason after DISPUTE. Example: DISPUTE wrong weight on beef.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "Please include a reason after DISPUTE. Example: DISPUTE wrong weight on beef.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     try {
@@ -284,7 +285,7 @@ export async function handleInboundText(phone: string, text: string) {
       });
     } catch (err) {
       console.error('supply dispute failed', err);
-      await sendText(phone, "We couldn't record the dispute. Please contact your supervisor directly.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "We couldn't record the dispute. Please contact your supervisor directly.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
@@ -299,12 +300,13 @@ export async function handleInboundText(phone: string, text: string) {
       orderBy: { createdAt: "desc" },
     });
     if (!rows.length) {
-      await sendText(phone, "No deposits yet today.", "AI_DISPATCH_TEXT");
+      await sendText(phone, "No deposits yet today.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
       await sendText(
         phone,
         rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"),
-        "AI_DISPATCH_TEXT"
+        "AI_DISPATCH_TEXT",
+        { gpt_sent: true }
       );
     }
     return;
@@ -319,7 +321,7 @@ export async function handleInboundText(phone: string, text: string) {
 
   if (s.state === "LOGIN") {
     // Do not accept codes in chat. Always send a login link to finalize on the website.
-    await sendText(phone, "We no longer accept codes in chat. Use the login link to continue.", "AI_DISPATCH_TEXT");
+    await sendText(phone, "We no longer accept codes in chat. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await promptLogin(phone);
     return;
   }
@@ -343,8 +345,8 @@ export async function handleInboundText(phone: string, text: string) {
     if (isNumericText(t)) {
       const val = Number(t);
       const item = cur.currentItem;
-      if (!item) {
-        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
+        if (!item) {
+        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
       // Guard: day-level lock
@@ -355,10 +357,10 @@ export async function handleInboundText(phone: string, text: string) {
         return;
       }
       // Guard: product already closed today
-      if (s.outlet) {
+        if (s.outlet) {
         const closed = await getClosedKeys(cur.date, s.outlet);
         if (closed.has(item.key)) {
-          await sendText(phone, `${item.name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT");
+          await sendText(phone, `${item.name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
           await saveSession(phone, { state: "CLOSING_PICK", ...cur });
           const prods = await getAssignedProducts(s.code || "");
           const remaining = prods.filter((p) => !closed.has(p.key));
@@ -370,7 +372,7 @@ export async function handleInboundText(phone: string, text: string) {
       await saveSession(phone, { state: "CLOSING_QTY", ...cur });
       await sendInteractive(buttonsWasteOrSkip(phone, item.name), "AI_DISPATCH_INTERACTIVE");
     } else {
-      await sendText(phone, "Numbers only, e.g. 9.5", "AI_DISPATCH_TEXT");
+      await sendText(phone, "Numbers only, e.g. 9.5", "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
@@ -381,12 +383,12 @@ export async function handleInboundText(phone: string, text: string) {
       const val = Number(t);
       const item = cur.currentItem;
       if (!item) {
-        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
+        await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
       // Guard: day-level lock
-      if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
+        if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         await saveSession(phone, { state: "MENU", ...cur });
         await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
@@ -413,7 +415,7 @@ export async function handleInboundText(phone: string, text: string) {
   if (s.state === "EXPENSE_NAME") {
     cur.expenseName = t;
     await saveSession(phone, { state: "EXPENSE_AMOUNT", ...cur });
-    await sendText(phone, `Enter amount for ${t}. Numbers only, e.g. 250`, "AI_DISPATCH_TEXT");
+    await sendText(phone, `Enter amount for ${t}. Numbers only, e.g. 250`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     return;
   }
   if (s.state === "EXPENSE_AMOUNT") {
@@ -422,8 +424,8 @@ export async function handleInboundText(phone: string, text: string) {
       return;
     }
     const amount = Number(t);
-    if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+      if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     // Idempotent create: skip if identical expense exists
@@ -448,7 +450,7 @@ export async function handleInboundText(phone: string, text: string) {
       }
   await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
   await notifySupAdm(`Deposit recorded at ${s.outlet} (${cur.date}): KSh ${parsed.amount} (ref ${parsed.ref}).`);
-      await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`, "AI_DISPATCH_TEXT");
+  await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       await sendInteractive({
         messaging_product: "whatsapp",
         to: phone.replace(/^\+/, ""),
@@ -467,13 +469,13 @@ export async function handleInboundText(phone: string, text: string) {
       } as any, "AI_DISPATCH_INTERACTIVE");
       return;
     }
-    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT");
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT", { gpt_sent: true });
     return;
   }
 
   // Default: compact help
-  if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT");
-  else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT");
+  if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+  else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT", { gpt_sent: true });
 }
 
 export async function handleInteractiveReply(phone: string, payload: any) {

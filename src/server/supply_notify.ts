@@ -50,7 +50,7 @@ async function sendBulk(phones: string[], message: string) {
   if (!phones.length) return;
   if (process.env.WA_AUTOSEND_ENABLED === "true") {
     // old path (temporary)
-  await Promise.allSettled(phones.map((phone) => sendText(phone, message, "AI_DISPATCH_TEXT")));
+  await Promise.allSettled(phones.map((phone) => sendText(phone, message, "AI_DISPATCH_TEXT", { gpt_sent: true })));
   } else {
     await Promise.allSettled(phones.map((phone) => sendOpsMessage(phone, { kind: "free_text", text: message })));
   }
@@ -103,15 +103,15 @@ If disputed by the outlet, Supervisor will contact you.`;
     await enqueueOpsEvent({ id: makeId(), type: 'SUPPLY_SUBMITTED', entityId: null, outletId: outletName, supplierId: opts.supplierCode || null, actorRole: null, dedupeKey: `SUPPLY_SUBMITTED:${outletName}:${date}` });
   } catch (e) {
     // if enqueue fails, fallback to existing direct sends to avoid losing notifications
-    await sendBulk(uniquePhones(attendants), msgAttendant);
-    await sendBulk(uniquePhones(supervisors), msgSupervisor);
+  await sendBulk(uniquePhones(attendants), msgAttendant);
+        await sendBulk(uniquePhones(supervisors), msgSupervisor);
     await sendBulk(uniquePhones(admins), msgAdmin);
     if (supplier?.phoneE164) {
       if (process.env.WA_AUTOSEND_ENABLED === "true") {
-        await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT");
-      } else {
-        await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
-      }
+          await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        } else {
+          await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
+        }
     }
   }
 
@@ -145,7 +145,7 @@ export async function handleSupplyDispute(opts: {
     await enqueueOpsEvent({ id: makeId(), type: 'SUPPLY_DISPUTED', entityId: null, outletId: outletName, supplierId: null, actorRole: 'attendant', dedupeKey: `SUPPLY_DISPUTED:${outletName}:${date}` });
     const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
+      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
       await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
     }
@@ -156,7 +156,7 @@ export async function handleSupplyDispute(opts: {
     await sendBulk(uniquePhones(supervisors), messageSupervisor);
     const ack = `Dispute logged for ${outletName}. Supervisor has been notified.`;
     if (process.env.WA_AUTOSEND_ENABLED === "true") {
-      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT");
+      await sendText(opts.attendantPhone, ack, "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
       await sendOpsMessage(opts.attendantPhone, { kind: "free_text", text: ack });
     }

@@ -168,7 +168,7 @@ export async function notifyAttendantAssignmentChange(codeRaw: string, opts?: {
   await sendOpsMessage(phoneE164, { kind: "assignment_notice", role: "attendant", outlet: afterSnapshot.outlet || "" });
   } catch (e) {
     // Best-effort fallback to direct send if ops dispatcher unavailable
-    try { await sendText(phoneE164, message, "AI_DISPATCH_TEXT"); } catch (er) { console.error('[notifyAssign] fallback send failed', String(er)); }
+  try { await sendText(phoneE164, message, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch (er) { console.error('[notifyAssign] fallback send failed', String(er)); }
   }
 
   return { sent: true };

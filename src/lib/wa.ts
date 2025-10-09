@@ -196,23 +196,13 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
     await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "autosend.disabled.context", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
-  // GPT-only deployments should not send interactive payloads; prefer a short
-  // plaintext hint so users interact via GPT-driven flows instead of buttons.
-  const GPT_ONLY = String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true";
-  if (GPT_ONLY) {
-    const toNorm = normalizeGraphPhone(body?.to || "");
-    const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
-    const waMessageId = `NOOP-${Date.now()}`;
-    try {
-      await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "gpt_only.interactive_disabled", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "gpt-only-noop", body }, waMessageId, status: "NOOP", type: "GPT_ONLY_INTERACTIVE_DISABLED" });
-    } catch {}
-    // attempt to send a plaintext fallback explaining menus are disabled
-    try {
-      return await _sendTextRaw(phoneE164, "Menus are disabled in this GPT-only deployment. Please reply in plain text.", "AI_DISPATCH_TEXT", inReplyTo);
-    } catch {
-      return { ok: true, waMessageId, response: { noop: true } } as const;
-    }
-  }
+  // Respect explicit feature flag for interactive payloads. Interactive
+  // messages are allowed only when WA_INTERACTIVE_ENABLED is set to "true".
+  // Previously we forced interactive NOOPs when WA_GPT_ONLY was enabled; that
+  // prevented deployments from using GPT for inbound routing while still
+  // sending interactive replies. Make the interactive behavior driven by the
+  // `WA_INTERACTIVE_ENABLED` flag so deployers can opt-in to receiving
+  // interactive payloads even in GPT-only deployments.
   // Global kill-switch for interactive payloads (pure GPT text mode)
   if (process.env.WA_INTERACTIVE_ENABLED !== "true") {
     const toNorm = normalizeGraphPhone(body?.to || "");
