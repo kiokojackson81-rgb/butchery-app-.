@@ -425,6 +425,33 @@ export async function POST(req: Request) {
           const sessRole = String((_sess?.role) || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
 
+          // Quick numeric shortcut: when GPT_ONLY is disabled, allow users to
+          // type a single digit (1-7) to select the corresponding tab/menu
+          // option. This mirrors behavior of tapping the UI tabs.
+          if (!GPT_ONLY && type === "text") {
+            try {
+              const typed = String(m.text?.body ?? "").trim();
+              if (/^[1-7]$/.test(typed)) {
+                const id = mapDigitToId(sessRole, typed);
+                const flowId = canonicalToFlowId(sessRole, id);
+                if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+                else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+                else await handleAuthenticatedInteractive(_sess, flowId);
+                const to = toGraphPhone(phoneE164);
+                try {
+                  if (!__sentOnce && !TABS_ENABLED) {
+                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
+                  }
+                } catch {}
+                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                continue;
+              }
+            } catch (e) {
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
+            }
+          }
+
           // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
           if (GPT_ONLY && (type === "text" || type === "interactive")) {
             // Normalize inbound into a text prompt for GPT
@@ -441,6 +468,9 @@ export async function POST(req: Request) {
             // skip the legacy direct-handler path so digits are routed through GPT for consistent
             // OOC generation and reply composition. When GPT_ONLY is disabled, preserve the
             // prior faster direct mapping behavior.
+            // Special-case: when GPT_ONLY is disabled we want typed digits (1-7)
+            // to behave exactly like pressing the numeric tab in the UI. This
+            // mirrors the interactive mapping done later for interactive payloads.
             const digit = String(text || "").trim();
             if (/^[1-7]$/.test(digit)) {
               if (!GPT_ONLY) {
@@ -451,8 +481,7 @@ export async function POST(req: Request) {
                   else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
                   else await handleAuthenticatedInteractive(_sess, flowId);
                   const to = toGraphPhone(phoneE164);
-                  // Do not send a bare 'OK.' ack — follow with role tabs (if enabled).
-                  // If the handler didn't emit any outbound message, send a brief friendly follow-up (only when tabs are disabled).
+                  // If handler didn't emit outbound, send a tiny ack when tabs disabled
                   try {
                     if (!__sentOnce && !TABS_ENABLED) {
                       try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
@@ -461,10 +490,11 @@ export async function POST(req: Request) {
                   try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
                   try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                   continue;
-                } catch {}
+                } catch (e) {
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, digit }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
+                }
               }
-              // When GPT_ONLY is true we let the digit fallthrough to the GPT path below
-              // so the conversation remains GPT-driven and OOC is produced/validated.
+              // Otherwise (GPT_ONLY=true) fall through to GPT path below
             }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
@@ -927,31 +957,42 @@ export async function POST(req: Request) {
             const idRaw = listId || buttonId || "";
             const id = aliasToCanonical(idRaw);
             if (!id) continue;
-            // GPT echo on interactive to record OOC and validate intent (when GPT_ONLY)
+
+            // In GPT-only mode, prefer to route interactive selections through GPT
+            // so all intent resolution, OOC generation and reply composition is centralized.
             if (GPT_ONLY) {
               try {
-                const echo = `user selected ${id}`;
-                const r = await runGptForIncoming(phoneE164, echo);
+                const prompt = `user selected ${id}`;
+                const r = await runGptForIncoming(phoneE164, prompt);
                 const replyText = String(r || "").trim();
-                const ooc = (() => {
-                  try {
-                    const start = replyText.lastIndexOf("<<<OOC>");
-                    const end = replyText.lastIndexOf("</OOC>>>");
-                    if (start >= 0 && end > start) {
-                      const jsonPart = replyText.substring(start + 7, end).trim();
-                      const parsed = JSON.parse(jsonPart);
-                      return parsed;
-                    }
-                  } catch {}
-                  return null;
-                })();
+                const ooc = parseOOCBlock(replyText);
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                const intent = String(ooc?.intent || "").toUpperCase();
-                if (intent && intent !== id) {
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "WARN", type: "OOC_INTENT_MISMATCH" }); } catch {}
+
+                const to = toGraphPhone(phoneE164);
+                const display = stripOOC(replyText);
+                if (display) {
+                  try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT"); } catch {}
                 }
-              } catch {}
+                // If GPT returned buttons via OOC, send them; otherwise use role tabs
+                try {
+                  const btns = Array.isArray(ooc?.buttons) && ooc?.buttons.length ? ooc?.buttons : null;
+                  if (btns) {
+                    try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" }); } catch {}
+                    await sendButtonsFor(to, btns as string[]);
+                  } else {
+                    await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                  }
+                } catch {}
+
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+              } catch (e) {
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.interactive.fail", error: String(e) }, status: "ERROR", type: "GPT_INTERACTIVE_FAIL" }); } catch {}
+                // fallback to legacy behavior if GPT fails
+              }
+              continue;
             }
+
+            // Non-GPT mode: preserve legacy direct handler behavior
             const flowId = canonicalToFlowId(sessRole, id);
             if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
             else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
