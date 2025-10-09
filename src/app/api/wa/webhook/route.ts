@@ -535,9 +535,14 @@ export async function POST(req: Request) {
 
                 // Enforce allow-list for intents and buttons to keep GPT within supported flows
                 const ALLOWED = new Set([
-                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','MENU','MENU_SUMMARY','MENU_SUPPLY','HELP',
-                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES',
-                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_HELP',
+                  // Attendant intents (both legacy ATT_* and canonical ATT_TAB_*)
+                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
+                  'MENU','MENU_SUMMARY','MENU_SUPPLY','HELP',
+                  // Supplier intents
+                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',
+                  // Supervisor intents
+                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_HELP','SV_TAB_REVIEW_QUEUE','SV_TAB_SUMMARIES','SV_TAB_UNLOCK',
+                  // Common
                   'LOGIN','FREE_TEXT'
                 ]);
                 // Normalize and filter buttons to allowed set
