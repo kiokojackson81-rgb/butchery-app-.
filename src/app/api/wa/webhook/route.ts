@@ -192,6 +192,20 @@ export async function POST(req: Request) {
   const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
   const TABS_ENABLED = String(process.env.WA_TABS_ENABLED || "false").toLowerCase() === "true";
 
+  // Diagnostic: surface key runtime flags so we can see why sends may be suppressed
+  try {
+    console.info("[WA] ENV", {
+      DRY,
+      GPT_ONLY,
+      TABS_ENABLED,
+      WA_AUTOSEND_ENABLED: String(process.env.WA_AUTOSEND_ENABLED || "false").toLowerCase() === "true",
+      WA_INTERACTIVE_ENABLED: String(process.env.WA_INTERACTIVE_ENABLED || "false").toLowerCase() === "true",
+      OPENAI_KEY_PRESENT: !!process.env.OPENAI_API_KEY,
+      WHATSAPP_TOKEN_PRESENT: !!process.env.WHATSAPP_TOKEN,
+      WHATSAPP_PHONE_NUMBER_ID_PRESENT: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+    });
+  } catch {}
+
   if (!verifySignature(raw, sig)) {
     if (!DRY) {
       await logOutbound({ direction: "in", payload: { error: "bad signature" }, status: "ERROR" });
@@ -224,10 +238,16 @@ export async function POST(req: Request) {
           let __sentOnce = false;
           const markSent = () => { __sentOnce = true; };
           const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT") => {
-            try { console.info("[WA] SENDING", { type: "text", ctx }); } catch {}
-            const r = await sendText(to, text, ctx, { inReplyTo: wamid });
-            markSent();
-            return r;
+            try { console.info("[WA] SENDING", { type: "text", ctx, toPreview: String(to).slice(-12), textPreview: String(text || "").slice(0, 120) }); } catch {}
+            try {
+              const r = await sendText(to, text, ctx, { inReplyTo: wamid });
+              markSent();
+              try { console.info("[WA] SEND_RESULT", { ok: !!(r as any)?.ok, waMessageId: (r as any)?.waMessageId || null, error: (r as any)?.error || null }); } catch {}
+              return r;
+            } catch (e: any) {
+              try { console.error("[WA] SEND_EXCEPTION", { error: String(e) }); } catch {}
+              throw e;
+            }
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
             try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
@@ -289,6 +309,7 @@ export async function POST(req: Request) {
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
           const auth = await ensureAuthenticated(phoneE164);
+          try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: auth && (auth as any).sess ? { role: (auth as any).sess.role, outlet: (auth as any).sess.outlet } : null }); } catch {}
           try {
             await logOutbound({
               direction: "in",
