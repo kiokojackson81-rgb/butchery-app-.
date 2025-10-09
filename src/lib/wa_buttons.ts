@@ -13,6 +13,26 @@ export function sixTabsButtons() {
   ];
 }
 
+export function roleDefaultButtons(role: "attendant"|"supervisor"|"supplier") {
+  if (role === "supervisor") return [
+    { id: "SV_REVIEW_CLOSINGS", title: "Review Closings" },
+    { id: "SV_REVIEW_DEPOSITS", title: "Review Deposits" },
+    { id: "SV_REVIEW_EXPENSES", title: "Review Expenses" },
+    { id: "SV_APPROVE_UNLOCK", title: "Unlock / Approve" },
+  ];
+  if (role === "supplier") return [
+    { id: "SUPL_DELIVERY", title: "Submit Delivery" },
+    { id: "SUPL_VIEW_OPENING", title: "View Opening" },
+    { id: "SUPL_DISPUTES", title: "Disputes" },
+  ];
+  return [
+    { id: "ATT_CLOSING", title: "Enter Closing" },
+    { id: "ATT_DEPOSIT", title: "Deposit" },
+    { id: "ATT_EXPENSE", title: "Expense" },
+    { id: "MENU_SUMMARY", title: "Summary" },
+  ];
+}
+
 /** Build a unified six-tab list payload for any role */
 export function buildSixTabsPayload(to: string, role: "attendant"|"supervisor"|"supplier", outlet?: string) {
   const date = new Date().toISOString().slice(0,10);
@@ -60,11 +80,14 @@ export function buildSixTabsPayload(to: string, role: "attendant"|"supervisor"|"
   });
 }
 
+export function buildRoleButtonsPayload(to: string, role: "attendant"|"supervisor"|"supplier", outlet?: string) {
+  const rows = roleDefaultButtons(role);
+  const buttons = rows.slice(0, 4).map((r) => ({ type: "reply", reply: { id: r.id, title: r.title } }));
+  return { messaging_product: "whatsapp", to, type: "interactive", interactive: { type: "button", body: { text: `${role === 'attendant' ? (outlet ? `Welcome — ${outlet}` : 'Welcome') : (role==='supervisor' ? 'Supervisor' : 'Supplier') }` }, action: { buttons } } };
+}
+
 export async function sendSixTabs(to: string, role: "attendant"|"supervisor"|"supplier", outlet?: string) {
-  // Allow disabling tabs globally to run in pure GPT-text mode
-  if (process.env.WA_TABS_ENABLED !== "true") {
-    return; // no-op when tabs are disabled
-  }
-  const payload = buildSixTabsPayload(to, role, outlet);
+  // Replace list-based tabs with simple buttons. Interactive sending honors WA_INTERACTIVE_ENABLED.
+  const payload = buildRoleButtonsPayload(to, role, outlet);
   await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
 }

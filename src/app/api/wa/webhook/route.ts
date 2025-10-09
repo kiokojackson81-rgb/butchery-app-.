@@ -16,6 +16,7 @@ import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
 import { parseOOCBlock, stripOOC, buildUnauthenticatedReply, buildAuthenticatedReply } from "@/lib/ooc_parse";
+import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +50,48 @@ export async function GET(req: Request) {
 
 // POST: receive events
 export async function POST(req: Request) {
+  // Helper: human-friendly button titles for known ids
+  const buttonTitleMap: Record<string, string> = {
+    ATT_CLOSING: "Enter Closing",
+    ATT_DEPOSIT: "Deposit",
+    ATT_EXPENSE: "Expense",
+    ATT_TAB_SUMMARY: "Summary",
+    MENU_SUMMARY: "Summary",
+    ATT_TAB_SUPPLY: "Supply",
+    SV_REVIEW_CLOSINGS: "Review Closings",
+    SV_REVIEW_DEPOSITS: "Review Deposits",
+    SV_REVIEW_EXPENSES: "Review Expenses",
+    SV_APPROVE_UNLOCK: "Unlock / Approve",
+    SUPL_DELIVERY: "Submit Delivery",
+    SUPL_VIEW_OPENING: "View Opening",
+    SUPL_DISPUTES: "Disputes",
+    LOGIN: "Login",
+    HELP: "Help",
+  };
+
+  function humanTitle(id: string) {
+    return buttonTitleMap[id] || id.replace(/_/g, " ").slice(0, 40);
+  }
+
+  // Build and send interactive reply with reply buttons (2-4)
+  async function sendButtonsFor(phoneGraph: string, buttons: string[]) {
+    try {
+      if (!Array.isArray(buttons) || !buttons.length) return;
+      const b = buttons.slice(0, 4).map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
+      await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
+    } catch {}
+  }
+
+  // Small fallback clarifier when GPT fails
+  function generateDefaultClarifier(role: string) {
+    if (role === "supervisor") {
+      return { text: "Just checking in… what would you like to do?", buttons: ["SV_REVIEW_CLOSINGS", "SV_REVIEW_DEPOSITS", "SV_REVIEW_EXPENSES"] };
+    }
+    if (role === "supplier") {
+      return { text: "Just checking in… what would you like to do?", buttons: ["SUPL_DELIVERY", "SUPL_VIEW_OPENING", "SUPL_DISPUTES"] };
+    }
+    return { text: "Just checking in… what would you like to do?", buttons: ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"] };
+  }
           // Canonical intent/button ID helpers
           function aliasToCanonical(id: string): string {
             const u = String(id || "").toUpperCase();
@@ -187,8 +230,10 @@ export async function POST(req: Request) {
             return r;
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
-            try { console.info("[WA] SENDING", { type: "interactive.tabs", role }); } catch {}
-            await sendSixTabs(to, role as any, outlet);
+            try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
+            // Use GPT-driven buttons (fallback to role defaults)
+            const def = (role === 'supervisor') ? ["SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES"] : (role === 'supplier') ? ["SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_DISPUTES"] : ["ATT_CLOSING","ATT_DEPOSIT","MENU_SUMMARY"];
+            await sendButtonsFor(to, def);
             markSent();
           };
           const fromGraph = m.from as string | undefined; // 2547...
@@ -418,15 +463,24 @@ export async function POST(req: Request) {
               else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
               else await handleAuthenticatedInteractive(auth.sess, flowId);
             } catch {}
+            // Send the human-facing display text (must be short)
             if (display) {
               try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT"); } catch {}
             } else {
-              // Avoid silence when GPT returns an empty display; send a clarifier if tabs are disabled
-              if (!TABS_ENABLED) {
-                try { await sendTextSafe(to, "I didn't quite get that.", "AI_DISPATCH_TEXT"); } catch {}
-              }
+              // If GPT returned no visible text, generate a clarifier
+              try { const clar = generateDefaultClarifier(sessRole); await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT"); } catch {}
             }
-            try { await sendRoleTabsLocal(); } catch {}
+            // Send buttons from OOC if provided; strip OOC is already applied to display
+            try {
+              const btns = Array.isArray(ooc.buttons) && ooc.buttons.length ? ooc.buttons : null;
+              if (btns) {
+                await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" });
+                await sendButtonsFor(to, btns);
+              } else {
+                // fallback role defaults
+                await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+              }
+            } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
 
@@ -491,10 +545,13 @@ export async function POST(req: Request) {
                         await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: "unauth.ooc" }, status: "LOGIN_PROMPT", type: "WARN" });
                         await promptWebLogin(phoneE164, "unauth");
                         const reply = buildUnauthenticatedReply(url, false);
-                        await sendTextSafe(toGraphPhone(phoneE164), `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT");
+                        // Log OOC server-side, do not send to user
+                        try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT");
                       } else {
                         const reply = buildUnauthenticatedReply(url, true);
-                        await sendTextSafe(toGraphPhone(phoneE164), `${reply.text}\n\n${reply.ooc}`, "AI_DISPATCH_TEXT");
+                        try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                        await sendTextSafe(toGraphPhone(phoneE164), reply.text, "AI_DISPATCH_TEXT");
                       }
                     } catch {}
                     continue;
