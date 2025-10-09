@@ -22,6 +22,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Type guard helper for auth union returned by ensureAuthenticated()
+function authOk(a: any): a is { ok: true; sess: any } {
+  return !!a && !!a.ok && !!a.sess;
+}
+
 function verifySignature(body: string, sig: string | null) {
   try {
     const appSecret = process.env.WHATSAPP_APP_SECRET!;
@@ -309,7 +314,7 @@ export async function POST(req: Request) {
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
           let auth = await ensureAuthenticated(phoneE164);
-          try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: auth && (auth as any).sess ? { role: (auth as any).sess.role, outlet: (auth as any).sess.outlet } : null }); } catch {}
+          try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
           // a session row exists in MENU state with credentials we treat as authenticated.
           if (!auth.ok) {
@@ -331,44 +336,72 @@ export async function POST(req: Request) {
             });
           } catch {}
             if (!auth.ok) {
-            // Universal guard: send login prompt at most once per 24 hours per phone
-            const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
-            const recent = await (prisma as any).waMessageLog.findFirst({
-              where: {
-                status: "LOGIN_PROMPT",
-                createdAt: { gt: windowStart },
-                payload: { path: ["phone"], equals: phoneE164 } as any,
-              },
-              select: { id: true },
-            }).catch(() => null);
-            if (auth.reason === "expired") {
-              try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "LOGIN" } }); } catch {}
-              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
-            }
+            // Pre-send DB re-check + logging: if a concurrent finalize/upsert landed
+            // between earlier checks and now, prefer the live DB truth and avoid
+            // sending a spurious login prompt. Also log the session row for diagnostics.
             try {
-              const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
-              if (!recent) {
-                await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
-                // send template/reopen via centralized gate (debounced)
-                await promptWebLogin(phoneE164, auth.reason);
-                // Send the strict short nudge (OOC is logged server-side only)
-                const reply = buildUnauthenticatedReply(url, false);
-                const to = toGraphPhone(phoneE164);
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
-              } else {
-                // Suppressed duplicate login prompt → still send a lightweight reminder (deduped). OOC logged only.
-                const reply = buildUnauthenticatedReply(url, true);
-                const to = toGraphPhone(phoneE164);
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
+              const preSend = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+              try { console.info('[WA] PRE-SEND LOGIN CHECK', { phone: phoneE164, preSend: preSend ? { state: preSend.state, code: !!preSend.code, cursorStatus: (preSend.cursor||{}).status, lastFinalizeAt: preSend.lastFinalizeAt } : null }); } catch {}
+              // Persist the pre-send snapshot in outbound logs so it appears in Diagnostics
+              try {
+                // Attempt to attach the waMessageLog id for this inbound wamid (if available)
+                let waLogId: string | null = null;
+                try {
+                  if (wamid) {
+                    const existingLog = await (prisma as any).waMessageLog.findFirst({ where: { waMessageId: wamid as any }, select: { id: true } }).catch(() => null);
+                    if (existingLog) waLogId = existingLog.id;
+                  }
+                } catch {}
+                await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, wamid: wamid || null, waMessageLogId: waLogId, preSend: preSend ? { state: preSend.state, hasCode: !!preSend.code, cursorStatus: (preSend.cursor||{}).status, lastFinalizeAt: preSend.lastFinalizeAt } : null } , event: "pre_send_login_check" }, status: "INFO", type: "PRE_SEND_CHECK" });
+              } catch {}
+              if (preSend && preSend.state === 'MENU' && preSend.code) {
+                // Accept the fresh row as authoritative and continue processing as authenticated
+                auth = { ok: true, sess: preSend } as any;
+                try { console.info('[WA] PRE-SEND LOGIN CHECK: session now active, skipping login prompt', { phone: phoneE164 }); } catch {}
               }
-            } catch {}
-            try { await touchWaSession(phoneE164); } catch {}
-            continue;
+            } catch (e) { try { console.warn('[WA] PRE-SEND LOGIN CHECK error', String(e)); } catch {} }
+
+            // Universal guard: send login prompt at most once per 24 hours per phone
+            if (!auth.ok) {
+              const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
+              const recent = await (prisma as any).waMessageLog.findFirst({
+                where: {
+                  status: "LOGIN_PROMPT",
+                  createdAt: { gt: windowStart },
+                  payload: { path: ["phone"], equals: phoneE164 } as any,
+                },
+                select: { id: true },
+              }).catch(() => null);
+              if (auth.reason === "expired") {
+                try { await (prisma as any).waSession.update({ where: { phoneE164 }, data: { state: "LOGIN" } }); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164: phoneE164 }, event: "TTL_EXPIRED" }, status: "TTL_EXPIRED" }); } catch {}
+              }
+              try {
+                const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
+                if (!recent) {
+                  await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
+                  // send template/reopen via centralized gate (debounced)
+                  await promptWebLogin(phoneE164, auth.reason);
+                  // Send the strict short nudge (OOC is logged server-side only)
+                  const reply = buildUnauthenticatedReply(url, false);
+                  const to = toGraphPhone(phoneE164);
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
+                } else {
+                  // Suppressed duplicate login prompt → still send a lightweight reminder (deduped). OOC logged only.
+                  const reply = buildUnauthenticatedReply(url, true);
+                  const to = toGraphPhone(phoneE164);
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT"); } catch {}
+                }
+              } catch {}
+              try { await touchWaSession(phoneE164); } catch {}
+              continue;
+            }
           }
 
-          const sessRole = String(auth.sess?.role || "attendant");
+          const _sess = authOk(auth) ? auth.sess : undefined;
+          const sessRole = String((_sess?.role) || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
 
           // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
@@ -393,9 +426,9 @@ export async function POST(req: Request) {
                 try {
                   const id = mapDigitToId(sessRole, digit);
                   const flowId = canonicalToFlowId(sessRole, id);
-                  if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
-                  else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
-                  else await handleAuthenticatedInteractive(auth.sess, flowId);
+                  if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+                  else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+                  else await handleAuthenticatedInteractive(_sess, flowId);
                   const to = toGraphPhone(phoneE164);
                   // Do not send a bare 'OK.' ack — follow with role tabs (if enabled).
                   // If the handler didn't emit any outbound message, send a brief friendly follow-up (only when tabs are disabled).
@@ -404,7 +437,7 @@ export async function POST(req: Request) {
                       try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT"); } catch {}
                     }
                   } catch {}
-                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
+                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
                   try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                   continue;
                 } catch {}
@@ -449,7 +482,7 @@ export async function POST(req: Request) {
             const sendRoleTabsLocal = async () => {
               if (!TABS_ENABLED) return;
               const to = toGraphPhone(phoneE164);
-              await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+              await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
             };
 
             // (oocRequired already computed above)
@@ -537,9 +570,9 @@ export async function POST(req: Request) {
             const to = toGraphPhone(phoneE164);
             const display = stripOOC(replyText);
             try {
-              if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
-              else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
-              else await handleAuthenticatedInteractive(auth.sess, flowId);
+              if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+              else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+              else await handleAuthenticatedInteractive(_sess, flowId);
             } catch {}
             // Send the human-facing display text (must be short)
             if (display) {
@@ -551,12 +584,12 @@ export async function POST(req: Request) {
             // Send buttons from OOC if provided; strip OOC is already applied to display
             try {
               const btns = Array.isArray(ooc.buttons) && ooc.buttons.length ? ooc.buttons : null;
-              if (btns) {
+                if (btns) {
                 await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" });
                 await sendButtonsFor(to, btns);
               } else {
                 // fallback role defaults
-                await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
               }
             } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
@@ -590,9 +623,9 @@ export async function POST(req: Request) {
                 const words = lower.split(/\s+/).filter(Boolean);
                 const isVague = words.length < 3 || /^(hi|hey|hello|ok|okay|niaje|mambo|sasa|yo)\b/.test(lower);
                 if (isVague) {
-                  const role = String(auth.sess?.role || "attendant");
+                  const role = String(_sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                    await sendRoleTabs(to, (role as any) || "attendant", _sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -610,13 +643,33 @@ export async function POST(req: Request) {
                   await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc } }, status: "INFO", type: "OOC_INFO" });
                 } catch {}
 
-                // If unauthenticated: force login prompt even if GPT says otherwise
+                // If unauthenticated: perform a pre-send DB re-check and force login prompt only if still unauthenticated
                 if (!auth.ok) {
-                  const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
-                  const recent = await (prisma as any).waMessageLog.findFirst({
-                    where: { status: "LOGIN_PROMPT", createdAt: { gt: windowStart }, payload: { path: ["phone"], equals: phoneE164 } as any },
-                    select: { id: true },
-                  }).catch(() => null);
+                  try {
+                    const preSend = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+                    try { console.info('[WA] PRE-SEND LOGIN CHECK (GPT branch)', { phone: phoneE164, preSend: preSend ? { state: preSend.state, code: !!preSend.code, cursorStatus: (preSend.cursor||{}).status, lastFinalizeAt: preSend.lastFinalizeAt } : null }); } catch {}
+                    try {
+                      let waLogId: string | null = null;
+                      try {
+                        if (wamid) {
+                          const existingLog = await (prisma as any).waMessageLog.findFirst({ where: { waMessageId: wamid as any }, select: { id: true } }).catch(() => null);
+                          if (existingLog) waLogId = existingLog.id;
+                        }
+                      } catch {}
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, wamid: wamid || null, waMessageLogId: waLogId, preSend: preSend ? { state: preSend.state, hasCode: !!preSend.code, cursorStatus: (preSend.cursor||{}).status, lastFinalizeAt: preSend.lastFinalizeAt } : null } , event: "pre_send_login_check.gpt" }, status: "INFO", type: "PRE_SEND_CHECK" });
+                    } catch {}
+                    if (preSend && preSend.state === 'MENU' && preSend.code) {
+                      auth = { ok: true, sess: preSend } as any;
+                      try { console.info('[WA] PRE-SEND LOGIN CHECK (GPT branch): session now active, skipping login prompt', { phone: phoneE164 }); } catch {}
+                    }
+                  } catch (e) { try { console.warn('[WA] PRE-SEND LOGIN CHECK (GPT branch) error', String(e)); } catch {} }
+
+                  if (!auth.ok) {
+                    const windowStart = new Date(Date.now() - 24 * 60 * 60_000);
+                    const recent = await (prisma as any).waMessageLog.findFirst({
+                      where: { status: "LOGIN_PROMPT", createdAt: { gt: windowStart }, payload: { path: ["phone"], equals: phoneE164 } as any },
+                      select: { id: true },
+                    }).catch(() => null);
                     try {
                       const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
                       if (!recent) {
@@ -633,14 +686,15 @@ export async function POST(req: Request) {
                       }
                     } catch {}
                     continue;
+                  }
                 }
 
                 // Missing/invalid OOC → treat as FREE_TEXT and fall back to menu
                 const intent = String(ooc?.intent || "").toUpperCase();
                 if (!ooc || !intent) {
-                  const role = String(auth.sess?.role || "attendant");
+                  const role = String(_sess?.role || "attendant");
                   const to = toGraphPhone(phoneE164);
-                  await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                  await sendRoleTabs(to, (role as any) || "attendant", _sess?.outlet || undefined);
                   await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "ooc.invalid", phone: phoneE164, text: r }, status: "SENT", type: "INTENT_UNRESOLVED" });
                   continue;
                 }
@@ -671,7 +725,7 @@ export async function POST(req: Request) {
                         }
                       }
                     } catch {}
-                    await handleAuthenticatedInteractive(auth.sess, mapped);
+                    await handleAuthenticatedInteractive(_sess, mapped);
                     await sendTextSafe(toGraphPhone(phoneE164), r, "AI_DISPATCH_TEXT");
                     await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164, ooc } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                     continue;
@@ -683,9 +737,9 @@ export async function POST(req: Request) {
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164 }, status: "SENT", type: "AI_DISPATCH_TEXT" });
                 continue;
               } else {
-                const role = String(auth.sess?.role || "attendant");
+                const role = String(_sess?.role || "attendant");
                 const to = toGraphPhone(phoneE164);
-                await sendRoleTabs(to, (role as any) || "attendant", auth.sess?.outlet || undefined);
+                await sendRoleTabs(to, (role as any) || "attendant", _sess?.outlet || undefined);
                 await logOutbound({ direction: "out", templateName: null, payload: { in_reply_to: wamid, event: "intent.unresolved", phone: phoneE164, text, reason: "gpt-empty" }, status: "SENT", type: "INTENT_UNRESOLVED" });
                 continue;
               }
@@ -728,9 +782,9 @@ export async function POST(req: Request) {
               } catch {}
             }
             const flowId = canonicalToFlowId(sessRole, id);
-            if (sessRole === "supervisor") await handleSupervisorAction(auth.sess, flowId, phoneE164);
-            else if (sessRole === "supplier") await handleSupplierAction(auth.sess, flowId, phoneE164);
-            else await handleAuthenticatedInteractive(auth.sess, flowId);
+            if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+            else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+            else await handleAuthenticatedInteractive(_sess, flowId);
             // If handler didn't send anything, provide a tiny human follow-up when tabs are disabled
             try {
               if (!__sentOnce && !TABS_ENABLED) {
@@ -738,20 +792,20 @@ export async function POST(req: Request) {
               }
             } catch {}
             // Always follow with tabs menu for role (six tabs)
-            try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", auth.sess?.outlet || undefined); } catch {}
+            try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
           }
 
           if (type === "text" && !GPT_ONLY) {
             const text = (m.text?.body ?? "").trim();
-            if (sessRole === "supervisor") {
-              await handleSupervisorText(auth.sess, text, phoneE164);
-            } else if (sessRole === "supplier") {
-              await handleSupplierText(auth.sess, text, phoneE164);
-            } else {
-              await handleAuthenticatedText(auth.sess, text);
-            }
+    if (sessRole === "supervisor") {
+      await handleSupervisorText(_sess, text, phoneE164);
+    } else if (sessRole === "supplier") {
+      await handleSupplierText(_sess, text, phoneE164);
+    } else {
+      await handleAuthenticatedText(_sess, text);
+    }
             continue;
           }
 
@@ -761,7 +815,7 @@ export async function POST(req: Request) {
             if (!TABS_ENABLED) {
               await sendTextSafe(to, "I can only read text and button replies for now.", "AI_DISPATCH_TEXT");
             }
-            await sendRoleTabs(to, (sessRole as any) || "attendant", auth.sess?.outlet || undefined);
+            await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
             await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "fallback.unknown_type", type }, status: "INFO", type: "FALLBACK_UNKNOWN" });
           } catch {}
           // Final basic guard for this message (best-effort; may be skipped if earlier paths continued)

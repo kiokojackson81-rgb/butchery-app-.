@@ -106,7 +106,7 @@ export default function WALogsPage() {
   })), [logs]);
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 bg-slate-900 text-slate-100 min-h-screen">
       <h1 className="text-lg font-semibold">WhatsApp Logs</h1>
       <div className="flex gap-2 flex-wrap items-end">
         <div className="flex flex-col">
@@ -137,7 +137,7 @@ export default function WALogsPage() {
       </div>
 
       {/* Diagnostics inspector */}
-      <div className="rounded border p-3">
+      <div className="rounded border border-slate-700 p-3 bg-slate-900">
         <h2 className="font-medium mb-2">WhatsApp Diagnostics Inspector</h2>
         <div className="flex gap-2 flex-wrap items-end mb-3">
           <div className="flex flex-col">
@@ -155,18 +155,18 @@ export default function WALogsPage() {
           </div>
           <div className="flex-1 min-w-[280px]">
             <label className="text-xs">Text</label>
-            <input className="border rounded px-2 py-1 w-full" value={diagText} onChange={(e)=>setDiagText(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-full bg-slate-800 text-slate-100 border-slate-700" value={diagText} onChange={(e)=>setDiagText(e.target.value)} />
           </div>
           <div className="flex flex-col">
             <label className="text-xs">Template</label>
-            <input className="border rounded px-2 py-1 w-56" value={diagTemplate} onChange={(e)=>setDiagTemplate(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-56 bg-slate-800 text-slate-100 border-slate-700" value={diagTemplate} onChange={(e)=>setDiagTemplate(e.target.value)} />
           </div>
           <div className="flex flex-col">
             <label className="text-xs">Params (comma)</label>
-            <input className="border rounded px-2 py-1 w-56" value={diagParams} onChange={(e)=>setDiagParams(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-56 bg-slate-800 text-slate-100 border-slate-700" value={diagParams} onChange={(e)=>setDiagParams(e.target.value)} />
           </div>
           <button
-            className="border rounded px-3 py-1"
+            className="border rounded px-3 py-1 bg-slate-700 text-slate-100 border-slate-600"
             disabled={!diagPhone || diagLoading}
             onClick={async ()=>{
               try {
@@ -188,7 +188,7 @@ export default function WALogsPage() {
               }
             }}
           >{diagLoading ? "Running…" : "Run"}</button>
-          <button className="border rounded px-3 py-1" onClick={async ()=>{
+          <button className="border rounded px-3 py-1 bg-slate-700 text-slate-100 border-slate-600" onClick={async ()=>{
             if (!diagPhone) return; setDiagLoading(true); setDiagResult(null);
             try {
               const url = `/api/wa/admin/inspect?phone=${encodeURIComponent(diagPhone)}`;
@@ -199,32 +199,32 @@ export default function WALogsPage() {
             finally { setDiagLoading(false); }
           }}>Fetch</button>
         </div>
-        <div className="text-xs text-gray-600 mb-2">Result:</div>
-        <pre className="bg-gray-50 p-2 rounded text-xs max-h-64 overflow-auto">{diagResult ? JSON.stringify(diagResult, null, 2) : "No result"}</pre>
+        <div className="text-xs text-slate-400 mb-2">Result:</div>
+        <pre className="bg-slate-800 p-2 rounded text-xs text-slate-200 max-h-64 overflow-auto">{diagResult ? JSON.stringify(diagResult, null, 2) : "No result"}</pre>
       </div>
 
       {/* Sender controls */}
-      <div className="rounded border p-3">
+      <div className="rounded border border-slate-700 p-3 bg-slate-900">
         <h2 className="font-medium mb-2">Send WhatsApp Message</h2>
         <div className="flex gap-2 flex-wrap items-end">
           <div className="flex flex-col">
             <label className="text-xs">To (+E164)</label>
-            <input className="border rounded px-2 py-1 w-56" placeholder="+2547…" value={sendTo} onChange={(e)=>setSendTo(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-56 bg-slate-800 text-slate-100 border-slate-700" placeholder="+2547…" value={sendTo} onChange={(e)=>setSendTo(e.target.value)} />
           </div>
           <div className="flex flex-col">
             <label className="text-xs">Template (optional)</label>
-            <input className="border rounded px-2 py-1 w-56" placeholder="template_name" value={sendTemplate} onChange={(e)=>setSendTemplate(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-56 bg-slate-800 text-slate-100 border-slate-700" placeholder="template_name" value={sendTemplate} onChange={(e)=>setSendTemplate(e.target.value)} />
           </div>
           <div className="flex flex-col">
             <label className="text-xs">Params (comma-separated)</label>
-            <input className="border rounded px-2 py-1 w-72" placeholder="p1,p2,p3" value={sendParams} onChange={(e)=>setSendParams(e.target.value)} />
+            <input className="border rounded px-2 py-1 w-72 bg-slate-800 text-slate-100 border-slate-700" placeholder="p1,p2,p3" value={sendParams} onChange={(e)=>setSendParams(e.target.value)} />
           </div>
           <div className="flex-1 flex flex-col min-w-[280px]">
             <label className="text-xs">Or Text</label>
-            <input className="border rounded px-2 py-1" placeholder="Plain text to send" value={sendText} onChange={(e)=>setSendText(e.target.value)} />
+            <input className="border rounded px-2 py-1 bg-slate-800 text-slate-100 border-slate-700" placeholder="Plain text to send" value={sendText} onChange={(e)=>setSendText(e.target.value)} />
           </div>
           <button
-            className="border rounded px-3 py-1"
+            className="border rounded px-3 py-1 bg-slate-700 text-slate-100 border-slate-600"
             disabled={sending || !sendTo || (!sendTemplate && !sendText)}
             onClick={async ()=>{
               try {
@@ -254,11 +254,11 @@ export default function WALogsPage() {
       </div>
 
       {/* Flow configuration controls */}
-      <div className="rounded border p-3">
+      <div className="rounded border border-slate-700 p-3 bg-slate-900">
         <h2 className="font-medium mb-2">Flow Configuration</h2>
         <div className="text-xs text-gray-600 mb-3">Toggle features for Attendant, Supplier, and Supervisor WhatsApp menus. Changes apply to new messages immediately.</div>
         <div className="grid md:grid-cols-3 gap-4">
-          <div className="rounded border p-2">
+          <div className="rounded border border-slate-700 p-2 bg-slate-900">
             <h3 className="font-medium mb-2">Attendant</h3>
             {!attendantCfg ? (
               <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
@@ -281,7 +281,7 @@ export default function WALogsPage() {
               </div>
             )}
           </div>
-          <div className="rounded border p-2">
+          <div className="rounded border border-slate-700 p-2 bg-slate-900">
             <h3 className="font-medium mb-2">Supplier</h3>
             {!supplierCfg ? (
               <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
@@ -300,7 +300,7 @@ export default function WALogsPage() {
               </div>
             )}
           </div>
-          <div className="rounded border p-2">
+          <div className="rounded border border-slate-700 p-2 bg-slate-900">
             <h3 className="font-medium mb-2">Supervisor</h3>
             {!supervisorCfg ? (
               <div className="text-sm">{cfgLoading ? "Loading…" : "No config (using defaults)"}</div>
@@ -321,9 +321,9 @@ export default function WALogsPage() {
           </div>
         </div>
         <div className="mt-3 flex gap-2">
-          <button className="border rounded px-3 py-1" disabled={cfgLoading} onClick={loadConfig}>Reload</button>
+          <button className="border rounded px-3 py-1 bg-slate-700 text-slate-100 border-slate-600" disabled={cfgLoading} onClick={loadConfig}>Reload</button>
           <button
-            className="border rounded px-3 py-1"
+            className="border rounded px-3 py-1 bg-slate-700 text-slate-100 border-slate-600"
             disabled={cfgSaving || !attendantCfg || !supplierCfg || !supervisorCfg}
             onClick={async ()=>{
               try {
