@@ -25,6 +25,14 @@ export default function WALogsPage() {
   const [sendTemplate, setSendTemplate] = useState("");
   const [sendParams, setSendParams] = useState("");
   const [sending, setSending] = useState(false);
+  // Diagnostics inspector state
+  const [diagPhone, setDiagPhone] = useState("");
+  const [diagResult, setDiagResult] = useState<any>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagAction, setDiagAction] = useState<"text"|"template"|"interactive"|"gpt_dryrun">("text");
+  const [diagText, setDiagText] = useState("");
+  const [diagTemplate, setDiagTemplate] = useState("");
+  const [diagParams, setDiagParams] = useState("");
 
   // Flow configuration state
   const [attendantCfg, setAttendantCfg] = useState<any | null>(null);
@@ -126,6 +134,73 @@ export default function WALogsPage() {
           <input className="border rounded px-2 py-1 w-28" type="number" value={sinceMin} onChange={(e)=>setSinceMin(Math.max(1, Math.min(10080, Number(e.target.value)||1440)))} />
         </div>
         <button className="border rounded px-3 py-1" onClick={load} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
+      </div>
+
+      {/* Diagnostics inspector */}
+      <div className="rounded border p-3">
+        <h2 className="font-medium mb-2">WhatsApp Diagnostics Inspector</h2>
+        <div className="flex gap-2 flex-wrap items-end mb-3">
+          <div className="flex flex-col">
+            <label className="text-xs">Phone (+E164)</label>
+            <input className="border rounded px-2 py-1 w-56" placeholder="+2547…" value={diagPhone} onChange={(e)=>setDiagPhone(e.target.value)} />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs">Action</label>
+            <select className="border rounded px-2 py-1" value={diagAction} onChange={(e)=>setDiagAction(e.target.value as any)}>
+              <option value="text">Text (safe)</option>
+              <option value="template">Template (safe)</option>
+              <option value="interactive">Interactive (safe)</option>
+              <option value="gpt_dryrun">GPT dry-run (no send)</option>
+            </select>
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <label className="text-xs">Text</label>
+            <input className="border rounded px-2 py-1 w-full" value={diagText} onChange={(e)=>setDiagText(e.target.value)} />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs">Template</label>
+            <input className="border rounded px-2 py-1 w-56" value={diagTemplate} onChange={(e)=>setDiagTemplate(e.target.value)} />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs">Params (comma)</label>
+            <input className="border rounded px-2 py-1 w-56" value={diagParams} onChange={(e)=>setDiagParams(e.target.value)} />
+          </div>
+          <button
+            className="border rounded px-3 py-1"
+            disabled={!diagPhone || diagLoading}
+            onClick={async ()=>{
+              try {
+                setDiagLoading(true);
+                setDiagResult(null);
+                const to = diagPhone.startsWith("+") ? diagPhone : `+${diagPhone}`;
+                const body: any = { phone: to, action: diagAction };
+                if (diagAction === "text") body.text = diagText || "Test message from admin";
+                if (diagAction === "template") { body.template = diagTemplate; body.params = diagParams ? diagParams.split(",").map(s=>s.trim()) : []; }
+                if (diagAction === "interactive") { body.interactive = { type: "button", body: diagText || "Hello" }; }
+                const res = await fetch(`/api/wa/admin/inspect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                const j = await res.json().catch(()=>null);
+                setDiagResult({ status: res.status, body: j });
+                await load();
+              } catch (e:any) {
+                setDiagResult({ error: String(e?.message || e) });
+              } finally {
+                setDiagLoading(false);
+              }
+            }}
+          >{diagLoading ? "Running…" : "Run"}</button>
+          <button className="border rounded px-3 py-1" onClick={async ()=>{
+            if (!diagPhone) return; setDiagLoading(true); setDiagResult(null);
+            try {
+              const url = `/api/wa/admin/inspect?phone=${encodeURIComponent(diagPhone)}`;
+              const r = await fetch(url, { cache: "no-store" });
+              const j = await r.json().catch(()=>null);
+              setDiagResult({ status: r.status, body: j });
+            } catch (e:any) { setDiagResult({ error: String(e?.message || e) }); }
+            finally { setDiagLoading(false); }
+          }}>Fetch</button>
+        </div>
+        <div className="text-xs text-gray-600 mb-2">Result:</div>
+        <pre className="bg-gray-50 p-2 rounded text-xs max-h-64 overflow-auto">{diagResult ? JSON.stringify(diagResult, null, 2) : "No result"}</pre>
       </div>
 
       {/* Sender controls */}
