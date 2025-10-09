@@ -74,9 +74,13 @@ export async function sendTemplate(opts: {
   }
   const toNorm = normalizeGraphPhone(opts.to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
+  // If running in GPT-only mode, mark these as gpt_sent so strict transport
+  // filters (WA_STRICT_GPT_ONLY) won't block them. Also propagate any caller
+  // meta through the logged payload.
+  const runningGptOnly = String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true";
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}) }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}), ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: { via: "dry-run", ...opts } }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -115,7 +119,7 @@ export async function sendTemplate(opts: {
   }
 
   const waMessageId = json?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}) }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
+  await logOutbound({ direction: "out", templateName: opts.template, payload: { phone: phoneE164, meta: { phoneE164, _type: opts.contextType || "TEMPLATE_OUTBOUND", ...(opts.meta || {}), ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: body, response: json }, waMessageId, status: "SENT", type: opts.contextType || "TEMPLATE_OUTBOUND" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -153,9 +157,10 @@ async function _sendTextRaw(to: string, text: string, contextType?: string, inRe
   }
   const toNorm = normalizeGraphPhone(to);
   const phoneE164 = toNorm ? `+${toNorm}` : String(to || "");
+  const runningGptOnly = String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true";
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT", ...(runningGptOnly ? { gpt_sent: true } : {}) }, via: "dry-run", text }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -176,11 +181,11 @@ async function _sendTextRaw(to: string, text: string, contextType?: string, inRe
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_TEXT" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT", ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: body, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_TEXT" });
     return { ok: false, error: `WA text failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT" }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_TEXT", ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: body, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_TEXT" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
@@ -213,10 +218,11 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
   }
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
+  const runningGptOnly = String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true";
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     // Ensure phoneE164 is present under meta for test filters
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE", ...(runningGptOnly ? { gpt_sent: true } : {}) }, via: "dry-run", body }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
@@ -231,11 +237,11 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE", ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: normalized, response: json, status: res.status }, status: "ERROR", type: contextType || "AI_DISPATCH_INTERACTIVE" });
     return { ok: false, error: `WA interactive failed: ${res.status}` } as const;
   }
   const waMessageId = (json as any)?.messages?.[0]?.id as string | undefined;
-  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE" }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
+  await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, _type: contextType || "AI_DISPATCH_INTERACTIVE", ...(runningGptOnly ? { gpt_sent: true } : {}) }, request: normalized, response: json }, waMessageId, status: "SENT", type: contextType || "AI_DISPATCH_INTERACTIVE" });
   return { ok: true, waMessageId, response: json } as const;
 }
 
