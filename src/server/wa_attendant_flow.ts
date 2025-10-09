@@ -55,6 +55,23 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
     return { ok: true, sess };
   }
   if (!hasCreds || isLoginish) return { ok: false, reason: "logged-out" };
+  // If we're about to return unauthenticated but the record shows credentials
+  // there can be a small race between finalize/upsert and the incoming webhook.
+  // Do a single short re-read with a tiny backoff to reduce false negatives.
+  try {
+    const shouldRetry = hasCreds && !isCursorActive;
+    if (shouldRetry) {
+      // Wait a short moment for any concurrent finalize/upsert to land.
+      await new Promise((r) => setTimeout(r, 200));
+      const fresh = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+      if (fresh) {
+        sess = fresh;
+        const freshHasCreds = !!fresh.code;
+        const freshCursorActive = Boolean((fresh?.cursor as any)?.status === "ACTIVE");
+        if (freshHasCreds && freshCursorActive) return { ok: true, sess: fresh };
+      }
+    }
+  } catch {}
 
   const updatedAt = new Date(sess.updatedAt).getTime();
   const maxIdle = TTL_MIN * 60 * 1000;
