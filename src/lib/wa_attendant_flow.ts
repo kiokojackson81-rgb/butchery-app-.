@@ -426,9 +426,13 @@ export async function handleInboundText(phone: string, text: string) {
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return;
     }
-    await (prisma as any).attendantExpense.create({ data: { date: cur.date, outletName: s.outlet, name: cur.expenseName || "Expense", amount } });
-    // Notify supervisors/admins
-    await notifySupAdm(`Expense recorded at ${s.outlet} (${cur.date}): ${cur.expenseName || "Expense"}  KSh ${amount}`);
+    // Idempotent create: skip if identical expense exists
+    const exists = await (prisma as any).attendantExpense.findFirst({ where: { date: cur.date, outletName: s.outlet, name: cur.expenseName || "Expense", amount } });
+    if (!exists) {
+      await (prisma as any).attendantExpense.create({ data: { date: cur.date, outletName: s.outlet, name: cur.expenseName || "Expense", amount } });
+      // Notify supervisors/admins
+      await notifySupAdm(`Expense recorded at ${s.outlet} (${cur.date}): ${cur.expenseName || "Expense"}  KSh ${amount}`);
+    }
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     await sendInteractive(expenseFollowupButtons(phone), "AI_DISPATCH_INTERACTIVE");
     return;

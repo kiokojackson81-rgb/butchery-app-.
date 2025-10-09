@@ -12,6 +12,11 @@ import { sendText, sendInteractive } from "@/lib/wa";
 // Legacy role menus are disabled under GPT-only; use six-tabs helper instead
 import { sendSixTabs } from "@/lib/wa_buttons";
 import { runGptForIncoming } from "@/lib/gpt_router";
+import { saveClosings } from "@/server/closings";
+import { addDeposit, parseMpesaText } from "@/server/deposits";
+import { reviewItem } from "@/server/supervisor/review.service";
+import { notifyAttendants as notifyAttendantsSupervisor, notifySupplier as notifySupplierSupervisor } from "@/server/supervisor/supervisor.notifications";
+import { enqueueOpsEvent } from "@/lib/opsEvents";
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
@@ -67,9 +72,12 @@ export async function POST(req: Request) {
     SV_REVIEW_DEPOSITS: "Review Deposits",
     SV_REVIEW_EXPENSES: "Review Expenses",
     SV_APPROVE_UNLOCK: "Unlock / Approve",
+  SV_PRICEBOOK: "Pricebook",
+  SV_SUMMARY: "Portfolio Summary",
     SUPL_DELIVERY: "Submit Delivery",
     SUPL_VIEW_OPENING: "View Opening",
     SUPL_DISPUTES: "Disputes",
+  SUPL_HISTORY: "History",
     LOGIN: "Login",
     HELP: "Help",
   };
@@ -82,7 +90,11 @@ export async function POST(req: Request) {
   async function sendButtonsFor(phoneGraph: string, buttons: string[]) {
     try {
       if (!Array.isArray(buttons) || !buttons.length) return;
-      const b = buttons.slice(0, 4).map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
+      // Ensure Back to Menu is present and cap buttons to 4 (Back to Menu included)
+      const normalized = [...new Set(buttons.map((b) => String(b || "").toUpperCase()))];
+      if (!normalized.includes("BACK_TO_MENU")) normalized.push("BACK_TO_MENU");
+      const take = normalized.slice(0, 4);
+      const b = take.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
       await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
     } catch {}
   }
@@ -95,7 +107,7 @@ export async function POST(req: Request) {
     if (role === "supplier") {
       return { text: "Just checking in… what would you like to do?", buttons: ["SUPL_DELIVERY", "SUPL_VIEW_OPENING", "SUPL_DISPUTES"] };
     }
-    return { text: "Just checking in… what would you like to do?", buttons: ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"] };
+    return { text: "Just checking in… what would you like to do?", buttons: ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY", "BACK_TO_MENU"] };
   }
           // Canonical intent/button ID helpers
           function aliasToCanonical(id: string): string {
@@ -242,10 +254,15 @@ export async function POST(req: Request) {
           // Per-message instrumentation and no-silence helpers
           let __sentOnce = false;
           const markSent = () => { __sentOnce = true; };
+          const truncateDisplay = (s: string) => {
+            try { return String(s || "").slice(0, 400); } catch { return String(s || "").slice(0, 400); }
+          };
+
           const sendTextSafe = async (to: string, text: string, ctx: string = "AI_DISPATCH_TEXT") => {
             try { console.info("[WA] SENDING", { type: "text", ctx, toPreview: String(to).slice(-12), textPreview: String(text || "").slice(0, 120) }); } catch {}
             try {
-              const r = await sendText(to, text, ctx, { inReplyTo: wamid });
+              const truncated = truncateDisplay(text);
+              const r = await sendText(to, truncated, ctx, { inReplyTo: wamid });
               markSent();
               try { console.info("[WA] SEND_RESULT", { ok: !!(r as any)?.ok, waMessageId: (r as any)?.waMessageId || null, error: (r as any)?.error || null }); } catch {}
               return r;
@@ -257,7 +274,11 @@ export async function POST(req: Request) {
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
             try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
             // Use GPT-driven buttons (fallback to role defaults)
-            const def = (role === 'supervisor') ? ["SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES"] : (role === 'supplier') ? ["SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_DISPUTES"] : ["ATT_CLOSING","ATT_DEPOSIT","MENU_SUMMARY"];
+            const def = (role === 'supervisor')
+              ? ["SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES","SV_APPROVE_UNLOCK","SV_PRICEBOOK","SV_SUMMARY"]
+              : (role === 'supplier')
+              ? ["SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_DISPUTES","SUPL_HISTORY","HELP","MENU"]
+              : ["ATT_CLOSING","ATT_DEPOSIT","MENU_SUMMARY"];
             await sendButtonsFor(to, def);
             markSent();
           };
@@ -450,7 +471,9 @@ export async function POST(req: Request) {
 
             // Call GPT
             try { console.info("[WA] BEFORE GPT", { textLen: text?.length }); } catch {}
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "BEFORE_GPT", text }, status: "INFO", type: "BEFORE_GPT" }); } catch {}
             const r = await runGptForIncoming(phoneE164, text);
+            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "AFTER_GPT", got: !!r }, status: "INFO", type: "AFTER_GPT" }); } catch {}
             let replyText = String(r || "").trim();
 
             // Try OOC parse
@@ -465,7 +488,9 @@ export async function POST(req: Request) {
             if ((!ooc || !ooc.intent) && oocRequired) {
               try {
                 const retryPrompt = `${text}\n\nPlease reply with an OOC JSON block only (no extra text). Example:\n<<<OOC>${JSON.stringify({ intent: "MENU", buttons: ["ATT_CLOSING"] })}</OOC>>>`;
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "BEFORE_GPT_RETRY", text: retryPrompt }, status: "INFO", type: "BEFORE_GPT" }); } catch {}
                 const retry = await runGptForIncoming(phoneE164, retryPrompt);
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "AFTER_GPT_RETRY", got: !!retry }, status: "INFO", type: "AFTER_GPT" }); } catch {}
                 const retryText = String(retry || "").trim();
                 const retryOoc = parseOOCBlock(retryText);
                 if (retryOoc && retryOoc.intent) {
@@ -534,14 +559,17 @@ export async function POST(req: Request) {
                 ooc = { ...ooc, intent: intentCanon, buttons: buttonsCanon };
 
                 // Enforce allow-list for intents and buttons to keep GPT within supported flows
-                const ALLOWED = new Set([
+                const ALLOWED = new Set<string>([
+                  // Supervisor / Supplier canonical tokens
+                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_PRICEBOOK','SV_SUMMARY','SV_HELP',
+                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUPL_HISTORY',
                   // Attendant intents (both legacy ATT_* and canonical ATT_TAB_*)
                   'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
                   'MENU','MENU_SUMMARY','MENU_SUPPLY','HELP',
-                  // Supplier intents
-                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',
-                  // Supervisor intents
-                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_HELP','SV_TAB_REVIEW_QUEUE','SV_TAB_SUMMARIES','SV_TAB_UNLOCK',
+                  // Supplier intents (additional canonical forms)
+                  'SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',
+                  // Supervisor canonical/tab forms
+                  'SV_TAB_REVIEW_QUEUE','SV_TAB_SUMMARIES','SV_TAB_UNLOCK',
                   // Common
                   'LOGIN','FREE_TEXT'
                 ]);
@@ -575,9 +603,137 @@ export async function POST(req: Request) {
             const to = toGraphPhone(phoneE164);
             const display = stripOOC(replyText);
             try {
-              if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
-              else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
-              else await handleAuthenticatedInteractive(_sess, flowId);
+              // Supervisor: allow server-side review actions via OOC (approve/reject)
+              if (sessRole === "supervisor") {
+                const args = (ooc as any).args || {};
+                if (flowId.startsWith("SV") && args && args.id && typeof args.approve === "boolean") {
+                  try {
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SV_REVIEW_CALL", args }, status: "INFO", type: "SV_REVIEW_CALL" });
+                    // call review service (idempotent within)
+                    const svcRes = await reviewItem({ id: args.id, action: args.approve ? "approve" : "reject", note: args.note || undefined }, _sess?.code || "SUPERVISOR");
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SV_REVIEW_OK", svcRes }, status: "OK", type: "SV_REVIEW_OK" });
+                    try { await sendTextSafe(to, args.approve ? "Approved ✅" : "Rejected ❌", "AI_DISPATCH_TEXT"); } catch {}
+                    try { await sendRoleTabs(to, "supervisor", undefined); } catch {}
+                    continue;
+                  } catch (e) {
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SV_REVIEW_FAIL", error: String(e) }, status: "ERROR", type: "SV_REVIEW_FAIL" });
+                  }
+                }
+                // fallback to interactive handler when not handled server-side
+                await handleSupervisorAction(_sess, flowId, phoneE164);
+              } else if (sessRole === "supplier") {
+                // Supplier: allow supply.create via OOC args
+                const args = (ooc as any).args || {};
+                if (flowId.startsWith("SUP") && args && Array.isArray(args.items) && args.outletId) {
+                  try {
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SUP_CREATE_CALL", args }, status: "INFO", type: "SUP_CREATE_CALL" });
+                    // Call existing supply.create API via server internals (prisma)
+                    const id = String(Date.now()) + Math.random().toString(36).slice(2, 8);
+                    const sup = await (prisma as any).supply.create({ data: { id, outlet_id: args.outletId, supplier_id: _sess?.code || null, eta: args.eta || null, ref: args.ref || null, status: 'submitted', created_by_role: 'supplier', created_by_person: _sess?.code || null } });
+                    for (const it of args.items) {
+                      await (prisma as any).supplyItem.create({ data: { id: String(Date.now()) + Math.random().toString(36).slice(2,8), supply_id: sup.id, product_id: it.productKey || it.productId, qty: Number(it.qty || 0), unit: it.unit || 'kg', unit_price: it.unitPrice || null } }).catch(()=>{});
+                    }
+                    await enqueueOpsEvent({ id: String(Date.now()) + Math.random().toString(36).slice(2,8), type: 'SUPPLY_SUBMITTED', entityId: sup.id, outletId: args.outletId, supplierId: _sess?.code || null, actorRole: 'supplier', dedupeKey: `SUPPLY_SUBMITTED:${sup.id}:1` }).catch(()=>{});
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SUP_CREATE_OK", supplyId: sup.id }, status: "OK", type: "SUP_CREATE_OK" });
+                    // notify attendants and supervisors
+                    try { await notifyAttendantsSupervisor(args.outletId, `Delivery dispatched — items: ${args.items.map((i:any)=>i.productKey).join(', ')}`); } catch {}
+                    try { await notifySupplierSupervisor(args.outletId, `Delivery created for ${args.outletId}`); } catch {}
+                    try { await sendTextSafe(to, "Delivery created.", "AI_DISPATCH_TEXT"); } catch {}
+                    try { await sendRoleTabs(to, "supplier", undefined); } catch {}
+                    continue;
+                  } catch (e) {
+                    await logOutbound({ direction: "in", payload: { phone: phoneE164, event: "SUP_CREATE_FAIL", error: String(e) }, status: "ERROR", type: "SUP_CREATE_FAIL" });
+                  }
+                }
+                // fallback
+                await handleSupplierAction(_sess, flowId, phoneE164);
+              } else {
+                // Attendant: attempt direct server-side actions when GPT provided structured args
+                let handledByServer = false;
+                const args = (ooc && (ooc as any).args) || {};
+                try {
+                  // Closing submission: expect rows: [{ productKey, closingQty, wasteQty }]
+                  if (/CLOSING|STOCK/.test(flowId) && Array.isArray(args.rows) && args.rows.length) {
+                    try {
+                      const rows = (args.rows || []).map((r: any) => ({ productKey: r.productKey || r.itemKey || r.key, closingQty: Number(r.closingQty || r.closing || 0) || 0, wasteQty: Number(r.wasteQty || r.waste || 0) || 0 }));
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_CALL", kind: "closing", rows }, status: "INFO", type: "ATTENDANT_CREATE_CALL" });
+                      await saveClosings({ date: (args.date || (( _sess && (_sess.cursor||{}).date) || new Date().toISOString().slice(0,10) )), outletName: _sess?.outlet || (args.outlet || undefined), rows });
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_OK", kind: "closing", rows }, status: "OK", type: "ATTENDANT_CREATE_OK" });
+                      handledByServer = true;
+                    } catch (e) {
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_FAIL", kind: "closing", error: String(e) }, status: "ERROR", type: "ATTENDANT_CREATE_FAIL" });
+                    }
+                  }
+
+                  // Deposit: handle mpesaText or explicit amount
+                  if (!handledByServer && /DEPOSIT/.test(flowId) && (args.mpesaText || args.amount)) {
+                    try {
+                      let parsed = null as any;
+                      if (args.mpesaText) parsed = parseMpesaText(String(args.mpesaText || ""));
+                      if (!parsed && args.amount) parsed = { amount: Number(args.amount), ref: args.ref || args.note || null };
+                      if (parsed) {
+                        const date = args.date || ((_sess && (_sess.cursor||{}).date) || new Date().toISOString().slice(0,10));
+                        const outletName = _sess?.outlet || args.outlet || null;
+                        await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_CALL", kind: "deposit", parsed }, status: "INFO", type: "ATTENDANT_CREATE_CALL" });
+                        await addDeposit({ date, outletName: outletName || args.outlet, amount: parsed.amount, note: parsed.ref || null, code: _sess?.code || undefined });
+                        await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_OK", kind: "deposit", parsed }, status: "OK", type: "ATTENDANT_CREATE_OK" });
+                        handledByServer = true;
+                      }
+                    } catch (e) {
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_FAIL", kind: "deposit", error: String(e) }, status: "ERROR", type: "ATTENDANT_CREATE_FAIL" });
+                    }
+                  }
+
+                  // Expense: expect items: [{ name, amount }]
+                  if (!handledByServer && /EXPENSE/.test(flowId) && (Array.isArray(args.items) || (args.name && args.amount))) {
+                    try {
+                      const items = Array.isArray(args.items) ? args.items : [{ name: args.name, amount: args.amount }];
+                      const date = args.date || ((_sess && (_sess.cursor||{}).date) || new Date().toISOString().slice(0,10));
+                      const outletName = _sess?.outlet || args.outlet || null;
+                      const created: any[] = [];
+                      for (const it of items) {
+                        const name = String(it.name || "").trim();
+                        const amount = Number(it.amount || 0);
+                        if (!name || !Number.isFinite(amount) || amount <= 0) continue;
+                        const exists = await (prisma as any).attendantExpense.findFirst({ where: { date, outletName, name, amount } });
+                        if (!exists) {
+                          const row = await (prisma as any).attendantExpense.create({ data: { date, outletName, name, amount } });
+                          created.push(row);
+                        }
+                      }
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_OK", kind: "expense", created }, status: "OK", type: "ATTENDANT_CREATE_OK" });
+                      handledByServer = true;
+                    } catch (e) {
+                      await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_FAIL", kind: "expense", error: String(e) }, status: "ERROR", type: "ATTENDANT_CREATE_FAIL" });
+                    }
+                  }
+                } catch (e) {
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_EXCEPTION", error: String(e) }, status: "ERROR", type: "ATTENDANT_CREATE_FAIL" }); } catch {}
+                }
+
+                if (!handledByServer) {
+                  await handleAuthenticatedInteractive(_sess, flowId);
+                } else {
+                  // If server handled the create, send a short confirmation and role tabs
+                  try {
+                    // Friendly, short confirmations per kind
+                    if (/CLOSING|STOCK/.test(flowId)) {
+                      await sendTextSafe(to, "Closings saved. Thanks!", "AI_DISPATCH_TEXT");
+                    } else if (/DEPOSIT/.test(flowId)) {
+                      // try to include amount when available
+                      const amt = (args && (args.mpesaText && parseMpesaText(String(args.mpesaText || ""))?.amount)) || (args && args.amount) || null;
+                      const txt = amt ? `Deposit recorded: Ksh ${amt}.` : "Deposit recorded.";
+                      await sendTextSafe(to, txt, "AI_DISPATCH_TEXT");
+                    } else if (/EXPENSE/.test(flowId)) {
+                      await sendTextSafe(to, "Expense recorded.", "AI_DISPATCH_TEXT");
+                    } else {
+                      await sendTextSafe(to, "Saved.", "AI_DISPATCH_TEXT");
+                    }
+                  } catch {}
+                  try { await sendRoleTabs(to, "attendant", _sess?.outlet || undefined); } catch {}
+                  continue;
+                }
+              }
             } catch {}
             // Send the human-facing display text (must be short)
             if (display) {
@@ -598,6 +754,16 @@ export async function POST(req: Request) {
               }
             } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+            // Silence guard: if no outbound was produced by handlers or sends, ensure we send a clarifier and log it
+            try {
+              if (!__sentOnce) {
+                try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, event: "SILENCE_GUARD" }, status: "WARN", type: "SILENCE_GUARD" }); } catch {}
+                const clar = generateDefaultClarifier(sessRole);
+                const to = toGraphPhone(phoneE164);
+                await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT");
+                await sendButtonsFor(to, clar.buttons);
+              }
+            } catch (e) { try { console.warn('[WA] SILENCE_GUARD error', String(e)); } catch {} }
             continue;
 
             // FREE_TEXT or other → send clarifier with full role tabs

@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { sendTextSafe } from "@/lib/wa";
 import { getSession } from "@/lib/session";
 import { DepositStatus } from "@prisma/client";
 import { getPeriodState } from "@/server/trading_period";
@@ -49,12 +50,37 @@ export async function POST(req: Request) {
     const state = await getPeriodState(outletName, date);
     if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
+    // Perform idempotent per-entry creates: skip entries that already exist with same date/outlet/code/amount/note
     await withRetry(() => prisma.$transaction(async (tx) => {
-      await (tx as any).attendantDeposit.deleteMany({ where: { date, outletName } });
-      if (data.length) await (tx as any).attendantDeposit.createMany({ data });
+      for (const d of data) {
+        const exists = await (tx as any).attendantDeposit.findFirst({ where: { date: d.date, outletName: d.outletName, code: d.code, amount: d.amount, note: d.note } });
+        if (!exists) {
+          await (tx as any).attendantDeposit.create({ data: d });
+        }
+      }
     }, { timeout: 15000, maxWait: 10000 }));
 
-    return NextResponse.json({ ok: true });
+    // Read back saved rows and totals
+    const savedRows: any[] = await withRetry(() => (prisma as any).attendantDeposit.findMany({ where: { date, outletName } }));
+    const total = savedRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+    // Try to notify the submitting attendant(s) if we can resolve their phone(s)
+    try {
+      const maps: Array<{ code: string; phoneE164: string | null }> = await withRetry(() => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }));
+      const codes = maps.map((m) => m.code).filter(Boolean) as string[];
+      const attendants: Array<{ loginCode: string | null; name: string | null }> = codes.length
+        ? await withRetry(() => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }))
+        : [];
+      const nameByCode = new Map<string, string>();
+      for (const a of attendants) {
+        if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
+      }
+      await Promise.allSettled(
+        maps.map((m) => sendTextSafe(m.phoneE164 || "", `Deposits submitted for ${outletName}. Total: Ksh ${total}.`, "AI_DISPATCH_TEXT"))
+      );
+    } catch {}
+
+  return NextResponse.json({ ok: true, total });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }

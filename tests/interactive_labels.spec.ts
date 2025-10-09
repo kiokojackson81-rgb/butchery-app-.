@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Ensure GPT-only guard is off for this unit test
+process.env.WA_GPT_ONLY = "false";
+
 vi.mock('@/lib/wa', () => ({ sendInteractive: vi.fn(), sendText: vi.fn() }));
 vi.mock('@/lib/wa_config', () => ({ getAttendantConfig: async () => ({ enableWaste: true, enableExpense: true, enableDeposit: true, enableTxns: true, enableSupplyView: true, enableSummary: true, enableSubmitAndLock: false }) }));
+// Mock trading period to avoid DB access during tests
+vi.mock('@/server/trading_period', () => ({ getPeriodState: async (_outlet: string, _date: string) => 'OPEN' }));
 
 import { sendAttendantMenu } from '@/lib/wa_menus';
 import { sendInteractive } from '@/lib/wa';

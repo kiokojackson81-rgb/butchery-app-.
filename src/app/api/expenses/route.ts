@@ -38,7 +38,6 @@ export async function POST(req: Request) {
     if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
     await withRetry(() => prisma.$transaction(async (tx) => {
-      await tx.attendantExpense.deleteMany({ where: { date, outletName } });
       const data = (items || [])
         .map((i) => {
           const name = (i?.name ?? "").trim();
@@ -47,7 +46,12 @@ export async function POST(req: Request) {
           return { date, outletName, name, amount };
         })
         .filter((d) => d.name && d.amount > 0);
-      if (data.length) await tx.attendantExpense.createMany({ data });
+      for (const d of data) {
+        const exists = await tx.attendantExpense.findFirst({ where: { date: d.date, outletName: d.outletName, name: d.name, amount: d.amount } });
+        if (!exists) {
+          await tx.attendantExpense.create({ data: d });
+        }
+      }
     }, { timeout: 15000, maxWait: 10000 }));
 
     return NextResponse.json({ ok: true });

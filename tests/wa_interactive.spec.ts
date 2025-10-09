@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Provide a lightweight prisma mock to avoid DB connections during unit tests
+const prismaMock = new Proxy({}, { get: (_, prop) => ({ findFirst: async () => null, findUnique: async () => null, findMany: async () => [], update: async () => null, upsert: async () => null, create: async () => null, deleteMany: async () => null, $transaction: async (fn: any) => typeof fn === 'function' ? await fn(prismaMock) : null }) });
+vi.doMock('@/lib/prisma', () => ({ prisma: prismaMock }));
+
 import * as route from '@/app/api/wa/webhook/route';
 import * as wa from '@/lib/wa';
 import * as attendant from '@/server/wa_attendant_flow';
@@ -38,6 +42,8 @@ describe('wa webhook interactive routing', () => {
 
   it('routes interactive button id to attendant handler', async () => {
     const spy = vi.spyOn(attendant, 'handleAuthenticatedInteractive').mockResolvedValue(undefined as any);
+    // Ensure webhook treats this phone as authenticated attendant
+    vi.spyOn(attendant, 'ensureAuthenticated').mockResolvedValue({ ok: true, sess: { role: 'attendant', code: 'A1', outlet: 'TestOutlet', phoneE164: '+254700000001' } } as any);
 
     const body = makeMessage('254700000001', {
       id: 'wamid.1',
@@ -55,6 +61,7 @@ describe('wa webhook interactive routing', () => {
 
   it('routes numeric text to attendant flow via digit mapping', async () => {
     const spy = vi.spyOn(attendant, 'handleAuthenticatedInteractive').mockResolvedValue(undefined as any);
+    vi.spyOn(attendant, 'ensureAuthenticated').mockResolvedValue({ ok: true, sess: { role: 'attendant', code: 'A2', outlet: 'TestOutlet', phoneE164: '+254700000002' } } as any);
 
     const body = makeMessage('254700000002', {
       id: 'wamid.2',
@@ -71,6 +78,8 @@ describe('wa webhook interactive routing', () => {
 
   it('routes supervisor interactive to supervisor handler', async () => {
     const spy = vi.spyOn(supervisor, 'handleSupervisorAction').mockResolvedValue(undefined as any);
+    // For supervisor test, ensure auth returns supervisor role
+    vi.spyOn(attendant, 'ensureAuthenticated').mockResolvedValue({ ok: true, sess: { role: 'supervisor', code: 'S1', outlet: null, phoneE164: '+254700000010' } } as any);
 
     const body = makeMessage('254700000010', {
       id: 'wamid.10',
@@ -87,6 +96,7 @@ describe('wa webhook interactive routing', () => {
 
   it('routes supplier interactive to supplier handler', async () => {
     const spy = vi.spyOn(supplier, 'handleSupplierAction').mockResolvedValue(undefined as any);
+    vi.spyOn(attendant, 'ensureAuthenticated').mockResolvedValue({ ok: true, sess: { role: 'supplier', code: 'SUP1', outlet: null, phoneE164: '+254700000020' } } as any);
 
     const body = makeMessage('254700000020', {
       id: 'wamid.20',

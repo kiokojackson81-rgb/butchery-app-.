@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { sendTextSafe } from "@/lib/wa";
 import { getSession } from "@/lib/session";
 import { getPeriodState } from "@/server/trading_period";
 
@@ -46,12 +47,25 @@ export async function POST(req: Request) {
     const state = await getPeriodState(outletName, date);
     if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
+    // Idempotent per-entry create: skip duplicates matching date/outlet/name/amount
     await withRetry(() => prisma.$transaction(async (tx) => {
-      await (tx as any).attendantExpense.deleteMany({ where: { date, outletName } });
-      if (data.length) await (tx as any).attendantExpense.createMany({ data });
+      for (const d of data) {
+        const exists = await (tx as any).attendantExpense.findFirst({ where: { date: d.date, outletName: d.outletName, name: d.name, amount: d.amount } });
+        if (!exists) {
+          await (tx as any).attendantExpense.create({ data: d });
+        }
+      }
     }, { timeout: 15000, maxWait: 10000 }));
 
-    return NextResponse.json({ ok: true });
+    // Read back totals and notify attendant phones
+    const savedRows: any[] = await withRetry(() => (prisma as any).attendantExpense.findMany({ where: { date, outletName } }));
+    const total = savedRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    try {
+      const maps: Array<{ code: string; phoneE164: string | null }> = await withRetry(() => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }));
+      await Promise.allSettled(maps.map((m) => sendTextSafe(m.phoneE164 || "", `Expenses submitted for ${outletName}. Total: Ksh ${total}.`, "AI_DISPATCH_TEXT")));
+    } catch {}
+
+  return NextResponse.json({ ok: true, total });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }

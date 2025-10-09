@@ -23,8 +23,8 @@ export async function sendAttendantMenu(to: string, outlet: string) {
             title: "Attendant Tabs",
             rows: [
               { id: "ATT_TAB_STOCK", title: "Enter Closing" },
-              { id: "ATT_TAB_SUPPLY", title: "Supply (view)" },
-              { id: "ATT_TAB_DEPOSITS", title: "Deposit (paste SMS)" },
+              { id: "ATT_TAB_SUPPLY", title: "Supply" },
+              { id: "ATT_TAB_DEPOSITS", title: "Deposit" },
               { id: "ATT_TAB_EXPENSES", title: "Expense" },
               { id: "ATT_TAB_TILL", title: "Till Count" },
               { id: "ATT_TAB_SUMMARY", title: "Summary" },
@@ -40,8 +40,8 @@ export async function sendAttendantMenu(to: string, outlet: string) {
   const rows: any[] = [];
   // Canonical 6-tab menu (always shown) — titles exactly match dashboard copy
   rows.push({ id: "ATT_TAB_STOCK", title: "Enter Closing", description: "Enter closing & waste" });
-  rows.push({ id: "MENU_SUPPLY", title: "Supply (view)", description: "Opening math & add lines" });
-  rows.push({ id: "ATT_DEPOSIT", title: "Deposit (paste SMS)", description: "Paste M-PESA SMS" });
+  rows.push({ id: "MENU_SUPPLY", title: "Supply", description: "Opening math & add lines" });
+  rows.push({ id: "ATT_DEPOSIT", title: "Deposit", description: "Paste M-PESA SMS" });
   rows.push({ id: "ATT_EXPENSE", title: "Expense", description: "Quick categories" });
   rows.push({ id: "MENU_TXNS", title: "Till Count", description: "Payments / TXNS" });
   rows.push({ id: "MENU_SUMMARY", title: "Summary", description: cfg.enableSubmitAndLock ? "Lock day when ready" : "Totals" });

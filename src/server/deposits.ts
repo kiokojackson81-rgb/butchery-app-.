@@ -11,5 +11,9 @@ export function parseMpesaText(s: string): { amount: number; ref: string; at: Da
 
 export async function addDeposit(args: { date?: string; outletName: string; amount: number; note?: string; code?: string }) {
   const date = args.date || new Date().toISOString().slice(0, 10);
-  await (prisma as any).attendantDeposit.create({ data: { date, outletName: args.outletName, amount: args.amount, note: args.note || null, status: "PENDING", createdAt: new Date() } });
+  // Idempotent create: if a deposit with same date/outlet/amount/note exists, return it
+  const existing = await (prisma as any).attendantDeposit.findFirst({ where: { date, outletName: args.outletName, amount: args.amount, note: args.note || null } });
+  if (existing) return existing;
+  const created = await (prisma as any).attendantDeposit.create({ data: { date, outletName: args.outletName, amount: args.amount, note: args.note || null, status: "PENDING", createdAt: new Date() } });
+  return created;
 }
