@@ -140,6 +140,13 @@ async function notifySupAdm(message: string) {
 }
 
 export async function sendAttendantMenu(phone: string, sess: any) {
+  const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+  if (useGptOnly) {
+    const outlet = sess?.outlet || undefined;
+    await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', outlet);
+    return;
+  }
+
   const outlet = sess?.outlet || undefined;
   const header = outlet ? `You're logged in as an attendant at ${outlet}.` : "You're logged in as an attendant.";
   await sendText(phone, `${header} What would you like to do?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -248,7 +255,12 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
   });
 
   if (finalRole === "attendant") {
-    await sendAttendantMenu(phoneE164, { outlet });
+    const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+    if (useGptOnly) {
+      await sendGptGreeting(phoneE164.replace(/^\+/, ""), "attendant", outlet ?? undefined);
+    } else {
+      await sendAttendantMenu(phoneE164, { outlet });
+    }
   } else {
     await sendGptGreeting(phoneE164.replace(/^\+/, ""), finalRole, outlet || undefined);
   }
@@ -293,7 +305,12 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-      await sendAttendantMenu(phone, s);
+      const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+      if (useGptOnly) {
+        await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined);
+      } else {
+        await sendAttendantMenu(phone, s);
+      }
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -390,7 +407,12 @@ export async function handleInboundText(phone: string, text: string) {
       await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
-    await sendAttendantMenu(phone, s);
+    const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+    if (useGptOnly) {
+      await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined);
+    } else {
+      await sendAttendantMenu(phone, s);
+    }
     return;
   }
 
