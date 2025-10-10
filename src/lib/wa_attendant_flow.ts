@@ -142,9 +142,21 @@ async function notifySupAdm(message: string) {
 export async function sendAttendantMenu(phone: string, sess: any, opts?: { force?: boolean; source?: string }) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
   if (!opts?.force) {
+    // pre-check quickly before attempting to acquire in-flight lock
     const allowed = await menuSendAllowed(phoneE164);
     if (!allowed) {
       try { console.info?.(`[wa] skip attendant menu`, { phoneE164, source: opts?.source }); } catch {}
+      return;
+    }
+    // Attempt to acquire in-flight lock. If we fail, another send is running on this instance.
+    if (!acquireInFlight(phoneE164)) {
+      try { console.info?.(`[wa] skip attendant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
+      return;
+    }
+  } else {
+    // force: still acquire lock to avoid duplicates within this instance
+    if (!acquireInFlight(phoneE164)) {
+      try { console.info?.(`[wa] force skip attendant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
       return;
     }
   }
@@ -181,7 +193,11 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
     },
   });
   await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
-  await markMenuSent(phoneE164, opts?.source);
+  try {
+    await markMenuSent(phoneE164, opts?.source);
+  } finally {
+    releaseInFlight(phoneE164);
+  }
 }
 
 async function getAvailableClosingProducts(sess: any, cursor: Cursor) {
@@ -217,8 +233,26 @@ async function promptLogin(phone: string) {
 }
 
 // --- Menu send guard helpers: prevent duplicate menu/greeting sends within short window ---
+// In-process lock to avoid concurrent sends from the same instance
+const MENU_IN_FLIGHT = new Set<string>();
+
+function acquireInFlight(phoneE164: string) {
+  if (MENU_IN_FLIGHT.has(phoneE164)) return false;
+  MENU_IN_FLIGHT.add(phoneE164);
+  return true;
+}
+
+function releaseInFlight(phoneE164: string) {
+  MENU_IN_FLIGHT.delete(phoneE164);
+}
+
 export async function menuSendAllowed(phoneE164: string, minIntervalMs = 8_000) {
   try {
+    // If another send is in-flight on this instance, suppress
+    if (MENU_IN_FLIGHT.has(phoneE164)) {
+      try { console.info?.(`[wa] menu suppressed (in-flight)`, { phoneE164, minIntervalMs }); } catch {}
+      return false;
+    }
     const st = await getWaState(phoneE164);
     const last = st?.lastMenuSentAt ? new Date(st.lastMenuSentAt).getTime() : 0;
     const allowed = Date.now() - last > minIntervalMs; // allow if more than the threshold since last menu
@@ -261,23 +295,53 @@ export async function safeSendGreetingOrMenu({
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
   const roleKey = String(role || "attendant");
   const roleKind = roleKey.toLowerCase();
-  const shouldSend = force || (await menuSendAllowed(phoneE164));
-  if (!shouldSend) {
-    try { console.info?.(`[wa] greeting suppressed`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+  // Quick pre-check
+  const preAllowed = force || (await menuSendAllowed(phoneE164));
+  if (!preAllowed) {
+    try { console.info?.(`[wa] greeting suppressed (pre-check)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
     return false;
   }
 
-  if (roleKind === "attendant") {
-    const sess = sessionLike || { outlet: outlet ?? undefined };
-    await sendAttendantMenu(phoneE164, sess, { force: true, source });
-  } else {
-    const toGraph = phoneE164.replace(/^\+/, "");
-    await sendGptGreeting(toGraph, roleKind, outlet || undefined);
-    await markMenuSent(phoneE164, source);
+  // Acquire in-flight lock to avoid concurrent sends from this instance
+  if (!acquireInFlight(phoneE164)) {
+    try { console.info?.(`[wa] greeting suppressed (in-flight)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+    return false;
   }
 
-  try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source }); } catch {}
-  return true;
+  try {
+    // Re-check DB state to avoid race condition with another process
+    const allowed = force || (await menuSendAllowed(phoneE164));
+    if (!allowed) {
+      try { console.info?.(`[wa] greeting suppressed (re-check)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+      return false;
+    }
+
+    // Cross-process guard: try to create a short-lived reminderSend entry (5s window).
+    // reminderSend has a unique constraint on (type, phoneE164, date), so concurrent
+    // attempts with the same windowKey will fail for all but one process.
+    const windowKey = String(Math.floor(Date.now() / 5000));
+    try {
+      await (prisma as any).reminderSend.create({ data: { type: `menu_send_v1`, phoneE164: phoneE164, date: windowKey } });
+    } catch (err) {
+      // If create fails (unique constraint), another process already sent within the window
+      try { console.info?.(`[wa] greeting suppressed (reminderSend dup)`, { phoneE164, windowKey, source }); } catch {}
+      return false;
+    }
+
+    if (roleKind === "attendant") {
+      const sess = sessionLike || { outlet: outlet ?? undefined };
+      await sendAttendantMenu(phoneE164, sess, { force: true, source });
+    } else {
+      const toGraph = phoneE164.replace(/^\+/, "");
+      await sendGptGreeting(toGraph, roleKind, outlet || undefined);
+      await markMenuSent(phoneE164, source);
+    }
+
+    try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+    return true;
+  } finally {
+    releaseInFlight(phoneE164);
+  }
 }
 
 
