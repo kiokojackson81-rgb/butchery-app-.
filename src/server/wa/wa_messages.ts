@@ -8,19 +8,19 @@ export function buildSupplierMenu() {
   return {
     type: "list",
     header: { type: "text", text: "✅ Welcome — Supplier" },
-    body: { text: "Choose what you'd like to do." },
+    body: { text: "How would you like to proceed today?" },
     action: {
       button: "Choose",
       sections: [
         {
           title: "Menu",
           rows: [
-            { id: "SUPL_DELIVERY", title: "1) Submit Delivery", description: "Create delivery for an outlet" },
-            { id: "SUPL_TRANSFER", title: "2) Transfer Between Outlets", description: "Move stock A → B" },
-            { id: "SUPL_VIEW_OPENING", title: "3) View Opening", description: "See today’s expected openings" },
-            { id: "SUPL_DISPUTES", title: "4) Disputes", description: "View open disputes" },
-            { id: "SUPL_PRICEBOOK", title: "5) Price List", description: "View pricebook (per outlet)" },
-            { id: "SUPL_HISTORY", title: "6) Recent Deliveries", description: "Recent dispatched/received" },
+            { id: "SUPL_SUBMIT_DELIVERY", title: "1) Submit Delivery", description: "Create delivery for an outlet" },
+            { id: "SUPL_VIEW_OPENING", title: "2) View Opening", description: "See today’s expected openings" },
+            { id: "SUPL_VIEW_STOCK", title: "3) View Stock", description: "Current stock per outlet" },
+            { id: "SUPL_TRANSFER", title: "4) Transfer Between Outlets", description: "Move stock A → B" },
+            { id: "SUPL_DISPUTES", title: "5) Disputes", description: "View open disputes" },
+            { id: "SUPL_PRICEBOOK", title: "6) Price List", description: "View pricebook (per outlet)" },
             { id: "LOGOUT", title: "7) Logout", description: "End session and return to login" },
           ],
         },

@@ -22,6 +22,7 @@ import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
 import { parseOOCBlock, stripOOC, buildUnauthenticatedReply, buildAuthenticatedReply } from "@/lib/ooc_parse";
 import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
+import { buildInteractiveListPayload } from "@/lib/wa_messages";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -289,7 +290,19 @@ export async function POST(req: Request) {
               : (role === 'supplier')
               ? ["SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_DISPUTES","SUPL_HISTORY","HELP","MENU"]
               : ["ATT_CLOSING","ATT_DEPOSIT","MENU_SUMMARY"];
-            await sendButtonsFor(to, def);
+            // If more than 3 defaults, present as a list so WhatsApp won't reject
+            try {
+              if (Array.isArray(def) && def.length > 3) {
+                const rows = def.map((id) => ({ id: String(id), title: humanTitle(id) }));
+                const payload = buildInteractiveListPayload({ to, bodyText: "Choose an action:", buttonLabel: "Choose", sections: [{ title: "Menu", rows }] });
+                await sendInteractiveLib(payload as any, "AI_DISPATCH_INTERACTIVE");
+              } else {
+                await sendButtonsFor(to, def);
+              }
+            } catch (e) {
+              // Fallback to buttons for robustness
+              await sendButtonsFor(to, def);
+            }
             markSent();
           };
           const fromGraph = m.from as string | undefined; // 2547...
@@ -569,13 +582,13 @@ export async function POST(req: Request) {
                 const intentRaw = String(ooc.intent || "");
                 // Map the Prompt-1 IDs to canonical tab/action IDs
                 const idMap: Record<string, string> = {
-                  // Attendant
-                  "ATT_CLOSING": "ATT_TAB_STOCK",
-                  "ATT_DEPOSIT": "ATT_TAB_DEPOSITS",
-                  "ATT_EXPENSE": "ATT_TAB_EXPENSES",
-                  "MENU_SUMMARY": "ATT_TAB_SUMMARY",
-                  "MENU_SUPPLY": "ATT_TAB_SUPPLY",
-                  "TILL_COUNT": "ATT_TAB_TILL",
+                  "1": "SUPL_SUBMIT_DELIVERY",
+                  "2": "SUPL_VIEW_OPENING",
+                  "3": "SUPL_VIEW_STOCK",
+                  "4": "SUPL_HELP",
+                  "5": "SUPL_HELP",
+                  "6": "SUPL_HELP",
+                  "7": "SUPL_HELP",
                   // Supervisor
                   "SV_REVIEW_CLOSINGS": "SV_TAB_REVIEW_QUEUE",
                   "SV_REVIEW_DEPOSITS": "SV_TAB_REVIEW_QUEUE",
