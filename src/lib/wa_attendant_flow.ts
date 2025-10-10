@@ -205,6 +205,46 @@ async function promptLogin(phone: string) {
   }
 }
 
+// --- Menu send guard helpers: prevent duplicate menu/greeting sends within short window ---
+async function _menuAllowedForPhone(phoneE164: string) {
+  try {
+    const st = await getWaState(phoneE164);
+    const last = st?.lastMenuSentAt ? new Date(st.lastMenuSentAt).getTime() : 0;
+    return Date.now() - last > 8_000; // allow if more than 8 seconds since last menu
+  } catch (e) {
+    return true;
+  }
+}
+
+async function _markMenuSent(phoneE164: string) {
+  try {
+    await updateWaState(phoneE164, { lastMenuSentAt: new Date().toISOString(), lastMessageAt: new Date().toISOString() } as Partial<WaState>);
+  } catch (e) {
+    // best-effort
+  }
+}
+
+async function sendMenuOnce(phone: string, sess: any, source = "flow") {
+  const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+  if (!(await _menuAllowedForPhone(phoneE164))) {
+    console.info(`[wa] skipping duplicate menu/greeting for ${phoneE164} (source=${source})`);
+    return;
+  }
+  const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+  try {
+    if (useGptOnly) {
+      const outlet = sess?.outlet || undefined;
+      await sendGptGreeting(phone.replace(/^[+]/, ''), 'attendant', outlet);
+    } else {
+      await sendAttendantMenu(phone, sess);
+    }
+  } catch (e) {
+    console.warn('[wa] sendMenuOnce failed', e);
+  }
+  await _markMenuSent(phoneE164);
+}
+
+
 // Helper: bind phone to code/role and enter MENU (reuses existing mapping + outlet logic)
 async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: string; code: string; role?: string }) {
   const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true } });
@@ -377,17 +417,16 @@ export async function handleInboundText(phone: string, text: string) {
     if (!rows.length) {
       await sendText(phone, "No deposits yet today.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
-      await sendText(
-        phone,
-        rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"),
-        "AI_DISPATCH_TEXT",
-        { gpt_sent: true }
-      );
+      const lines = rows.map((r: any) => {
+        const note = r.note ? ` ref ${r.note}` : "";
+        return `- ${r.amount} (${r.status})${note}`;
+      });
+      await sendText(phone, lines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
 
-  // SPLASH → LOGIN
+  // SPLASH -> LOGIN
   if (s.state === "SPLASH") {
     await promptLogin(phone);
     await saveSession(phone, { state: "LOGIN" });
@@ -593,7 +632,7 @@ export async function handleInboundText(phone: string, text: string) {
   else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT", { gpt_sent: true });
 }
 
-export async function handleInteractiveReply(phone: string, payload: any) {
+export async function handleInteractiveReply(phone: string, payload: any): Promise<boolean> {
   const s = await loadSession(phone);
   if (s?.id) await touchSession(s.id);
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
@@ -606,7 +645,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await saveSession(phone, { state: "MENU", ...cur });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
 
   if (id === "NAV_CANCEL") {
@@ -614,7 +653,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendText(phone, "Closing draft cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
 
   if (id === "LOGOUT") {
@@ -628,7 +667,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     }
     await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await promptLogin(phone);
-    return;
+    return true;
   }
 
   if (id === "NAV_BACK") {
@@ -660,41 +699,41 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       const statePatch: Partial<WaState> = { currentAction: "closing", lastMessageAt: new Date().toISOString() };
       if (closingDraftPatch) statePatch.closingDraft = closingDraftPatch;
       await updateWaState(phoneE164, statePatch);
-      return;
+      return true;
     }
     await saveSession(phone, { state: "MENU", ...cur });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
   // Quick path: show the extended list menu
   if (id === "MENU") {
     if (!s.code || !s.outlet) {
       await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT");
       await promptLogin(phone);
-      return;
+      return true;
     }
     await saveSession(phone, { state: "MENU", ...cur });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
 
   // Login link resend handler
   if (id === "SEND_LOGIN_LINK") {
     const link = await createLoginLink(toDbPhone(phone));
     await sendText(phone, `Tap to log in via the website:\n${link.url}`, "AI_DISPATCH_TEXT");
-    return;
+    return true;
   }
 
   // Interpret menu choices
   if (id === "MENU_SUBMIT_CLOSING" || id === "ATD_CLOSING" || id === "ATT_CLOSING") {
     if (!s.code || !s.outlet) {
       await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
 
     const prodsAll = await getAssignedProducts(s.code);
@@ -702,7 +741,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     const prods = prodsAll.filter((p) => !closed.has(p.key));
     if (!prods.length) {
       await nextPickOrSummary(phone, s, cur);
-      return;
+      return true;
     }
 
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
@@ -741,51 +780,70 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       const payload = buildListPayload(phone.replace(/^\+/, ''), interactive);
       await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
   if (id === "ATD_DEPOSIT" || id === "ATT_DEPOSIT" || id === "MENU_DEPOSIT") {
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, "Paste the original M-Pesa SMS (no edits). We will extract the amount and reference.", "AI_DISPATCH_TEXT");
-    return;
+    return true;
   }
   if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE" || id === "ATT_EXPENSE") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
     if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
       await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
   if (id === "MENU_TXNS" || id === "ATD_TXNS") {
     const rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
-    if (!rows.length) await sendText(phone, "No till payments recorded yet today.", "AI_DISPATCH_TEXT");
-    else await sendText(phone, rows.map((r: any) => `• ${r.amount} (${r.status}) ${r.note ? `ref ${r.note}` : ""}`).join("\n"), "AI_DISPATCH_TEXT");
-    return;
+    if (!rows.length) {
+      await sendText(phone, "No till payments recorded yet today.", "AI_DISPATCH_TEXT");
+    } else {
+      const lines = rows.map((r: any) => {
+        const note = r.note ? ` ref ${r.note}` : "";
+        return `- ${r.amount} (${r.status})${note}`;
+      });
+      await sendText(phone, lines.join("\n"), "AI_DISPATCH_TEXT");
+    }
+    return true;
   }
 
   if (id === "MENU_SUPPLY") {
-    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT"); return; }
+    if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+      return true;
+    }
     const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { itemKey: "asc" } });
     if (!rows.length) {
       // Fall back to yesterday's closing as opening baseline
       const y = prevDateISO(cur.date);
       const prev = await (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y }, orderBy: { itemKey: "asc" } });
-      if (!prev.length) { await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT"); return; }
-      const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r:any)=>r.itemKey) } } });
-      const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
-      const text = prev.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`).join("\n");
+      if (!prev.length) {
+        await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT");
+        return true;
+      }
+      const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r: any) => r.itemKey) } } });
+      const nameByKey = new Map(plist.map((p: any) => [p.key, p.name] as const));
+      const text = prev
+        .map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`)
+        .join("\n");
       await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
-      return;
-    } else {
-      const plist = await (prisma as any).product.findMany({ where: { key: { in: rows.map((r:any)=>r.itemKey) } } });
-      const nameByKey = new Map(plist.map((p:any)=>[p.key, p.name] as const));
-      const text = rows.map((r:any)=>`• ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.qty} ${r.unit}`).join("\n");
-      await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
+      return true;
     }
-    return;
+    const plist = await (prisma as any).product.findMany({ where: { key: { in: rows.map((r: any) => r.itemKey) } } });
+    const nameByKey = new Map(plist.map((p: any) => [p.key, p.name] as const));
+    const text = rows
+      .map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.qty} ${r.unit}`)
+      .join("\n");
+    await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
+    return true;
   }
 
   if (id === "MENU_SUMMARY") {
-    if (!s.outlet) { await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT"); return; }
+    if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+      return true;
+    }
     try {
       const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
       const lines = [
@@ -798,7 +856,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     } catch (e) {
       await sendText(phone, "Summary is unavailable right now. Try again later.", "AI_DISPATCH_TEXT");
     }
-    return;
+    return true;
   }
 
   // List product selection
@@ -809,7 +867,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "MENU", ...cur });
   await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
-      return;
+      return true;
     }
     const prods = await getAssignedProducts(s.code || "");
     const name = prods.find((p) => p.key === key)?.name || key;
@@ -823,7 +881,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
         if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
           await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
         }
-        return;
+        return true;
       }
     }
     // Attach current item and fetch opening stock for this product so the attendant
@@ -884,31 +942,31 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       const payload = buildButtonPayload(phone.replace(/^\+/, ""), promptText, navButtons);
       await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
 
   // Waste/Skip buttons
   if (id === "WASTE_YES") {
     if (!cur.currentItem) {
       await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     await saveSession(phone, { state: "CLOSING_WASTE_QTY", ...cur });
     if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
       await sendInteractive(promptWaste(phone, cur.currentItem.name), "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
   if (id === "WASTE_SKIP") {
     if (!cur.currentItem) {
       await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     cur.currentItem.waste = 0;
     upsertRow(cur, cur.currentItem.key, { name: cur.currentItem.name, closing: cur.currentItem.closing || 0, waste: 0 });
     delete cur.currentItem;
     await nextPickOrSummary(phone, s, cur);
-    return;
+    return true;
   }
 
   if (id === "SUMMARY_CANCEL") {
@@ -916,22 +974,22 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendText(phone, "Closing draft cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
 
   // Summary actions
   if (id === "SUMMARY_SUBMIT") {
     if (!s.outlet) {
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-      return;
+      return true;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     if (!cur.rows.length) {
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-      return;
+      return true;
     }
     await saveClosings({
       date: cur.date,
@@ -965,16 +1023,16 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
       await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
   if (id === "SUMMARY_LOCK") {
     if (!s.outlet) {
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
       await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     // Save any staged rows then lock the day
     if (cur.rows.length) {
@@ -989,12 +1047,12 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     await notifySupAdm(`Attendant day locked for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
-    return;
+    return true;
   }
   if (id === "SUMMARY_MODIFY") {
     if (!cur.rows.length) {
       await sendText(phone, "No rows yet. Pick a product first.", "AI_DISPATCH_TEXT");
-      return;
+      return true;
     }
     const items = cur.rows.map((r) => ({ key: r.key, name: r.name }));
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
@@ -1024,7 +1082,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       const payload = buildListPayload(phone.replace(/^\+/, ""), interactive);
       await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
 
   // Expense follow-ups
@@ -1033,16 +1091,19 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
       await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     }
-    return;
+    return true;
   }
   if (id === "EXP_FINISH") {
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     await sendAttendantMenu(phone, s);
-    return;
+    return true;
   }
+
+  return false;
 }
 
 async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
+  const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
   const prods = await getAssignedProducts(s.code || "");
   const inactive = new Set(cur.inactiveKeys || []);
   let remaining = prods.filter((p) => !inactive.has(p.key) && !cur.rows.some((r) => r.key === p.key));
@@ -1057,7 +1118,7 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
       const closingQty = Number(r.closing ?? 0);
       const wasteQty = Number(r.waste ?? 0);
       const wasteText = wasteQty ? ` (waste ${wasteQty})` : "";
-      return `• ${r.name}: ${closingQty}${wasteText}`;
+      return `- ${r.name}: ${closingQty}${wasteText}`;
     });
     const summaryText = buildReviewSummaryText(s.outlet || "Outlet", reviewLines);
     const summaryButtons = buildClosingReviewButtons();

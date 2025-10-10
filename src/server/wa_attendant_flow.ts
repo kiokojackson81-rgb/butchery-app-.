@@ -91,9 +91,14 @@ export async function handleAuthenticatedText(sess: any, text: string) {
   await libHandleInboundText(phone, text);
 }
 
-export async function handleAuthenticatedInteractive(sess: any, id: string) {
+export async function handleAuthenticatedInteractive(sess: any, id: string): Promise<boolean> {
   const phone = sess?.phoneE164 || "";
-  if (!phone || !id) return;
-  // Adapt to lib signature by creating an interactive-like payload
-  await libHandleInteractiveReply(phone, { button_reply: { id, title: id } });
+  if (!phone || !id) return false;
+  try {
+    // Adapt to lib signature by creating an interactive-like payload
+    return await libHandleInteractiveReply(phone, { button_reply: { id, title: id } });
+  } catch (err) {
+    console.error("handleAuthenticatedInteractive failed", err);
+    return false;
+  }
 }
