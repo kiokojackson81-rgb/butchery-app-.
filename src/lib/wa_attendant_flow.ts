@@ -20,8 +20,16 @@ import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { handleSupplyDispute } from "@/server/supply_notify";
-import { updateWaState } from "@/lib/wa/state";
-import { buildAttendantMainMenuButtons, buildAttendantMainMenuText, buildButtonPayload } from "@/lib/wa/messageBuilder";
+import { getWaState, updateWaState } from "@/lib/wa/state";
+import {
+  buildAttendantMainMenuButtons,
+  buildAttendantMainMenuText,
+  buildButtonPayload,
+  buildListPayload,
+  buildProductPickerBody,
+  buildQuantityPromptText,
+  buildNavigationRow,
+} from "@/lib/wa/messageBuilder";
 // (sendText) already imported; (prisma) already imported at top
 
 type Cursor = {
@@ -381,7 +389,7 @@ export async function handleInboundText(phone: string, text: string) {
         return;
       }
       // Guard: product already closed today
-        if (s.outlet) {
+      if (s.outlet) {
         const closed = await getClosedKeys(cur.date, s.outlet);
         if (closed.has(item.key)) {
           await sendText(phone, `${item.name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -396,11 +404,42 @@ export async function handleInboundText(phone: string, text: string) {
       }
       item.closing = val;
       await saveSession(phone, { state: "CLOSING_QTY", ...cur });
+
+      const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+      const stateSnapshot = await getWaState(phoneE164);
+      const existingDraft = stateSnapshot.closingDraft ?? { products: {}, orderedIds: [] };
+      const draftProducts = { ...existingDraft.products };
+      const draftOrdered = Array.from(new Set([...(existingDraft.orderedIds ?? []), item.key]));
+      draftProducts[item.key] = {
+        productKey: item.key,
+        name: item.name,
+        qty: val,
+      };
+      await updateWaState(phoneE164, {
+        attendantCode: s.code ?? undefined,
+        outletName: s.outlet ?? undefined,
+        currentAction: "closing",
+        closingDraft: {
+          products: draftProducts,
+          orderedIds: draftOrdered,
+          selectedProductId: item.key,
+          lastUpdated: new Date().toISOString(),
+        },
+        lastMessageAt: new Date().toISOString(),
+      });
+
       if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
         await sendInteractive(buttonsWasteOrSkip(phone, item.name), "AI_DISPATCH_INTERACTIVE");
       }
     } else {
-      await sendText(phone, "Numbers only, e.g. 9.5", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      const itemName = cur.currentItem?.name || "this product";
+      if (process.env.WA_GPT_ONLY === 'true') {
+        await sendText(phone, `Numbers only for ${itemName}, e.g. 9.5`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } else {
+        const promptText = `Numbers only for ${itemName}, e.g. 9.5`;
+        const payload = buildButtonPayload(phone.replace(/^\+/, ""), promptText, buildNavigationRow());
+        await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+      }
     }
     return;
   }
@@ -540,26 +579,60 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
       return;
     }
-    // Guard: day-level lock
     if (await isDayLocked(cur.date, s.outlet)) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       return;
     }
-    // Filter already closed products
+
     const prodsAll = await getAssignedProducts(s.code);
     const closed = await getClosedKeys(cur.date, s.outlet);
     const prods = prodsAll.filter((p) => !closed.has(p.key));
     if (!prods.length) {
       await sendText(phone, "All products are already closed for today.", "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "SUMMARY", ...cur });
-      if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+      if (process.env.WA_GPT_ONLY === 'true') {
+        try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+      } else {
         await sendInteractive(await summarySubmitModify(phone, cur.rows, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
       }
       return;
     }
+
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
-      await sendInteractive(listProducts(phone, prods, s.outlet), "AI_DISPATCH_INTERACTIVE");
+
+    const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+    const stateSnapshot = await getWaState(phoneE164);
+    const draftProducts = { ...(stateSnapshot.closingDraft?.products ?? {}) };
+    const orderedIds = [...(stateSnapshot.closingDraft?.orderedIds ?? [])];
+    for (const row of cur.rows || []) {
+      draftProducts[row.key] = { productKey: row.key, name: row.name, qty: Number(row.closing ?? 0) };
+      if (!orderedIds.includes(row.key)) orderedIds.push(row.key);
+    }
+
+    await updateWaState(phoneE164, {
+      attendantCode: s.code ?? undefined,
+      outletName: s.outlet ?? undefined,
+      currentAction: "closing",
+      closingDraft: {
+        products: draftProducts,
+        orderedIds,
+        selectedProductId: undefined,
+        lastUpdated: new Date().toISOString(),
+      },
+      lastMessageAt: new Date().toISOString(),
+    });
+
+    if (process.env.WA_GPT_ONLY === 'true') {
+      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+    } else {
+      const options = prods.slice(0, 10).map((p) => ({
+        id: `PROD_${p.key}`,
+        title: p.name || p.key,
+        description: "Record closing stock",
+      }));
+      const interactive = buildProductPickerBody(options, prods.length > 10 ? `Showing 10 of ${prods.length}` : undefined);
+      const payload = buildListPayload(phone.replace(/^\+/, ''), interactive);
+      await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
     return;
   }
@@ -674,8 +747,35 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       }
     }
     await saveSession(phone, { state: "CLOSING_QTY", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
-      await sendInteractive(promptQty(phone, name), "AI_DISPATCH_INTERACTIVE");
+    const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+    const stateSnapshot = await getWaState(phoneE164);
+    const existingDraft = stateSnapshot.closingDraft ?? { products: {}, orderedIds: [] };
+    const draftProducts = { ...existingDraft.products };
+    const currentOrdered = existingDraft.orderedIds ?? [];
+    const draftOrdered = Array.from(new Set([...currentOrdered, key]));
+    const existingRow = cur.rows.find((r) => r.key === key);
+    const existingQty = draftProducts[key]?.qty ?? Number(existingRow?.closing ?? 0);
+    draftProducts[key] = { productKey: key, name, qty: existingQty };
+    await updateWaState(phoneE164, {
+      attendantCode: s.code ?? undefined,
+      outletName: s.outlet ?? undefined,
+      currentAction: "closing",
+      closingDraft: {
+        products: draftProducts,
+        orderedIds: draftOrdered,
+        selectedProductId: key,
+        lastUpdated: new Date().toISOString(),
+      },
+      lastMessageAt: new Date().toISOString(),
+    });
+
+    if (process.env.WA_GPT_ONLY === 'true') {
+      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+    } else {
+      const promptText = buildQuantityPromptText(name);
+      const navButtons = buildNavigationRow();
+      const payload = buildButtonPayload(phone.replace(/^\+/, ""), promptText, navButtons);
+      await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
     return;
   }
@@ -821,3 +921,5 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
     }
   }
 }
+
+

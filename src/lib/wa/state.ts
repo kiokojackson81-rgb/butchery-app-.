@@ -1,14 +1,14 @@
 import { prisma } from "@/lib/prisma";
 
 type ClosingDraftProduct = {
-  productId: number;
+  productKey: string;
   name: string;
   qty: number;
 };
 
 export interface WaClosingDraftState {
-  products: Record<number, ClosingDraftProduct>;
-  orderedIds: number[];
+  products: Record<string, ClosingDraftProduct>;
+  orderedIds: string[];
   selectedProductId?: number;
   lastUpdated: string;
 }
@@ -125,3 +125,5 @@ export async function clearCurrentAction(waId: string): Promise<void> {
     data: { state: "MENU", cursor },
   });
 }
+
+
