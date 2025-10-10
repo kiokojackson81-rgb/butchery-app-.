@@ -219,6 +219,22 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
   const runningGptOnly = String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true";
+  // Defensive: WhatsApp buttons payloads are limited to max 3 buttons.
+  // If a builder accidentally produces >3 buttons, convert to a plain text
+  // fallback to avoid Graph errors and record the fallback in logs.
+  try {
+    const buttons = body?.interactive?.action?.buttons;
+    if (Array.isArray(buttons) && buttons.length > 3) {
+      // Build a readable text fallback listing options and send as text instead
+      const titles = buttons.map((b: any, i: number) => `${i + 1}) ${((b || {}).reply || {}).title || ((b || {}).title) || 'Option'}`);
+      const fallback = `${(body?.interactive?.body?.text) || 'Choose an option:'}\n${titles.join('\n')}`;
+      try { await logOutbound({ direction: 'out', templateName: null, payload: { phone: phoneE164, meta: { phoneE164, reason: 'interactive.too_many_buttons', buttonsCount: buttons.length }, request: body }, status: 'WARN', type: 'SEND_INTERACTIVE_FALLBACK' }); } catch {}
+      // Send as plain text instead of interactive to avoid API 131009
+      return _sendTextRaw(toNorm, fallback, contextType, inReplyTo);
+    }
+  } catch (e) {
+    // swallow; best-effort only
+  }
   if (DRY) {
     const waMessageId = `DRYRUN-${Date.now()}`;
     // Ensure phoneE164 is present under meta for test filters
@@ -394,8 +410,17 @@ export async function logOutbound(entry: {
 
 export async function updateStatusByWamid(waMessageId: string, status: string) {
   try {
-    await (prisma as any).waMessageLog.update({ where: { waMessageId }, data: { status } });
-  } catch {}
+    // Use updateMany to avoid throwing when the waMessageId does not match any row.
+    const res: any = await (prisma as any).waMessageLog.updateMany({ where: { waMessageId }, data: { status } }).catch(() => ({ count: 0 }));
+    const count = (res && typeof res.count === 'number') ? res.count : 0;
+    if (count === 0) {
+      try { await logOutbound({ direction: 'in', payload: { waMessageId, status }, status: 'WARN', type: 'WEBHOOK_MISSING_WAMID' }); } catch {}
+    } else {
+      try { await logOutbound({ direction: 'in', payload: { waMessageId, status }, status: 'OK', type: 'WEBHOOK_STATUS_UPDATE' }); } catch {}
+    }
+  } catch (e: any) {
+    try { await logOutbound({ direction: 'in', payload: { waMessageId, status, error: String(e) }, status: 'ERROR', type: 'WEBHOOK_STATUS_UPDATE_FAIL' }); } catch {}
+  }
 }
 
 /** Resolve a phone for a given role/code/outlet using PhoneMapping */

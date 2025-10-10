@@ -90,11 +90,20 @@ export async function POST(req: Request) {
   async function sendButtonsFor(phoneGraph: string, buttons: string[]) {
     try {
       if (!Array.isArray(buttons) || !buttons.length) return;
-      // Ensure Back to Menu is present and cap buttons to 4 (Back to Menu included)
+      // Ensure Back to Menu is present but cap visible user buttons to 3
+      // (WhatsApp allows max 3 reply buttons). We'll include BACK_TO_MENU as
+      // the last button if there's room; otherwise prefer the first 3 options.
       const normalized = [...new Set(buttons.map((b) => String(b || "").toUpperCase()))];
-      if (!normalized.includes("BACK_TO_MENU")) normalized.push("BACK_TO_MENU");
-      const take = normalized.slice(0, 4);
-      const b = take.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
+      // Remove BACK_TO_MENU from the pool so we can decide placement
+      const withoutBack = normalized.filter((id) => id !== "BACK_TO_MENU");
+      const userTake = withoutBack.slice(0, 3);
+      // If there is room (less than 3 user buttons) and BACK_TO_MENU wasn't included
+      // already, append it to the end so user can return to menu.
+      if (userTake.length < 3 && normalized.includes("BACK_TO_MENU") === false) {
+        userTake.push("BACK_TO_MENU");
+      }
+      // Build reply buttons from selected ids
+      const b = userTake.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
       await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
     } catch {}
   }
@@ -107,7 +116,8 @@ export async function POST(req: Request) {
     if (role === "supplier") {
       return { text: "Just checking in… what would you like to do?", buttons: ["SUPL_DELIVERY", "SUPL_VIEW_OPENING", "SUPL_DISPUTES"] };
     }
-    return { text: "Just checking in… what would you like to do?", buttons: ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY", "BACK_TO_MENU"] };
+    // Keep attendant clarifier to at most 3 options to avoid interactive limits
+    return { text: "Just checking in… what would you like to do?", buttons: ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"] };
   }
           // Canonical intent/button ID helpers
           function aliasToCanonical(id: string): string {

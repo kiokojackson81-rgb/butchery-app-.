@@ -212,7 +212,7 @@ async function tryAutoLinkLogin(text: string, phoneE164: string) {
     const ok = await bindPhoneAndEnterMenu({ phoneE164, code: pc.code, role: pc.role });
     if (!ok) return false;
     await (prisma as any).waSession.delete({ where: { phoneE164: linkPhone } }).catch(() => {});
-    await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`, "AI_DISPATCH_TEXT");
+    await sendText(phoneE164.replace(/^\+/, ""), `Welcome ${pc.role} — login successful.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     return true;
   }
   // NOTE: We no longer accept LOGIN <CODE> in chat. Use website finalize flow instead.
@@ -291,7 +291,7 @@ export async function handleInboundText(phone: string, text: string) {
   }
   if (/^(TXNS)$/i.test(t)) {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
+  await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     const rows = await (prisma as any).attendantDeposit.findMany({
@@ -329,7 +329,7 @@ export async function handleInboundText(phone: string, text: string) {
   // MENU context
   if (/^MENU$/i.test(t) || s.state === "MENU") {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT");
+      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     if (/^MENU$/i.test(t)) {
@@ -351,7 +351,7 @@ export async function handleInboundText(phone: string, text: string) {
       }
       // Guard: day-level lock
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-    await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSession(phone, { state: "MENU", ...cur });
     await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
@@ -406,7 +406,7 @@ export async function handleInboundText(phone: string, text: string) {
       delete cur.currentItem;
       await nextPickOrSummary(phone, s, cur);
     } else {
-      await sendText(phone, "Numbers only, e.g. 1.0", "AI_DISPATCH_TEXT");
+      await sendText(phone, "Numbers only, e.g. 1.0", "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
@@ -420,12 +420,12 @@ export async function handleInboundText(phone: string, text: string) {
   }
   if (s.state === "EXPENSE_AMOUNT") {
     if (!isNumericText(t)) {
-      await sendText(phone, "Numbers only, e.g. 250", "AI_DISPATCH_TEXT");
+      await sendText(phone, "Numbers only, e.g. 250", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     const amount = Number(t);
       if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+  await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     // Idempotent create: skip if identical expense exists
@@ -608,7 +608,33 @@ export async function handleInteractiveReply(phone: string, payload: any) {
         return;
       }
     }
+    // Attach current item and fetch opening stock for this product so the attendant
+    // sees the same information the web UI shows. If no opening is found, fall
+    // back to yesterday's closing baseline. Always communicate the result then
+    // prompt for closing qty.
     cur.currentItem = { key, name };
+    // Query today's supply opening row for this outlet/product
+    if (s.outlet) {
+      try {
+        const opening = await (prisma as any).supplyOpeningRow.findFirst({ where: { outletName: s.outlet, date: cur.date, itemKey: key } }).catch(() => null);
+        if (opening) {
+          await sendText(phone, `Opening stock for ${name} (${s.outlet} — ${cur.date}): ${opening.qty} ${opening.unit || "kg"}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        } else {
+          // Fall back to yesterday's attendant closing as opening baseline
+          const y = prevDateISO(cur.date);
+          const prev = await (prisma as any).attendantClosing.findFirst({ where: { outletName: s.outlet, date: y, itemKey: key } }).catch(() => null);
+          if (prev) {
+            await sendText(phone, `Opening baseline (yesterday closing) for ${name} (${s.outlet} — ${cur.date}): ${prev.closingQty}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+          } else {
+            // Match web UI wording when no opening stock exists
+            await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+          }
+        }
+      } catch (err) {
+        // Non-fatal: still prompt for qty
+        console.warn("failed to fetch opening stock", err);
+      }
+    }
     await saveSession(phone, { state: "CLOSING_QTY", ...cur });
     await sendInteractive(promptQty(phone, name), "AI_DISPATCH_INTERACTIVE");
     return;
@@ -639,7 +665,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   // Summary actions
   if (id === "SUMMARY_SUBMIT") {
     if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+  await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
     if (await isDayLocked(cur.date, s.outlet)) {
