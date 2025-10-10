@@ -9,7 +9,7 @@ type ClosingDraftProduct = {
 export interface WaClosingDraftState {
   products: Record<string, ClosingDraftProduct>;
   orderedIds: string[];
-  selectedProductId?: number;
+  selectedProductId?: string | number;
   lastUpdated: string;
 }
 
@@ -21,6 +21,7 @@ export interface WaState {
   currentAction?: "menu" | "closing" | "deposit" | "expense" | "summary" | "supply";
   closingDraft?: WaClosingDraftState;
   lastMessageAt?: string;
+  lastMenuSentAt?: string;
 }
 
 const DEFAULT_STATE: WaState = {
@@ -52,6 +53,7 @@ export async function getWaState(waId: string): Promise<WaState> {
     currentAction: session.state ?? "menu",
     closingDraft: cursor.closingDraft ?? undefined,
     lastMessageAt: cursor.lastMessageAt ?? undefined,
+    lastMenuSentAt: cursor.lastMenuSentAt ?? undefined,
   };
 }
 
@@ -96,7 +98,16 @@ export async function updateWaState(waId: string, patch: Partial<WaState>): Prom
     currentAction: nextAction,
     closingDraft: nextDraft,
     lastMessageAt: patch.lastMessageAt ?? cursor.lastMessageAt ?? new Date().toISOString(),
+    lastMenuSentAt: patch.lastMenuSentAt ?? cursor.lastMenuSentAt ?? undefined,
   };
+
+  const nextCursor: Record<string, any> = {
+    ...cursor,
+    closingDraft: nextDraft,
+    lastMessageAt: nextState.lastMessageAt,
+  };
+  if (nextState.lastMenuSentAt) nextCursor.lastMenuSentAt = nextState.lastMenuSentAt;
+  else delete nextCursor.lastMenuSentAt;
 
   await (prisma as any).waSession.update({
     where: { id: session.id },
@@ -104,11 +115,7 @@ export async function updateWaState(waId: string, patch: Partial<WaState>): Prom
       state: nextState.currentAction,
       role: nextState.role ?? null,
       outlet: nextState.outletName ?? null,
-      cursor: {
-        ...cursor,
-        closingDraft: nextDraft,
-        lastMessageAt: nextState.lastMessageAt,
-      },
+      cursor: nextCursor,
     },
   });
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendText, sendInteractive, sendTemplate, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
+import { sendAttendantMenu } from "@/lib/wa_attendant_flow";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
 import { createLoginLink } from "@/server/wa_links";
@@ -67,19 +68,22 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   try {
     if (process.env.WA_INTERACTIVE_ENABLED === "true") {
       if (ctx.kind === "login_welcome") {
-        // Send role-specific interactive menu then send only the human text (no OOC)
         const role = (ctx as any).role as string;
         const outlet = (ctx as any).outlet || undefined;
         const built = buildAuthenticatedReply(role as any, outlet);
-        await sendGptGreeting(to, role, outlet);
-        const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
-        if (!useGptOnly) {
-          // Send human-facing text only (mark as GPT-originated for strict mode)
-          try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+        if (role === "attendant") {
+          await sendAttendantMenu(to, { outlet }, { force: true, source: "dispatcher_login_welcome" });
+          try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
+          result = { ok: true };
+        } else {
+          await sendGptGreeting(to, role, outlet);
+          const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+          if (!useGptOnly) {
+            try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+          }
+          try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
+          result = { ok: true };
         }
-        // Log the OOC for observability (do not expose to user)
-        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
-        result = { ok: true };
       } else if (ctx.kind === "login_prompt") {
         // Send a compact interactive button prompting to open the deep link, then send only the human text (no OOC)
         const deep = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
