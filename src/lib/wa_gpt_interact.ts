@@ -1,5 +1,6 @@
 import { buildInteractiveListPayload } from '@/lib/wa_messages';
 import { sendInteractive } from '@/lib/wa';
+import { isValidGptInteractive } from './wa_gpt_schema';
 
 type GptInteractive = {
   type: 'buttons' | 'list';
@@ -13,6 +14,7 @@ type GptInteractive = {
 export async function trySendGptInteractive(to: string, inter: GptInteractive | null | undefined) {
   if (!inter) return false;
   try {
+    if (!isValidGptInteractive({ interactive: inter })) return false;
     if (inter.type === 'buttons' && Array.isArray(inter.buttons)) {
       // Meta/Graph supports at most 3 reply buttons; if more, caller should use list
       const buttons = inter.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } }));
@@ -31,7 +33,7 @@ export async function trySendGptInteractive(to: string, inter: GptInteractive | 
     }
 
     // For lists, use the central builder
-    if (inter.type === 'list' && Array.isArray(inter.sections)) {
+  if (inter.type === 'list' && Array.isArray(inter.sections)) {
       const payload = buildInteractiveListPayload({
         to,
         bodyText: inter.bodyText || 'Choose an action',
