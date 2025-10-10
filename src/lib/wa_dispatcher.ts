@@ -1,10 +1,6 @@
-        await sendGptGreeting(to, role, outlet);
-        const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
-        if ( !useGptOnly) { 
-          try { await sendText(to, built.text, \ AI_DISPATCH_TEXT\, { gpt_sent: true }); } catch {}
-        }
+import { prisma } from "@/lib/prisma";
+import { sendText, sendInteractive, sendTemplate, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
-import { menuMain } from "@/lib/wa_messages";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
 import { createLoginLink } from "@/server/wa_links";
@@ -32,7 +28,6 @@ async function lastInboundAt(phoneE164: string): Promise<Date | null> {
 }
 
 export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
-  const ttlMin = Number(process.env.WA_SESSION_TTL_MIN || 60);
   const to = toE164.startsWith("+") ? toE164 : "+" + toE164;
 
   // If outside the 24h window: send ops_role_notice (or WA_TEMPLATE_NAME) to reopen
