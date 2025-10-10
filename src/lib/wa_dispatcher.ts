@@ -1,6 +1,8 @@
-// src/lib/wa_dispatcher.ts
-import { prisma } from "@/lib/prisma";
-import { sendTemplate, sendText, sendInteractive, logOutbound } from "@/lib/wa";
+        await sendGptGreeting(to, role, outlet);
+        const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+        if ( !useGptOnly) { 
+          try { await sendText(to, built.text, \ AI_DISPATCH_TEXT\, { gpt_sent: true }); } catch {}
+        }
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
 import { menuMain } from "@/lib/wa_messages";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
@@ -72,11 +74,14 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
       if (ctx.kind === "login_welcome") {
         // Send role-specific interactive menu then send only the human text (no OOC)
         const role = (ctx as any).role as string;
-        const built = buildAuthenticatedReply(role as any, (ctx as any).outlet || undefined);
-  // Send a GPT-generated greeting; GPT will compose any interactive followups
-  await sendGptGreeting(to, role, (ctx as any).outlet || undefined);
+        const outlet = (ctx as any).outlet || undefined;
+        const built = buildAuthenticatedReply(role as any, outlet);
+        await sendGptGreeting(to, role, outlet);
+        const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+        if (!useGptOnly) {
           // Send human-facing text only (mark as GPT-originated for strict mode)
           try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+        }
         // Log the OOC for observability (do not expose to user)
         try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
         result = { ok: true };
@@ -138,3 +143,6 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
 }
 
 export type { OpsContext };
+
+
+
