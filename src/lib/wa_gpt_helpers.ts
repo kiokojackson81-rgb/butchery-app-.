@@ -9,8 +9,8 @@ import { trySendGptInteractive } from './wa_gpt_interact';
  */
 export async function sendGptGreeting(phoneE164: string, role: string, outlet?: string) {
   try {
-    const prompt = `Respond with either plain text or JSON (object) with shape { text?: string, interactive?: { type: 'buttons'|'list', ... } }.
-Return a short greeting for a user logged in as ${role}${outlet ? ` at ${outlet}` : ''}. Provide a helpful prompt and, if useful, include an interactive payload.`;
+  const prompt = `Prefer returning JSON object with optional fields: { text?: string, interactive?: { type: 'buttons'|'list', buttons?: [{id,title}], sections?: [{title, rows:[{id,title,description}]}], buttonLabel?: string, bodyText?: string, footerText?: string } }.
+Return a short (1-2 sentence) greeting for a user logged in as ${role}${outlet ? ` at ${outlet}` : ''}. If user can act via quick replies, include an interactive payload. Ensure buttons are short and <=3; if more actions are needed, use a 'list' structure. Only emit raw JSON (no explanatory text) when possible.`;
   const reply = await runGptForIncoming(phoneE164, prompt);
     // If GPT returned a structured object, it may contain interactive instructions
     if (reply && typeof reply === 'object') {
