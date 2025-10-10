@@ -483,28 +483,26 @@ export async function POST(req: Request) {
             // mirrors the interactive mapping done later for interactive payloads.
             const digit = String(text || "").trim();
             if (/^[1-7]$/.test(digit)) {
-              if (!GPT_ONLY) {
+              try {
+                // Map the digit to the role-specific id and route regardless of GPT_ONLY
+                const id = mapDigitToId(sessRole, digit);
+                const flowId = canonicalToFlowId(sessRole, id);
+                if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+                else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+                else await handleAuthenticatedInteractive(_sess, flowId);
+                const to = toGraphPhone(phoneE164);
+                // If handler didn't emit outbound, send a tiny ack when tabs disabled
                 try {
-                  const id = mapDigitToId(sessRole, digit);
-                  const flowId = canonicalToFlowId(sessRole, id);
-                  if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
-                  else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
-                  else await handleAuthenticatedInteractive(_sess, flowId);
-                  const to = toGraphPhone(phoneE164);
-                  // If handler didn't emit outbound, send a tiny ack when tabs disabled
-                  try {
-                    if (!__sentOnce && !TABS_ENABLED) {
-                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-                    }
-                  } catch {}
-                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
-                  continue;
-                } catch (e) {
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, digit }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
-                }
+                  if (!__sentOnce && !TABS_ENABLED) {
+                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                  }
+                } catch {}
+                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                continue;
+              } catch (e) {
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, digit }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
               }
-              // Otherwise (GPT_ONLY=true) fall through to GPT path below
             }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}

@@ -2,24 +2,26 @@
 // Server-only builders for Supplier WhatsApp flows (interactive bodies)
 
 export function buildSupplierMenu() {
-  if (process.env.WA_GPT_ONLY === "true") {
-    // Avoid legacy builders in GPT-only; caller should use six-tabs instead.
-    return { type: "list", body: { text: "" }, action: { button: "Tabs", sections: [{ title: "Menu", rows: [] }] } } as const;
-  }
+  // Use an interactive list payload so we can present 2-7 actions with numeric
+  // shortcuts (WhatsApp reply buttons are limited to 3). The supplier UI is
+  // expected to show numeric shortcuts (1..7) and short descriptions.
   return {
     type: "list",
-    header: { type: "text", text: "BarakaOps — Supplier" },
-    body: { text: "Use the tabs:" },
+    header: { type: "text", text: "✅ Welcome — Supplier" },
+    body: { text: "Choose what you'd like to do." },
     action: {
-      button: "Tabs",
+      button: "Choose",
       sections: [
         {
           title: "Menu",
           rows: [
-            { id: "SPL_DELIVER", title: "Submit Supply", description: "Enter opening items" },
-            { id: "SPL_TRANSFER", title: "Record Transfer", description: "Move stock between outlets" },
-            { id: "SPL_RECENT", title: "Recent Supplies", description: "Today’s entries" },
-            { id: "SPL_DISPUTES", title: "View Disputes", description: "Open disputes" },
+            { id: "SUPL_DELIVERY", title: "1) Submit Delivery", description: "Create delivery for an outlet" },
+            { id: "SUPL_TRANSFER", title: "2) Transfer Between Outlets", description: "Move stock A → B" },
+            { id: "SUPL_VIEW_OPENING", title: "3) View Opening", description: "See today’s expected openings" },
+            { id: "SUPL_DISPUTES", title: "4) Disputes", description: "View open disputes" },
+            { id: "SUPL_PRICEBOOK", title: "5) Price List", description: "View pricebook (per outlet)" },
+            { id: "SUPL_HISTORY", title: "6) Recent Deliveries", description: "Recent dispatched/received" },
+            { id: "LOGOUT", title: "7) Logout", description: "End session and return to login" },
           ],
         },
       ],

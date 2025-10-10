@@ -110,14 +110,22 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
+    case "SUPL_DELIVERY": {
+      // Alias from GPT-driven OOC/menus: treat SUPL_DELIVERY same as SPL_DELIVER
+      await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_OUTLET", cursor: { date: today } });
+      const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
 
-    case "SPL_TRANSFER": {
+    case "SPL_TRANSFER":
+    case "SUPL_TRANSFER": {
       await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_FROM", cursor: { date: today } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
-    case "SPL_RECENT": {
+    case "SPL_RECENT":
+    case "SUPL_HISTORY": {
       const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { date: today }, orderBy: { id: "desc" }, take: 5 });
       const lines = (rows || []).length
         ? rows.map((r: any) => `• ${r.outletName} — ${r.itemKey} ${r.qty}${r.unit} @ ${r.buyPrice}`).join("\n")
@@ -126,7 +134,8 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
-    case "SPL_DISPUTES": {
+  case "SPL_DISPUTES":
+  case "SUPL_DISPUTES": {
       // show recent disputes (today or last 3 days) for visibility
       const since = new Date(Date.now() - 3 * 24 * 3600 * 1000);
       const items = await (prisma as any).reviewItem.findMany({ where: { type: { in: ["dispute", "supply_dispute"] as any }, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 10 });
@@ -141,6 +150,14 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
 
     case "SPL_BACK":
       return supplierGoBack(sess, gp);
+
+    case "LOGOUT": {
+      // Clear session state and instruct user to login
+      try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { state: 'LOGIN', code: null, outlet: null } }); } catch {}
+      await sendTextSafe(gp, "You've been logged out. To continue: tap Login.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      // Offer quick buttons: Login, Help
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: { type: "button", body: { text: "Next?" }, action: { buttons: [ { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Login" } }, { type: "reply", reply: { id: "SUPL_HELP", title: "Help" } } ] } } as any }, "AI_DISPATCH_INTERACTIVE");
+    }
 
     case "SPL_CANCEL":
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
