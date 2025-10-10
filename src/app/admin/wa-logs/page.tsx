@@ -7,6 +7,7 @@ type Log = {
   direction: "in" | "out";
   templateName: string | null;
   status: string | null;
+  type?: string | null;
   waMessageId: string | null;
   payload: any;
 };
@@ -40,6 +41,7 @@ export default function WALogsPage() {
   const [supervisorCfg, setSupervisorCfg] = useState<any | null>(null);
   const [cfgLoading, setCfgLoading] = useState(false);
   const [cfgSaving, setCfgSaving] = useState(false);
+  const [showGptOnly, setShowGptOnly] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -104,6 +106,17 @@ export default function WALogsPage() {
       return JSON.stringify(l.payload).slice(0, 120);
     })(),
   })), [logs]);
+
+  const gptRows = useMemo(() => logs.filter((l) => {
+    try {
+      const meta = l.payload?.meta || (typeof l.payload === 'object' ? l.payload : null);
+      if (meta && (meta.gpt_sent === true || (meta._type && String(meta._type).startsWith('AI_DISPATCH')))) return true;
+    } catch {}
+    if (String(l.type || '').startsWith('AI_DISPATCH')) return true;
+    return false;
+  }), [logs]);
+
+  const oocRows = useMemo(() => logs.filter((l) => l.type === 'OOC_INVALID' || l.type === 'OOC_INFO'), [logs]);
 
   return (
     <div className="p-4 space-y-4 bg-slate-900 text-slate-100 min-h-screen">
@@ -201,6 +214,73 @@ export default function WALogsPage() {
         </div>
         <div className="text-xs text-slate-400 mb-2">Result:</div>
         <pre className="bg-slate-800 p-2 rounded text-xs text-slate-200 max-h-64 overflow-auto">{diagResult ? JSON.stringify(diagResult, null, 2) : "No result"}</pre>
+      </div>
+
+      {/* GPT Debug summary */}
+      <div className="rounded border border-slate-700 p-3 bg-slate-900">
+        <h2 className="font-medium mb-2">GPT Debug</h2>
+        <div className="flex items-center gap-4 mb-3">
+          <div className="text-sm">GPT-origin rows: <strong>{gptRows.length}</strong></div>
+          <div className="text-sm">OOC issues: <strong>{oocRows.length}</strong></div>
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={showGptOnly} onChange={(e)=>setShowGptOnly(e.target.checked)} />
+            Show only GPT-origin
+          </label>
+          <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{ await load(); }}>Refresh logs</button>
+        </div>
+
+  <div className="mb-2 text-xs text-slate-400">Quick view (click a row to show raw)</div>
+        <div className="max-h-48 overflow-auto border border-slate-700 rounded">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="text-left bg-slate-800">
+                <th className="p-1">Time</th>
+                <th className="p-1">Dir</th>
+                <th className="p-1">Type</th>
+                <th className="p-1">Phone</th>
+                <th className="p-1">Short</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(showGptOnly ? gptRows : logs).slice(0, 50).map((l)=> (
+                <tr key={l.id} className="border-t hover:bg-slate-800 cursor-pointer" onClick={()=>setDiagResult(l)}>
+                  <td className="p-1 align-top">{new Date(l.createdAt).toLocaleTimeString()}</td>
+                  <td className="p-1 align-top">{l.direction}</td>
+                  <td className="p-1 align-top">{l.type || l.templateName || ''}</td>
+                  <td className="p-1 align-top">{l.payload?.meta?.phoneE164 || ''}</td>
+                  <td className="p-1 align-top font-mono truncate">{String(l.payload && (l.payload.text || l.payload.request || JSON.stringify(l.payload)).slice ? (l.payload.text || JSON.stringify(l.payload.request) || JSON.stringify(l.payload)).slice(0, 80) : JSON.stringify(l.payload)).slice(0, 80)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3">
+          <div className="flex items-center gap-2">
+            <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{
+              if (!diagResult) return alert('Select a row first');
+              // If selected row is inbound, attempt to extract text for GPT dry-run
+              let text = '';
+              try {
+                const p = diagResult.payload;
+                if (p?.text?.body) text = p.text.body;
+                else if (p?.interactive?.list_reply?.title) text = p.interactive.list_reply.title;
+                else if (p?.interactive?.button_reply?.title) text = p.interactive.button_reply.title;
+              } catch {}
+              const phone = diagResult.payload?.from || diagResult.payload?.meta?.phoneE164 || diagResult.payload?.phone || '';
+              if (!phone) return alert('Cannot determine phone from selected row');
+              const ok = confirm(`Re-run GPT dry-run for ${phone} using text: "${text || '<empty>'}"?`);
+              if (!ok) return;
+              try {
+                setDiagLoading(true);
+                const res = await fetch('/api/wa/admin/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, kind: 'gpt', text }) });
+                const j = await res.json().catch(()=>null);
+                setDiagResult({ status: res.status, body: j });
+              } catch (e:any) { setDiagResult({ error: String(e?.message || e) }); }
+              finally { setDiagLoading(false); }
+            }}>Re-run GPT dry-run for selected</button>
+            <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{ if (!diagResult) return alert('Select a row first'); setDiagResult(diagResult); }}>Show raw</button>
+          </div>
+        </div>
       </div>
 
       {/* Sender controls */}
