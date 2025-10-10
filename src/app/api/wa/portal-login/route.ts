@@ -69,7 +69,7 @@ export async function POST(req: Request) {
       });
 
   try { await warmUpSession(phoneGraph); } catch {}
-  await sendText(phoneGraph, "Welcome — you’re logged in. Use the tabs below to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+  await sendText(phoneGraph, "Welcome — you’re logged in. I just sent a short interactive greeting.", "AI_DISPATCH_TEXT", { gpt_sent: true });
   await sendGptGreeting(phoneGraph, (role as any) || "attendant", outlet || undefined);
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });

@@ -582,11 +582,11 @@ export async function POST(req: Request) {
                     if (GPT_ONLY) {
                       try { await sendGptGreeting(phoneE164.replace(/^\+/, ''), (sessRole as any) || 'attendant', _sess?.outlet || undefined); } catch {}
                     } else {
-                      const msg = TABS_ENABLED ? "I didn't quite get that. Use the tabs below." : "I didn't quite get that.";
+                      const msg = "I didn't quite get that. Please tell me what you'd like to do.";
                       await sendTextSafe(to, msg, "AI_DISPATCH_TEXT", { gpt_sent: true });
                     }
               } catch {}
-              try { await sendRoleTabsLocal(); } catch {}
+              try { if (TABS_ENABLED) await sendRoleTabsLocal(); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
             }

@@ -120,7 +120,7 @@ export function planDryResponse(userText: string): { text: string; ooc: DryOOC }
 
   // Default free text
   return {
-    text: "Let’s get you moving. Use the tabs below.",
+    text: "I didn't quite catch that — tell me what you'd like to do and I'll help.",
     ooc: { intent: "FREE_TEXT", args: {}, buttons: [...ATT_TABS], next_state_hint: "MENU" },
   };
 }
