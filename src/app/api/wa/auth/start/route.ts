@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { normalizeToPlusE164, toGraphPhone } from "@/lib/wa_phone";
 import { sendText, logOutbound, warmUpSession } from "@/lib/wa";
-import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,20 +73,17 @@ async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean>
 }
 
 async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }): Promise<boolean> {
-  const lines = [
-    `Login successful.`,
-    `Hello ${opts.name}. You’re logged in as ${opts.role} for ${opts.outlet || "—"}.`,
-  ];
-  if (opts.role === "attendant" && opts.products?.length) {
-    lines.push(`Products: ${opts.products.join(", ")}.`);
-  }
   const toGraph = toGraphPhone(opts.to);
   try { await warmUpSession(toGraph); } catch {}
-  const res = await sendText(toGraph, lines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
-  // Send a GPT-generated greeting instead of legacy interactive menu
-  await sendGptGreeting(toGraph, opts.role, opts.outlet || undefined);
+  const sent = await safeSendGreetingOrMenu({
+    phone: opts.to,
+    role: opts.role,
+    outlet: opts.outlet,
+    source: "auth_start_login_success",
+    sessionLike: { outlet: opts.outlet },
+  });
   await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
-  return (res as any)?.ok === true;
+  return sent;
 }
 
 async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string }): Promise<boolean> {

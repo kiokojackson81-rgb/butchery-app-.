@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { warmUpSession, sendText } from "@/lib/wa";
-import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { warmUpSession } from "@/lib/wa";
+import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
 
 export const runtime = "nodejs";
@@ -68,9 +68,16 @@ export async function POST(req: Request) {
         create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
       });
 
-  try { await warmUpSession(phoneGraph); } catch {}
-  await sendText(phoneGraph, "Welcome — you’re logged in. I just sent a short interactive greeting.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-  await sendGptGreeting(phoneGraph, (role as any) || "attendant", outlet || undefined);
+      try { await warmUpSession(phoneGraph); } catch {}
+      try {
+        await safeSendGreetingOrMenu({
+          phone: phonePlus,
+          role: (role as any) || "attendant",
+          outlet,
+          source: "portal_login_bound",
+          sessionLike: { outlet },
+        });
+      } catch {}
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
     }

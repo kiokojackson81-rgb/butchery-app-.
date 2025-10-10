@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
-import { sendText, warmUpSession, logOutbound } from "@/lib/wa";
+import { warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
-import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -91,10 +91,13 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   const to = toGraphPhone(phoneDB);
   try { await warmUpSession(to); } catch {}
-  // Welcome copy per spec (role-specific menu follows)
-  try { await sendText(to, "Login successful. What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
   try {
-    await sendGptGreeting(to, role, outletFinal || undefined);
+    await safeSendGreetingOrMenu({
+      phone: phoneDB,
+      role,
+      outlet: outletFinal,
+      source: "finalize_login_direct",
+    });
   } catch {}
 
   try {

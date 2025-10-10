@@ -23,7 +23,7 @@ import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
 import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
 import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
-import { sendAttendantMenu } from "@/lib/wa_attendant_flow";
+import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -300,11 +300,13 @@ export async function POST(req: Request) {
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
             try { console.info("[WA] SENDING tabs", { role }); } catch {}
             try {
-              if (role === "attendant") {
-                await sendAttendantMenu(to.startsWith("+") ? to : `+${to}`, { outlet });
-              } else {
-                await sendGptGreeting(to.replace(/^[+]/, ""), role, outlet);
-              }
+              await safeSendGreetingOrMenu({
+                phone: to.startsWith("+") ? to : `+${to}`,
+                role,
+                outlet,
+                source: "webhook_send_role_tabs",
+                sessionLike: role === "attendant" ? { outlet } : undefined,
+              });
             } catch (e) {
               try { console.warn('[WA] sendRoleTabs fallback', String(e)); } catch {}
               try { await sendText(to, "How can I help? Please tell me what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
@@ -649,7 +651,13 @@ export async function POST(req: Request) {
                   allowedButtons.length > 0 &&
                   allowedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b));
                 if (isAttendant && (ATTENDANT_MENU_INTENTS.has(normalizedIntent) || looksLikeMenu)) {
-                  await sendAttendantMenu(phoneE164, _sess);
+                  await safeSendGreetingOrMenu({
+                    phone: phoneE164,
+                    role: sessRole,
+                    outlet: _sess?.outlet,
+                    source: "webhook_ai_menu",
+                    sessionLike: _sess,
+                  });
                   markSent();
                   continue;
                 }
@@ -1042,7 +1050,13 @@ export async function POST(req: Request) {
 
                 const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
                 if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                  await sendAttendantMenu(phoneE164, _sess);
+                  await safeSendGreetingOrMenu({
+                    phone: phoneE164,
+                    role: sessRole,
+                    outlet: _sess?.outlet,
+                    source: "webhook_gpt_selection_menu",
+                    sessionLike: _sess,
+                  });
                   markSent();
                   continue;
                 }
@@ -1090,7 +1104,13 @@ export async function POST(req: Request) {
               const to = toGraphPhone(phoneE164);
               const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
               if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                await sendAttendantMenu(phoneE164, _sess);
+                await safeSendGreetingOrMenu({
+                  phone: phoneE164,
+                  role: sessRole,
+                  outlet: _sess?.outlet,
+                  source: "webhook_interactive_menu",
+                  sessionLike: _sess,
+                });
                 markSent();
                 continue;
               }

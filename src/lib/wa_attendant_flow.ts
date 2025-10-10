@@ -142,7 +142,7 @@ async function notifySupAdm(message: string) {
 export async function sendAttendantMenu(phone: string, sess: any, opts?: { force?: boolean; source?: string }) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
   if (!opts?.force) {
-    const allowed = await _menuAllowedForPhone(phoneE164);
+    const allowed = await menuSendAllowed(phoneE164);
     if (!allowed) {
       try { console.info?.(`[wa] skip attendant menu`, { phoneE164, source: opts?.source }); } catch {}
       return;
@@ -153,7 +153,7 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
   if (useGptOnly) {
     const outlet = sess?.outlet || undefined;
     await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', outlet);
-    await _markMenuSent(phoneE164, opts?.source);
+    await markMenuSent(phoneE164, opts?.source);
     return;
   }
 
@@ -181,7 +181,7 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
     },
   });
   await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
-  await _markMenuSent(phoneE164, opts?.source);
+  await markMenuSent(phoneE164, opts?.source);
 }
 
 async function getAvailableClosingProducts(sess: any, cursor: Cursor) {
@@ -217,13 +217,13 @@ async function promptLogin(phone: string) {
 }
 
 // --- Menu send guard helpers: prevent duplicate menu/greeting sends within short window ---
-async function _menuAllowedForPhone(phoneE164: string) {
+export async function menuSendAllowed(phoneE164: string, minIntervalMs = 8_000) {
   try {
     const st = await getWaState(phoneE164);
     const last = st?.lastMenuSentAt ? new Date(st.lastMenuSentAt).getTime() : 0;
-    const allowed = Date.now() - last > 8_000; // allow if more than 8 seconds since last menu
+    const allowed = Date.now() - last > minIntervalMs; // allow if more than the threshold since last menu
     if (!allowed) {
-      try { console.info?.(`[wa] menu suppressed`, { phoneE164, lastSentAt: st?.lastMenuSentAt }); } catch {}
+      try { console.info?.(`[wa] menu suppressed`, { phoneE164, lastSentAt: st?.lastMenuSentAt, minIntervalMs }); } catch {}
     }
     return allowed;
   } catch (e) {
@@ -231,7 +231,7 @@ async function _menuAllowedForPhone(phoneE164: string) {
   }
 }
 
-async function _markMenuSent(phoneE164: string, source?: string) {
+export async function markMenuSent(phoneE164: string, source?: string) {
   try {
     const now = new Date().toISOString();
     await updateWaState(phoneE164, { lastMenuSentAt: now, lastMessageAt: now });
@@ -239,6 +239,45 @@ async function _markMenuSent(phoneE164: string, source?: string) {
   } catch (e) {
     // best-effort
   }
+}
+
+type GreetingParams = {
+  phone: string;
+  role?: string | null;
+  outlet?: string | null;
+  force?: boolean;
+  source?: string;
+  sessionLike?: any;
+};
+
+export async function safeSendGreetingOrMenu({
+  phone,
+  role,
+  outlet,
+  force = false,
+  source,
+  sessionLike,
+}: GreetingParams): Promise<boolean> {
+  const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+  const roleKey = String(role || "attendant");
+  const roleKind = roleKey.toLowerCase();
+  const shouldSend = force || (await menuSendAllowed(phoneE164));
+  if (!shouldSend) {
+    try { console.info?.(`[wa] greeting suppressed`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+    return false;
+  }
+
+  if (roleKind === "attendant") {
+    const sess = sessionLike || { outlet: outlet ?? undefined };
+    await sendAttendantMenu(phoneE164, sess, { force: true, source });
+  } else {
+    const toGraph = phoneE164.replace(/^\+/, "");
+    await sendGptGreeting(toGraph, roleKind, outlet || undefined);
+    await markMenuSent(phoneE164, source);
+  }
+
+  try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+  return true;
 }
 
 
@@ -291,11 +330,12 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
     lastMessageAt: new Date().toISOString(),
   });
 
-  if (finalRole === "attendant") {
-    await sendAttendantMenu(phoneE164, { outlet }, { source: "bind_enter_menu" });
-  } else {
-    await sendGptGreeting(phoneE164.replace(/^\+/, ""), finalRole, outlet || undefined);
-  }
+  await safeSendGreetingOrMenu({
+    phone: phoneE164,
+    role: finalRole,
+    outlet,
+    source: "bind_enter_menu",
+  });
   return true;
 }
 
@@ -337,12 +377,12 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-      const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
-      if (useGptOnly) {
-        await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined);
-      } else {
-        await sendAttendantMenu(phone, s, { source: "inactivity_resume" });
-      }
+      await safeSendGreetingOrMenu({
+        phone,
+        role: s.role || "attendant",
+        outlet: s.outlet,
+        source: "inactivity_resume",
+      });
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -439,12 +479,14 @@ export async function handleInboundText(phone: string, text: string) {
       await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
-    const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
-    if (useGptOnly) {
-      await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined);
-    } else {
-      await sendAttendantMenu(phone, s, { force: menuRequested, source: menuRequested ? "menu_command" : "menu_state" });
-    }
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: menuRequested,
+      source: menuRequested ? "menu_command" : "menu_state",
+      sessionLike: s,
+    });
     return;
   }
 
@@ -461,7 +503,14 @@ export async function handleInboundText(phone: string, text: string) {
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         await saveSession(phone, { state: "MENU", ...cur });
-        await sendAttendantMenu(phone, s, { force: true, source: "day_locked_guard" });
+        await safeSendGreetingOrMenu({
+          phone,
+          role: s.role || "attendant",
+          outlet: s.outlet,
+          force: true,
+          source: "day_locked_guard",
+          sessionLike: s,
+        });
         return;
       }
       // Guard: product already closed today
@@ -533,7 +582,14 @@ export async function handleInboundText(phone: string, text: string) {
         if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         await saveSession(phone, { state: "MENU", ...cur });
-        await sendAttendantMenu(phone, s, { force: true, source: "day_locked_guard_waste" });
+        await safeSendGreetingOrMenu({
+          phone,
+          role: s.role || "attendant",
+          outlet: s.outlet,
+          force: true,
+          source: "day_locked_guard_waste",
+          sessionLike: s,
+        });
         return;
       }
       item.waste = val;
@@ -580,7 +636,14 @@ export async function handleInboundText(phone: string, text: string) {
     }
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     if (process.env.WA_GPT_ONLY === 'true') {
-      await sendAttendantMenu(phone, s, { source: "expense_followup" });
+      await safeSendGreetingOrMenu({
+        phone,
+        role: s.role || "attendant",
+        outlet: s.outlet,
+        force: true,
+        source: "expense_followup",
+        sessionLike: s,
+      });
     } else {
       await sendInteractive(expenseFollowupButtons(phone), "AI_DISPATCH_INTERACTIVE");
     }
@@ -637,7 +700,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   if (id === "NAV_MENU") {
     await saveSession(phone, { state: "MENU", ...cur });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
-    await sendAttendantMenu(phone, s, { force: true, source: "nav_menu" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "nav_menu",
+      sessionLike: s,
+    });
     return true;
   }
 
@@ -645,7 +715,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     await saveSession(phone, { state: "MENU", ...cur, rows: [], currentItem: undefined });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendText(phone, "Closing draft cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await sendAttendantMenu(phone, s, { force: true, source: "nav_cancel" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "nav_cancel",
+      sessionLike: s,
+    });
     return true;
   }
 
@@ -696,7 +773,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     await saveSession(phone, { state: "MENU", ...cur });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
-    await sendAttendantMenu(phone, s, { force: true, source: "nav_back_menu" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "nav_back_menu",
+      sessionLike: s,
+    });
     return true;
   }
   // Quick path: show the extended list menu
@@ -707,7 +791,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
     await saveSession(phone, { state: "MENU", ...cur });
-    await sendAttendantMenu(phone, s, { force: true, source: "interactive_menu_button" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "interactive_menu_button",
+      sessionLike: s,
+    });
     return true;
   }
 
@@ -966,7 +1057,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     await saveSession(phone, { state: "MENU", ...cur, currentItem: undefined });
     await updateWaState(phoneE164, { currentAction: "menu", closingDraft: undefined, lastMessageAt: new Date().toISOString() });
     await sendText(phone, "Closing draft cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await sendAttendantMenu(phone, s, { force: true, source: "summary_cancel" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "summary_cancel",
+      sessionLike: s,
+    });
     return true;
   }
 
@@ -1088,7 +1186,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   }
   if (id === "EXP_FINISH") {
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
-    await sendAttendantMenu(phone, s, { force: true, source: "expense_finish" });
+    await safeSendGreetingOrMenu({
+      phone,
+      role: s.role || "attendant",
+      outlet: s.outlet,
+      force: true,
+      source: "expense_finish",
+      sessionLike: s,
+    });
     return true;
   }
 
