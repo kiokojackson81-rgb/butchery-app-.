@@ -19,6 +19,7 @@ import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { sendCanonicalTabs } from "@/lib/wa_tabs";
 import { handleSupplyDispute } from "@/server/supply_notify";
 // (sendText) already imported; (prisma) already imported at top
 
@@ -233,7 +234,8 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-        await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+  try { await sendCanonicalTabs(phone.replace(/^\+/, ""), 'attendant', s.outlet || undefined); } catch {}
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -331,7 +333,8 @@ export async function handleInboundText(phone: string, text: string) {
       return;
     }
     if (/^MENU$/i.test(t)) {
-        await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+    await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+    try { await sendCanonicalTabs(phone.replace(/^\+/, ""), 'attendant', s.outlet || undefined); } catch {}
       return;
     }
     // Otherwise user may send arbitrary text; guide them back

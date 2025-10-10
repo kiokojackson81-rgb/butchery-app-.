@@ -4,6 +4,7 @@ import { sendTemplate, sendText, sendInteractive, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
 import { menuMain } from "@/lib/wa_messages";
 import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { sendCanonicalTabs } from "@/lib/wa_tabs";
 import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
 import { createLoginLink } from "@/server/wa_links";
 
@@ -73,8 +74,9 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         // Send role-specific interactive menu then send only the human text (no OOC)
         const role = (ctx as any).role as string;
         const built = buildAuthenticatedReply(role as any, (ctx as any).outlet || undefined);
-        // Send a GPT-generated greeting instead of legacy menu payloads
-        await sendGptGreeting(to, role, (ctx as any).outlet || undefined);
+  // Send a GPT-generated greeting; also send canonical tabs for parity
+  await sendGptGreeting(to, role, (ctx as any).outlet || undefined);
+  try { await sendCanonicalTabs(to, role as any, (ctx as any).outlet || undefined); } catch {}
           // Send human-facing text only (mark as GPT-originated for strict mode)
           try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
         // Log the OOC for observability (do not expose to user)
