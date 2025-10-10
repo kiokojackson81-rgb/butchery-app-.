@@ -46,6 +46,25 @@ export function buildNavigationRow(): WaQuickReplyButton[] {
   return [...NAV_BUTTONS];
 }
 
+export function buildClosingReviewButtons(includeMenu = true): WaQuickReplyButton[] {
+  const buttons: WaQuickReplyButton[] = [
+    { type: "reply", reply: { id: "SUMMARY_SUBMIT", title: "Confirm & Submit" } },
+    { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Edit Entries" } },
+    { type: "reply", reply: { id: "SUMMARY_CANCEL", title: "Cancel" } },
+  ];
+  if (includeMenu) buttons.push({ type: "reply", reply: { id: "NAV_MENU", title: "Main Menu" } });
+  return buttons;
+}
+
+export function buildClosingNextActionsButtons(): WaQuickReplyButton[] {
+  return [
+    { type: "reply", reply: { id: "ATT_CLOSING", title: "New Closing" } },
+    { type: "reply", reply: { id: "ATT_DEPOSIT", title: "Record Deposit" } },
+    { type: "reply", reply: { id: "ATT_EXPENSE", title: "Add Expense" } },
+    { type: "reply", reply: { id: "NAV_MENU", title: "Main Menu" } },
+  ];
+}
+
 export function buildAttendantMainMenuText(outletName?: string, tradingDate?: string): string {
   const header = [
     outletName ? `Outlet: ${outletName}` : null,
@@ -126,3 +145,13 @@ export function buildListPayload(to: string, interactive: WaListPayload["interac
     interactive,
   };
 }
+
+export function buildClosingNotifyButtons(): WaQuickReplyButton[] {
+  return [
+    { type: "reply", reply: { id: "ATT_EXPENSE", title: "Add Expense" } },
+    { type: "reply", reply: { id: "ATT_DEPOSIT", title: "Record Deposit" } },
+    { type: "reply", reply: { id: "ATT_CLOSING", title: "New Closing" } },
+    { type: "reply", reply: { id: "NAV_MENU", title: "Main Menu" } },
+  ];
+}
+

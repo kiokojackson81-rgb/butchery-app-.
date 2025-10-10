@@ -240,35 +240,6 @@ export function promptWaste(to: string, itemTitle: string) {
   return msgText(to, `Enter waste (kg) for ${itemTitle}`);
 }
 
-export async function summarySubmitModify(
-  to: string,
-  rows: Array<{ name: string; closing: number; waste: number }>,
-  outletName: string
-) {
-  const lines = rows.map((r) => `${r.name}: closing ${r.closing}, waste ${r.waste}`);
-  const body = sanitizeText([outletName ? `${outletName} — summary` : "Summary", ...lines].join("\n"), WA_MAXS.BODY_TEXT)!;
-  const cfg = await getAttendantConfig();
-  const buttons: any[] = [
-    { type: "reply", reply: { id: "SUMMARY_SUBMIT", title: "Submit" } },
-  ];
-  if (cfg.enableSubmitAndLock) {
-    buttons.push({ type: "reply", reply: { id: "SUMMARY_LOCK", title: "Submit & Lock" } });
-  }
-  buttons.push({ type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Modify" } });
-  return {
-    messaging_product: "whatsapp",
-    to,
-    type: "interactive",
-    interactive: {
-      type: "button",
-      body: { text: body },
-      action: {
-        buttons,
-      },
-    },
-  } as const;
-}
-
 export function expenseNamePrompt(to: string) {
   return msgText(to, "Enter expense name (e.g., Transport)");
 }
