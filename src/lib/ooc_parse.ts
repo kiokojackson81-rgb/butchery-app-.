@@ -20,37 +20,21 @@ export function buildUnauthenticatedReply(deepLink: string, dedupe = false): { t
 }
 
 export function buildAuthenticatedReply(role: "attendant"|"supervisor"|"supplier", outlet?: string): { text: string; buttons: string[]; ooc: string } {
-  // Professional, concise welcome text for each role
-  let text = "";
-  let buttons: string[] = [];
-  let args: Record<string, any> = { role };
-  switch (role) {
-    case "attendant":
-      text = `✅ Welcome back — ${outlet || "Outlet"}\nHow can I help you today?\n1) Enter Closing  2) Deposit (paste SMS)  3) Expense\n4) Summary  5) Till Count  6) Supply (view)`;
-      buttons = ["ATT_CLOSING", "ATT_DEPOSIT", "MENU_SUMMARY"];
-      args.outlet = outlet;
-      break;
-    case "supervisor":
-      text = `✅ Welcome — Supervisor\nQuick actions:\n1) Review Closings  2) Review Deposits  3) Review Expenses`;
-      buttons = ["SV_REVIEW_CLOSINGS", "SV_REVIEW_DEPOSITS", "SV_REVIEW_EXPENSES"];
-      break;
-    case "supplier":
-      text = `✅ Welcome — Supplier\nActions:\n1) Submit Delivery  2) View Opening  3) Disputes`;
-      buttons = ["SUPL_DELIVERY", "SUPL_VIEW_OPENING", "SUPL_DISPUTES"];
-      break;
-  }
+  const roleLabel = role === "attendant"
+    ? (outlet ? `${outlet} attendant` : "attendant")
+    : role;
+  const text = `Welcome back ${roleLabel}. I'll handle the rest - just tell me what you need.`;
+  const args: Record<string, any> = { role, ...(outlet ? { outlet } : {}) };
+  const buttons: string[] = [];
   const ooc = `<<<OOC>\n${JSON.stringify({
     intent: "MENU",
     args,
     buttons,
-    next_state_hint: "MENU"
+    next_state_hint: "GPT"
   }, null, 2)}\n</OOC>>>`;
-  return {
-    text,
-    buttons,
-    ooc
-  };
+  return { text, buttons, ooc };
 }
+
 // Helpers to parse and strip OOC blocks from GPT replies.
 
 /**
@@ -93,3 +77,4 @@ export function stripOOC(text: string): string {
 }
 
 export default { parseOOCBlock, stripOOC };
+
