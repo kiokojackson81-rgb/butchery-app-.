@@ -28,6 +28,36 @@ export function planDryResponse(userText: string): { text: string; ooc: DryOOC }
   const t = String(userText || "").trim();
   const lower = t.toLowerCase();
 
+  // Button echoes from interactive replies: "[button:ATT_CLOSING] Enter Closing"
+  {
+    const m = /^\s*\[button:([A-Z0-9_\-:]+)\]\s*(.*)$/i.exec(t);
+    if (m) {
+      const rawId = m[1].toUpperCase();
+      const title = m[2].trim();
+      const intentTextMap: Record<string, { text: string; next?: string }> = {
+        ATT_CLOSING: { text: "Opening closing flow.", next: "STOCK" },
+        ATT_DEPOSIT: { text: "Ready for the deposit SMS.", next: "DEPOSITS" },
+        ATT_EXPENSE: { text: "Let's capture that expense.", next: "EXPENSES" },
+        MENU_SUMMARY: { text: "Here's today's summary snapshot.", next: "SUMMARY" },
+        MENU_SUPPLY: { text: "Viewing supply options.", next: "SUPPLY" },
+        TILL_COUNT: { text: "Till count coming up.", next: "TILL" },
+        HELP: { text: "How can I help?", next: "MENU" },
+        MENU: { text: "Back to menu.", next: "MENU" },
+      };
+      const intent = rawId;
+      const meta = intentTextMap[intent] || { text: `Opening ${title || intent}.`, next: "MENU" };
+      return {
+        text: meta.text,
+        ooc: {
+          intent,
+          args: {},
+          buttons: [...ATT_TABS],
+          next_state_hint: meta.next,
+        },
+      };
+    }
+  }
+
   // 1-6 digit shortcuts
   const mDigit = /^\s*([1-6])\s*$/.exec(t);
   if (mDigit) {
