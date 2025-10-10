@@ -284,31 +284,15 @@ export async function POST(req: Request) {
             }
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
-                            try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
-                    // In strict GPT-only deployments, route fallbacks to GPT so GPT composes
-                    // any clarifiers or interactive payloads instead of sending legacy static menus.
-                    if (String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true") {
-                      try { await sendGptGreeting(to.replace(/^[+]/, ''), role, outlet); } catch {}
-                      return;
-                    }
-                    // Use GPT-driven buttons (fallback to role defaults when not in GPT-only mode)
-            const def = (role === 'supervisor')
-              ? ["SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES","SV_APPROVE_UNLOCK","SV_PRICEBOOK","SV_SUMMARY"]
-              : (role === 'supplier')
-              ? ["SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_DISPUTES","SUPL_HISTORY","HELP","MENU"]
-              : ["ATT_CLOSING","ATT_DEPOSIT","MENU_SUMMARY"];
-            // If more than 3 defaults, present as a list so WhatsApp won't reject
+            // GPT-first: always ask the model to compose any clarifier/interactive payload.
+            // This prevents emitting legacy static tab/list/button payloads from the server.
+            try { console.info("[WA] SENDING via GPT", { role }); } catch {}
             try {
-              if (Array.isArray(def) && def.length > 3) {
-                const rows = def.map((id) => ({ id: String(id), title: humanTitle(id) }));
-                const payload = buildInteractiveListPayload({ to, bodyText: "Choose an action:", buttonLabel: "Choose", sections: [{ title: "Menu", rows }] });
-                await sendInteractiveLib(payload as any, "AI_DISPATCH_INTERACTIVE");
-              } else {
-                await sendButtonsFor(to, def);
-              }
+              // Normalize phone and delegate to GPT helper which will validate any interactive JSON
+              await sendGptGreeting(to.replace(/^[+]/, ''), role, outlet);
             } catch (e) {
-              // Fallback to buttons for robustness
-              await sendButtonsFor(to, def);
+              try { console.warn('[WA] sendGptGreeting failed, falling back to short text', String(e)); } catch {}
+              try { await sendText(to, "How can I help? Please tell me what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
             }
             markSent();
           };
