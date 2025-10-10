@@ -43,6 +43,7 @@ export function planDryResponse(userText: string): { text: string; ooc: DryOOC }
         TILL_COUNT: { text: "Till count coming up.", next: "TILL" },
         HELP: { text: "How can I help?", next: "MENU" },
         MENU: { text: "Back to menu.", next: "MENU" },
+        LOGOUT: { text: "Logging you out.", next: "MENU" },
       };
       const intent = rawId;
       const meta = intentTextMap[intent] || { text: `Opening ${title || intent}.`, next: "MENU" };

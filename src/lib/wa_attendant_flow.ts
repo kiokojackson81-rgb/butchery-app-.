@@ -21,8 +21,6 @@ import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { handleSupplyDispute } from "@/server/supply_notify";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
 import {
-  buildAttendantMainMenuButtons,
-  buildAttendantMainMenuText,
   buildButtonPayload,
   buildListPayload,
   buildProductPickerBody,
@@ -142,9 +140,29 @@ async function notifySupAdm(message: string) {
 }
 
 async function sendAttendantMenu(phone: string, sess: any) {
-  const menuText = buildAttendantMainMenuText(sess.outlet || undefined, today());
-  const buttons = buildAttendantMainMenuButtons();
-  const payload = buildButtonPayload(phone.replace(/^\+/, ""), menuText, buttons);
+  const outlet = sess?.outlet || undefined;
+  const header = outlet ? `You're logged in as an attendant at ${outlet}.` : "You're logged in as an attendant.";
+  await sendText(phone, `${header} What would you like to do?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+
+  const rows = [
+    { id: "ATT_CLOSING", title: "Enter Closing Stock", description: "Record today's closing quantities" },
+    { id: "MENU_SUPPLY", title: "View Supply", description: "Check opening stock & deliveries" },
+    { id: "ATT_EXPENSE", title: "Add Expense", description: "Capture outlet expenses" },
+    { id: "MENU_TXNS", title: "View Till Count", description: "See today's till payments" },
+    { id: "MENU_SUMMARY", title: "View Summary", description: "Review today's snapshot" },
+    { id: "LOGOUT", title: "Logout", description: "End session and re-login" },
+  ];
+
+  const payload = buildListPayload(phone.replace(/^\+/, ""), {
+    type: "list",
+    header: { type: "text", text: "Choose an action" },
+    body: { text: "Pick one option below." },
+    footer: { text: "Need something else? Reply HELP." },
+    action: {
+      button: "Menu",
+      sections: [{ title: "Attendant menu", rows }],
+    },
+  });
   await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
 }
 
@@ -229,18 +247,10 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
     lastMessageAt: new Date().toISOString(),
   });
 
-  const to = phoneE164.replace(/^\+/, "");
   if (finalRole === "attendant") {
-    if (process.env.WA_GPT_ONLY === 'true') {
-      await sendGptGreeting(to, finalRole, outlet || undefined);
-    } else {
-      const menuText = buildAttendantMainMenuText(outlet || undefined, tradingDate);
-      const buttons = buildAttendantMainMenuButtons();
-      const payload = buildButtonPayload(to, menuText, buttons);
-      await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
-    }
+    await sendAttendantMenu(phoneE164, { outlet });
   } else {
-    await sendGptGreeting(to, finalRole, outlet || undefined);
+    await sendGptGreeting(phoneE164.replace(/^\+/, ""), finalRole, outlet || undefined);
   }
   return true;
 }
@@ -283,7 +293,7 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+      await sendAttendantMenu(phone, s);
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -380,12 +390,8 @@ export async function handleInboundText(phone: string, text: string) {
       await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
-    if (/^MENU$/i.test(t)) {
-    await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
-      return;
-    }
-    // Otherwise user may send arbitrary text; guide them back
-    // Fallthrough to next state handlers below
+    await sendAttendantMenu(phone, s);
+    return;
   }
 
   // CLOSING_QTY numeric gate
@@ -400,8 +406,8 @@ export async function handleInboundText(phone: string, text: string) {
       // Guard: day-level lock
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await saveSession(phone, { state: "MENU", ...cur });
-          await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+        await saveSession(phone, { state: "MENU", ...cur });
+        await sendAttendantMenu(phone, s);
         return;
       }
       // Guard: product already closed today
@@ -473,7 +479,7 @@ export async function handleInboundText(phone: string, text: string) {
         if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         await saveSession(phone, { state: "MENU", ...cur });
-          await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+        await sendAttendantMenu(phone, s);
         return;
       }
       item.waste = val;
@@ -519,7 +525,9 @@ export async function handleInboundText(phone: string, text: string) {
       await notifySupAdm(`Expense recorded at ${s.outlet} (${cur.date}): ${cur.expenseName || "Expense"}  KSh ${amount}`);
     }
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+    if (process.env.WA_GPT_ONLY === 'true') {
+      await sendAttendantMenu(phone, s);
+    } else {
       await sendInteractive(expenseFollowupButtons(phone), "AI_DISPATCH_INTERACTIVE");
     }
     return;
@@ -587,6 +595,20 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     return;
   }
 
+  if (id === "LOGOUT") {
+    if (s?.id) {
+      try {
+        await (prisma as any).waSession.update({
+          where: { id: s.id },
+          data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
+        });
+      } catch {}
+    }
+    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    await promptLogin(phone);
+    return;
+  }
+
   if (id === "NAV_BACK") {
     if (["CLOSING_QTY", "CLOSING_PICK", "SUMMARY", "CLOSING_WASTE_QTY"].includes(s.state)) {
       cur.currentItem = undefined;
@@ -631,7 +653,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       return;
     }
     await saveSession(phone, { state: "MENU", ...cur });
-  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+    await sendAttendantMenu(phone, s);
     return;
   }
 
@@ -993,8 +1015,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   }
   if (id === "EXP_FINISH") {
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
-    const to = phone.replace(/^\+/, "");
-  await sendGptGreeting(to, "attendant", s.outlet || undefined);
+    await sendAttendantMenu(phone, s);
     return;
   }
 }
