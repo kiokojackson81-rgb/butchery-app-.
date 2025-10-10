@@ -23,10 +23,24 @@ import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
 import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
 import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
+import { sendAttendantMenu } from "@/lib/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const ATTENDANT_MENU_BUTTONS = new Set([
+  "ATT_CLOSING",
+  "MENU_SUPPLY",
+  "ATT_EXPENSE",
+  "MENU_TXNS",
+  "MENU_SUMMARY",
+  "ATT_DEPOSIT",
+  "MENU",
+  "HELP",
+  "LOGOUT",
+]);
+const ATTENDANT_MENU_INTENTS = new Set(["MENU", "HELP", "FREE_TEXT", "LOGIN"]);
 
 // Type guard helper for auth union returned by ensureAuthenticated()
 function authOk(a: any): a is { ok: true; sess: any } {
@@ -284,14 +298,15 @@ export async function POST(req: Request) {
             }
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
-            // GPT-first: always ask the model to compose any clarifier/interactive payload.
-            // This prevents emitting legacy static tab/list/button payloads from the server.
-            try { console.info("[WA] SENDING via GPT", { role }); } catch {}
+            try { console.info("[WA] SENDING tabs", { role }); } catch {}
             try {
-              // Normalize phone and delegate to GPT helper which will validate any interactive JSON
-              await sendGptGreeting(to.replace(/^[+]/, ''), role, outlet);
+              if (role === "attendant") {
+                await sendAttendantMenu(to.startsWith("+") ? to : `+${to}`, { outlet });
+              } else {
+                await sendGptGreeting(to.replace(/^[+]/, ""), role, outlet);
+              }
             } catch (e) {
-              try { console.warn('[WA] sendGptGreeting failed, falling back to short text', String(e)); } catch {}
+              try { console.warn('[WA] sendRoleTabs fallback', String(e)); } catch {}
               try { await sendText(to, "How can I help? Please tell me what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
             }
             markSent();
@@ -616,7 +631,7 @@ export async function POST(req: Request) {
                   'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUPL_HISTORY',
                   // Attendant intents (both legacy ATT_* and canonical ATT_TAB_*)
                   'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
-                  'MENU','MENU_SUMMARY','MENU_SUPPLY','HELP',
+                  'MENU','MENU_SUMMARY','MENU_SUPPLY','MENU_TXNS','HELP','LOGOUT',
                   // Supplier intents (additional canonical forms)
                   'SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',
                   // Supervisor canonical/tab forms
@@ -628,6 +643,16 @@ export async function POST(req: Request) {
                 const normalizedIntent = String(ooc.intent || '').toUpperCase();
                 const allowedButtons = Array.isArray(ooc.buttons) ? (ooc.buttons as string[]).map(b=>String(b||'').toUpperCase()).filter(b=>ALLOWED.has(b)) : [];
                 ooc.buttons = allowedButtons;
+
+                const isAttendant = sessRole === "attendant";
+                const looksLikeMenu =
+                  allowedButtons.length > 0 &&
+                  allowedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b));
+                if (isAttendant && (ATTENDANT_MENU_INTENTS.has(normalizedIntent) || looksLikeMenu)) {
+                  await sendAttendantMenu(phoneE164, _sess);
+                  markSent();
+                  continue;
+                }
 
                 // If the intent is not allowed, treat as invalid OOC and fallback
                 if (!ALLOWED.has(normalizedIntent)) {
@@ -771,6 +796,10 @@ export async function POST(req: Request) {
 
                 if (!handledByServer) {
                   await handleAuthenticatedInteractive(_sess, flowId);
+                  if (flowId === "MENU" && sessRole === "attendant") {
+                    markSent();
+                    continue;
+                  }
                 } else {
                   // If server handled the create, send a short confirmation and role tabs
                   try {
@@ -1011,6 +1040,13 @@ export async function POST(req: Request) {
                 const ooc = parseOOCBlock(replyText);
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
+                const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
+                if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
+                  await sendAttendantMenu(phoneE164, _sess);
+                  markSent();
+                  continue;
+                }
+
                 const to = toGraphPhone(phoneE164);
                 const display = stripOOC(replyText);
                 if (display) {
@@ -1052,6 +1088,12 @@ export async function POST(req: Request) {
               const ooc = parseOOCBlock(replyText);
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
               const to = toGraphPhone(phoneE164);
+              const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
+              if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
+                await sendAttendantMenu(phoneE164, _sess);
+                markSent();
+                continue;
+              }
               const display = stripOOC(replyText);
               if (display) {
                 try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}

@@ -139,7 +139,7 @@ async function notifySupAdm(message: string) {
   }
 }
 
-async function sendAttendantMenu(phone: string, sess: any) {
+export async function sendAttendantMenu(phone: string, sess: any) {
   const outlet = sess?.outlet || undefined;
   const header = outlet ? `You're logged in as an attendant at ${outlet}.` : "You're logged in as an attendant.";
   await sendText(phone, `${header} What would you like to do?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
