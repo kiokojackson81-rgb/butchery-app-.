@@ -4,7 +4,7 @@ import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
 import { sendText, warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
-import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -94,9 +94,7 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
   // Welcome copy per spec (role-specific menu follows)
   try { await sendText(to, "Login successful. What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
   try {
-    if (role === "attendant") await sendAttendantMenu(to, outletFinal || "your outlet");
-    else if (role === "supervisor") await sendSupervisorMenu(to);
-    else await sendSupplierMenu(to);
+    await sendGptGreeting(to, role, outletFinal || undefined);
   } catch {}
 
   try {

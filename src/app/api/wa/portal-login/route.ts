@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { warmUpSession, sendText } from "@/lib/wa";
-import { sendSixTabs } from "@/lib/wa_buttons";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
 
 export const runtime = "nodejs";
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
 
   try { await warmUpSession(phoneGraph); } catch {}
   await sendText(phoneGraph, "Welcome — you’re logged in. Use the tabs below to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-  await sendSixTabs(phoneGraph, (role as any) || "attendant", outlet || undefined);
+  await sendGptGreeting(phoneGraph, (role as any) || "attendant", outlet || undefined);
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
     }

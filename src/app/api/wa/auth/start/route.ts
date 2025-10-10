@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { normalizeToPlusE164, toGraphPhone } from "@/lib/wa_phone";
 import { sendText, logOutbound, warmUpSession } from "@/lib/wa";
-import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,10 +83,8 @@ async function sendLoginSuccessDM(opts: { to: string; name: string; role: string
   const toGraph = toGraphPhone(opts.to);
   try { await warmUpSession(toGraph); } catch {}
   const res = await sendText(toGraph, lines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
-  // Immediately send role-specific interactive menu
-  if (opts.role === "attendant") await sendAttendantMenu(toGraph, opts.outlet || "your outlet");
-  else if (opts.role === "supplier") await sendSupplierMenu(toGraph);
-  else await sendSupervisorMenu(toGraph);
+  // Send a GPT-generated greeting instead of legacy interactive menu
+  await sendGptGreeting(toGraph, opts.role, opts.outlet || undefined);
   await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
   return (res as any)?.ok === true;
 }

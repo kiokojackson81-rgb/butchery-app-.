@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeToPlusE164 } from "@/lib/wa_phone";
-import { sendAttendantMenu, sendSupplierMenu, sendSupervisorMenu } from "@/lib/wa_menus";
 import { sendText } from "@/lib/wa";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 
 export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string) {
   if (!/^LINK\s+\d{6}$/i.test(String(text || "").trim())) return false;
@@ -62,9 +62,7 @@ export async function tryBindViaLinkToken(fromGraphNoPlus: string, text: string)
   // Clean pending
   await (prisma as any).waSession.delete({ where: { id: pending.id } }).catch(() => {});
 
-  if (pending.role === "attendant") await sendAttendantMenu(fromGraphNoPlus, pending.outlet || "your outlet");
-  else if (pending.role === "supplier") await sendSupplierMenu(fromGraphNoPlus);
-  else await sendSupervisorMenu(fromGraphNoPlus);
+  await sendGptGreeting(fromGraphNoPlus, pending.role || "attendant", pending.outlet || undefined);
 
   return true;
 }

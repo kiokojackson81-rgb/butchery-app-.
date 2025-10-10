@@ -18,8 +18,7 @@ import { saveClosings } from "@/server/closings";
 import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
-import { sendAttendantMenu, sendSupervisorMenu, sendSupplierMenu } from "@/lib/wa_menus";
-import { sendSixTabs } from "@/lib/wa_buttons";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 import { handleSupplyDispute } from "@/server/supply_notify";
 // (sendText) already imported; (prisma) already imported at top
 
@@ -191,9 +190,8 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
   });
 
   const to = phoneE164.replace(/^\+/, "");
-  if (finalRole === "attendant") await sendSixTabs(to, "attendant", outlet || undefined);
-  else if (finalRole === "supervisor") await sendSixTabs(to, "supervisor");
-  else await sendSixTabs(to, "supplier");
+    if (finalRole === "attendant") await sendGptGreeting(to, finalRole, outlet || undefined);
+    else await sendGptGreeting(to, finalRole, outlet || undefined);
   return true;
 }
 
@@ -235,7 +233,7 @@ export async function handleInboundText(phone: string, text: string) {
   if (inactiveExpired(s.updatedAt)) {
     if (s.code && s.outlet) {
       await saveSession(phone, { state: "MENU", date: today(), rows: [] });
-      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+        await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
     } else {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
@@ -333,7 +331,7 @@ export async function handleInboundText(phone: string, text: string) {
       return;
     }
     if (/^MENU$/i.test(t)) {
-      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+        await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
       return;
     }
     // Otherwise user may send arbitrary text; guide them back
@@ -353,7 +351,7 @@ export async function handleInboundText(phone: string, text: string) {
       if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSession(phone, { state: "MENU", ...cur });
-    await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+          await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
       }
       // Guard: product already closed today
@@ -390,7 +388,7 @@ export async function handleInboundText(phone: string, text: string) {
         if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
         await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         await saveSession(phone, { state: "MENU", ...cur });
-        await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+          await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
         return;
       }
       item.waste = val;
@@ -493,7 +491,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
       return;
     }
     await saveSession(phone, { state: "MENU", ...cur });
-    await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
     return;
   }
 
@@ -592,7 +590,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
     if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "MENU", ...cur });
-      await sendSixTabs(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
       return;
     }
     const prods = await getAssignedProducts(s.code || "");
@@ -747,7 +745,7 @@ export async function handleInteractiveReply(phone: string, payload: any) {
   if (id === "EXP_FINISH") {
     await saveSession(phone, { state: "MENU", ...cur, expenseName: undefined });
     const to = phone.replace(/^\+/, "");
-    await sendSixTabs(to, "attendant", s.outlet || undefined);
+  await sendGptGreeting(to, "attendant", s.outlet || undefined);
     return;
   }
 }

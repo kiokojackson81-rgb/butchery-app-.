@@ -9,8 +9,6 @@ import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedIntera
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText, sendInteractive } from "@/lib/wa";
-// Legacy role menus are disabled under GPT-only; use six-tabs helper instead
-import { sendSixTabs } from "@/lib/wa_buttons";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { saveClosings } from "@/server/closings";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
@@ -90,6 +88,11 @@ export async function POST(req: Request) {
   // Build and send interactive reply with reply buttons (2-4)
   async function sendButtonsFor(phoneGraph: string, buttons: string[]) {
     try {
+      // If deployment is in strict GPT-only mode, do not send legacy reply buttons.
+      if (String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true") {
+        try { console.info('[WA] GPT_ONLY enabled - skipping sendButtonsFor legacy interactive'); } catch {}
+        return;
+      }
       if (!Array.isArray(buttons) || !buttons.length) return;
       // Ensure Back to Menu is present but cap visible user buttons to 3
       // (WhatsApp allows max 3 reply buttons). We'll include BACK_TO_MENU as
@@ -283,7 +286,11 @@ export async function POST(req: Request) {
             }
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
-            try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
+                    try { console.info("[WA] SENDING", { type: "interactive.buttons", role }); } catch {}
+                    if (String(process.env.WA_GPT_ONLY || "").toLowerCase() === "true") {
+                      try { console.info('[WA] GPT_ONLY enabled - skipping sendRoleTabs legacy interactive'); } catch {}
+                      return;
+                    }
             // Use GPT-driven buttons (fallback to role defaults)
             const def = (role === 'supervisor')
               ? ["SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES","SV_APPROVE_UNLOCK","SV_PRICEBOOK","SV_SUMMARY"]
@@ -1018,34 +1025,46 @@ export async function POST(req: Request) {
               continue;
             }
 
-            // Non-GPT mode: preserve legacy direct handler behavior
-            const flowId = canonicalToFlowId(sessRole, id);
-            let handlerRes: any = null;
-            if (sessRole === "supervisor") handlerRes = await handleSupervisorAction(_sess, flowId, phoneE164);
-            else if (sessRole === "supplier") handlerRes = await handleSupplierAction(_sess, flowId, phoneE164);
-            else handlerRes = await handleAuthenticatedInteractive(_sess, flowId);
-            // If the handler didn't send anything, provide a tiny human follow-up and tabs when appropriate
+            // Route interactive selections through GPT for centralized handling.
             try {
-              if (!handlerRes) {
-                if (!__sentOnce && !TABS_ENABLED) {
-                  try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-                }
-                try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+              const prompt = `user selected ${id}`;
+              const r = await runGptForIncoming(phoneE164, prompt);
+              const replyText = String(r || "").trim();
+              const ooc = parseOOCBlock(replyText);
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
+              const to = toGraphPhone(phoneE164);
+              const display = stripOOC(replyText);
+              if (display) {
+                try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
               }
-            } catch {}
-            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+              const btns = Array.isArray(ooc?.buttons) && ooc?.buttons.length ? ooc?.buttons : null;
+              if (btns) {
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" }); } catch {}
+                await sendButtonsFor(to, btns as string[]);
+              }
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+            } catch (e) {
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.interactive.fail", error: String(e) }, status: "ERROR", type: "GPT_INTERACTIVE_FAIL" }); } catch {}
+            }
             continue;
           }
 
-          if (type === "text" && !GPT_ONLY) {
+          // All text routes now go through GPT-only path above when GPT_ONLY is enabled.
+          // For non-GPT deployments, prefer GPT as well for consistent behavior.
+          if (type === "text") {
             const text = (m.text?.body ?? "").trim();
-    if (sessRole === "supervisor") {
-      await handleSupervisorText(_sess, text, phoneE164);
-    } else if (sessRole === "supplier") {
-      await handleSupplierText(_sess, text, phoneE164);
-    } else {
-      await handleAuthenticatedText(_sess, text);
-    }
+            try {
+              // Call GPT and send reply (reuse the GPT-only path above by constructing same inputs)
+              const r = await runGptForIncoming(phoneE164, text);
+              const replyText = String(r || "").trim();
+              if (replyText) {
+                const display = stripOOC(replyText);
+                await sendTextSafe(toGraphPhone(phoneE164), display, "AI_DISPATCH_TEXT", { gpt_sent: true });
+                await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164 } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
+              }
+            } catch (e) {
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.text.fail", error: String(e) }, status: "ERROR", type: "GPT_TEXT_FAIL" }); } catch {}
+            }
             continue;
           }
 
