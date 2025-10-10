@@ -457,16 +457,20 @@ export async function POST(req: Request) {
               if (/^[1-7]$/.test(typed)) {
                 const id = mapDigitToId(sessRole, typed);
                 const flowId = canonicalToFlowId(sessRole, id);
-                if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
-                else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
-                else await handleAuthenticatedInteractive(_sess, flowId);
+                let handlerResult: any = null;
+                if (sessRole === "supervisor") handlerResult = await handleSupervisorAction(_sess, flowId, phoneE164);
+                else if (sessRole === "supplier") handlerResult = await handleSupplierAction(_sess, flowId, phoneE164);
+                else handlerResult = await handleAuthenticatedInteractive(_sess, flowId);
                 const to = toGraphPhone(phoneE164);
-                try {
-                  if (!__sentOnce && !TABS_ENABLED) {
-                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-                  }
-                } catch {}
-                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                // If the handler already sent an outbound (truthy result), skip sending role tabs
+                if (!handlerResult) {
+                  try {
+                    if (!__sentOnce && !TABS_ENABLED) {
+                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                    }
+                  } catch {}
+                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                }
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                 continue;
               }
@@ -1001,7 +1005,8 @@ export async function POST(req: Request) {
                     try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" }); } catch {}
                     await sendButtonsFor(to, btns as string[]);
                   } else {
-                    await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                    // Only send role tabs if handler didn't already send a response
+                    if (!__sentOnce) await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
                   }
                 } catch {}
 
@@ -1015,17 +1020,19 @@ export async function POST(req: Request) {
 
             // Non-GPT mode: preserve legacy direct handler behavior
             const flowId = canonicalToFlowId(sessRole, id);
-            if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
-            else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
-            else await handleAuthenticatedInteractive(_sess, flowId);
-            // If handler didn't send anything, provide a tiny human follow-up when tabs are disabled
+            let handlerRes: any = null;
+            if (sessRole === "supervisor") handlerRes = await handleSupervisorAction(_sess, flowId, phoneE164);
+            else if (sessRole === "supplier") handlerRes = await handleSupplierAction(_sess, flowId, phoneE164);
+            else handlerRes = await handleAuthenticatedInteractive(_sess, flowId);
+            // If the handler didn't send anything, provide a tiny human follow-up and tabs when appropriate
             try {
-              if (!__sentOnce && !TABS_ENABLED) {
-                try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+              if (!handlerRes) {
+                if (!__sentOnce && !TABS_ENABLED) {
+                  try { await sendTextSafe(toGraphPhone(phoneE164), "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                }
+                try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
               }
             } catch {}
-            // Always follow with tabs menu for role (six tabs)
-            try { await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             continue;
           }
