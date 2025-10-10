@@ -8,7 +8,7 @@ import { createLoginLink } from "@/server/wa_links";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
-import { sendText } from "@/lib/wa";
+import { sendText, sendInteractive } from "@/lib/wa";
 import { runGptForIncoming } from "@/lib/gpt_router";
 import { saveClosings } from "@/server/closings";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
@@ -19,6 +19,7 @@ import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
 import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
 import { parseOOCBlock, stripOOC, buildUnauthenticatedReply, buildAuthenticatedReply } from "@/lib/ooc_parse";
+import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
 import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
 import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
@@ -87,13 +88,26 @@ export async function POST(req: Request) {
   }
 
   // Build and send interactive reply with reply buttons (2-4)
-  async function sendButtonsFor(phoneGraph: string, _buttons: string[]) {
+  async function sendButtonsFor(phoneGraph: string, buttons: string[]) {
     try {
-      // Delegate to GPT to craft any follow-up options; legacy button payloads are no longer emitted.
-      await sendGptGreeting(phoneGraph.replace(/^\+/, ''), 'attendant');
-    } catch {
-      try { await sendText(phoneGraph, "How can I help? Please let me know what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-    }
+      // Send reply buttons (ensure max 3 reply buttons for Graph API)
+      if (!Array.isArray(buttons) || !buttons.length) return;
+      // Ensure Back to Menu is present but cap visible user buttons to 3
+      // (WhatsApp allows max 3 reply buttons). We'll include BACK_TO_MENU as
+      // the last button if there's room; otherwise prefer the first 3 options.
+      const normalized = [...new Set(buttons.map((b) => String(b || "").toUpperCase()))];
+      // Remove BACK_TO_MENU from the pool so we can decide placement
+      const withoutBack = normalized.filter((id) => id !== "BACK_TO_MENU");
+      const userTake = withoutBack.slice(0, 3);
+      // If there is room (less than 3 user buttons) and BACK_TO_MENU wasn't included
+      // already, append it to the end so user can return to menu.
+      if (userTake.length < 3 && normalized.includes("BACK_TO_MENU") === false) {
+        userTake.push("BACK_TO_MENU");
+      }
+      // Build reply buttons from selected ids
+      const b = userTake.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
+      await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
+    } catch {}
   }
 
   // Small fallback clarifier when GPT fails
@@ -166,11 +180,45 @@ export async function POST(req: Request) {
             };
             return map[u] || u;
           }
+          function mapDigitToId(role: string, digit: string): string {
+            if (role === "supervisor") {
+              const map: Record<string, string> = {
+                "1": "SV_REVIEW_CLOSINGS",
+                "2": "SV_REVIEW_DEPOSITS",
+                "3": "SV_REVIEW_EXPENSES",
+                "4": "SV_APPROVE_UNLOCK",
+                "5": "SV_HELP",
+                "6": "SV_HELP",
+                "7": "SV_HELP",
+              };
+              return map[digit] || "SV_HELP";
+            } else if (role === "supplier") {
+              const map: Record<string, string> = {
+                "1": "SUPL_DELIVERY",
+                "2": "SUPL_VIEW_OPENING",
+                "3": "SUPL_DISPUTES",
+                "4": "SUPL_HELP",
+                "5": "SUPL_HELP",
+                "6": "SUPL_HELP",
+                "7": "SUPL_HELP",
+              };
+              return map[digit] || "SUPL_HELP";
+            } else {
+              const map: Record<string, string> = {
+                "1": "ATT_TAB_STOCK",
+                "2": "ATT_TAB_SUPPLY",
+                "3": "ATT_TAB_DEPOSITS",
+                "4": "ATT_TAB_EXPENSES",
+                "5": "ATT_TAB_TILL",
+                "6": "ATT_TAB_SUMMARY",
+              };
+              return map[digit] || "ATT_TAB_SUMMARY";
+            }
           }
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? "true").toLowerCase() === "true";
+  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
   const TABS_ENABLED = String(process.env.WA_TABS_ENABLED || "false").toLowerCase() === "true";
 
   // Diagnostic: surface key runtime flags so we can see why sends may be suppressed
@@ -391,6 +439,37 @@ export async function POST(req: Request) {
           const sessRole = String((_sess?.role) || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
 
+          // Quick numeric shortcut: when GPT_ONLY is disabled, allow users to
+          // type a single digit (1-7) to select the corresponding tab/menu
+          // option. This mirrors behavior of tapping the UI tabs.
+          if (!GPT_ONLY && type === "text") {
+            try {
+              const typed = String(m.text?.body ?? "").trim();
+              if (/^[1-7]$/.test(typed)) {
+                const id = mapDigitToId(sessRole, typed);
+                const flowId = canonicalToFlowId(sessRole, id);
+                let handlerResult: any = null;
+                if (sessRole === "supervisor") handlerResult = await handleSupervisorAction(_sess, flowId, phoneE164);
+                else if (sessRole === "supplier") handlerResult = await handleSupplierAction(_sess, flowId, phoneE164);
+                else handlerResult = await handleAuthenticatedInteractive(_sess, flowId);
+                const to = toGraphPhone(phoneE164);
+                // If the handler already sent an outbound (truthy result), skip sending role tabs
+                if (!handlerResult) {
+                  try {
+                    if (!__sentOnce && !TABS_ENABLED) {
+                      try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                    }
+                  } catch {}
+                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                }
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                continue;
+              }
+            } catch (e) {
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164 }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
+            }
+          }
+
           // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
           if (GPT_ONLY && (type === "text" || type === "interactive")) {
             // Normalize inbound into a text prompt for GPT
@@ -403,6 +482,36 @@ export async function POST(req: Request) {
               return `[button:${id}] ${title || ""}`.trim();
             })();
 
+            // Direct digit mapping (1-7) to flows — when GPT_ONLY is enabled we intentionally
+            // skip the legacy direct-handler path so digits are routed through GPT for consistent
+            // OOC generation and reply composition. When GPT_ONLY is disabled, preserve the
+            // prior faster direct mapping behavior.
+            // Special-case: when GPT_ONLY is disabled we want typed digits (1-7)
+            // to behave exactly like pressing the numeric tab in the UI. This
+            // mirrors the interactive mapping done later for interactive payloads.
+            const digit = String(text || "").trim();
+            if (/^[1-7]$/.test(digit)) {
+              try {
+                // Map the digit to the role-specific id and route regardless of GPT_ONLY
+                const id = mapDigitToId(sessRole, digit);
+                const flowId = canonicalToFlowId(sessRole, id);
+                if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
+                else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
+                else await handleAuthenticatedInteractive(_sess, flowId);
+                const to = toGraphPhone(phoneE164);
+                // If handler didn't emit outbound, send a tiny ack when tabs disabled
+                try {
+                  if (!__sentOnce && !TABS_ENABLED) {
+                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                  }
+                } catch {}
+                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
+                continue;
+              } catch (e) {
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, digit }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
+              }
+            }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
 
@@ -1024,4 +1133,3 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
-
