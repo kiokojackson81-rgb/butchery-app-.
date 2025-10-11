@@ -7,22 +7,9 @@
   "properties": {
     "intent": {
       "type": "string",
-      "enum": [
-        "ATT_TAB_STOCK","ATT_STOCK_CLOSING","ATT_STOCK_WASTE",
-        "ATT_TAB_SUPPLY","ATT_SUPPLY_ADD","ATT_SUPPLY_DISPUTE",
-        "ATT_TAB_DEPOSITS","ATT_DEPOSIT",
-        "ATT_TAB_EXPENSES","ATT_EXPENSE_ADD",
-        "ATT_TAB_TILL","ATT_TILL_PAYMENT",
-        "ATT_TAB_SUMMARY",
-        "ATT_WASTE","CHANGE_CONTEXT",
-        "SUP_TAB_SUPPLY_TODAY","SUP_SUPPLY_ADD","SUP_SUPPLY_CONFIRM",
-        "SUP_TAB_VIEW","SUP_TAB_DISPUTE","SUP_DISPUTE_ADD",
-        "SUPL_OPENING","SUPL_DELIVERY","SUPL_TRANSFER","SUPL_DISPUTES","SUPL_PRICEBOOK","SUPL_CHANGE_CONTEXT",
-  "SV_TAB_REVIEW_QUEUE","SV_REVIEW_ITEM",
-  "SV_TAB_SUMMARIES","SV_SUMMARY_REQUEST",
-  "SV_TAB_UNLOCK","SV_UNLOCK_DAY","SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES","SV_REVIEW_SUPPLIES","SV_TXNS","SV_APPROVE_UNLOCK","SV_PRICEBOOK","SV_SUMMARY","SV_HELP",
-        "LOCK_DAY","LOGIN","MENU","HELP","FREE_TEXT"
-      ]
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[A-Z0-9_:-]+$"
     },
     "args": {
       "type": "object",
@@ -70,28 +57,17 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": [
-          "ATT_TAB_STOCK","ATT_TAB_SUPPLY","ATT_TAB_DEPOSITS",
-          "ATT_TAB_EXPENSES","ATT_TAB_TILL","ATT_TAB_SUMMARY",
-          "LOCK_DAY","LOCK_DAY_CONFIRM","MENU","HELP","LOGIN","LOGOUT",
-          "ATT_WASTE","CHANGE_CONTEXT",
-          "SUP_TAB_SUPPLY_TODAY","SUP_TAB_VIEW","SUP_TAB_DISPUTE","SUP_TAB_HELP",
-          "SUPL_DELIVERY","SUPL_VIEW_OPENING","SUPL_TRANSFER","SUPL_DISPUTES","SUPL_PRICEBOOK","SUPL_HISTORY","SUPL_CHANGE_CONTEXT",
-          "SV_TAB_REVIEW_QUEUE","SV_TAB_SUMMARIES","SV_TAB_UNLOCK","SV_TAB_HELP",
-          "SV_REVIEW_CLOSINGS","SV_REVIEW_DEPOSITS","SV_REVIEW_EXPENSES","SV_REVIEW_SUPPLIES","SV_TXNS"
-        ]
+        "minLength": 2,
+        "maxLength": 64,
+        "pattern": "^[A-Z0-9_:-]+$"
       },
       "minItems": 1
     },
     "next_state_hint": {
       "type": "string",
-  "enum": [
-    "STOCK","SUPPLY","DEPOSITS","EXPENSES","TILL","SUMMARY",
-    "REVIEW","UNLOCK","LOCK_CONFIRM","MENU",
-    "CLOSING_PICK","WAIT_DEPOSIT","EXPENSE_PICK",
-    "SV_REVIEW","SV_SUMMARY","SV_UNLOCK","SUP_DELIVERY","SUP_HISTORY",
-    "SUP_OPENING","SUP_TRANSFER","SUP_PRICEBOOK","SV_SUPPLIES","CHANGE_CONTEXT"
-  ]
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[A-Z0-9_:-]+$"
     }
   }
 }
