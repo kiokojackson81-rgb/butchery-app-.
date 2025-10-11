@@ -36,6 +36,8 @@ const ATTENDANT_MENU_BUTTONS = new Set([
   "MENU_TXNS",
   "MENU_SUMMARY",
   "ATT_DEPOSIT",
+  "ATT_WASTE",
+  "CHANGE_CONTEXT",
   "MENU",
   "HELP",
   "LOGOUT",
@@ -87,12 +89,20 @@ export async function POST(req: Request) {
     SV_REVIEW_DEPOSITS: "Review Deposits",
     SV_REVIEW_EXPENSES: "Review Expenses",
     SV_APPROVE_UNLOCK: "Unlock / Approve",
-  SV_PRICEBOOK: "Pricebook",
-  SV_SUMMARY: "Portfolio Summary",
+    SV_PRICEBOOK: "Pricebook",
+    SV_SUMMARY: "Portfolio Summary",
     SUPL_DELIVERY: "Submit Delivery",
     SUPL_VIEW_OPENING: "View Opening",
+    SUPL_TRANSFER: "Transfers",
     SUPL_DISPUTES: "Disputes",
-  SUPL_HISTORY: "History",
+    SUPL_PRICEBOOK: "Pricebook",
+    SUPL_HISTORY: "History",
+    ATT_WASTE: "Waste Entry",
+    CHANGE_CONTEXT: "Change Outlet/Date",
+    SUPL_OPENING: "Opening Supply",
+    SUPL_CHANGE_CONTEXT: "Change Outlet/Date",
+    SV_REVIEW_SUPPLIES: "Review Supplies",
+    SV_TXNS: "Transactions",
     LOGIN: "Login",
     HELP: "Help",
   };
@@ -146,15 +156,23 @@ export async function POST(req: Request) {
               "MENU_SUPPLY": "ATT_TAB_SUPPLY",
               "MENU_SUMMARY": "ATT_TAB_SUMMARY",
               "TILL_COUNT": "ATT_TAB_TILL",
+              "ATT_WASTE": "ATT_TAB_STOCK",
+              "CHANGE_CONTEXT": "MENU",
               "MENU": "ATT_TAB_SUMMARY",
               // Supplier legacy
               "SPL_DELIVER": "SUP_TAB_SUPPLY_TODAY",
               "SPL_RECENT": "SUP_TAB_VIEW",
               "SPL_DISPUTES": "SUP_TAB_DISPUTE",
+              "SUPL_OPENING": "SUPL_VIEW_OPENING",
+              "SUPL_TRANSFER": "SUPL_TRANSFER",
+              "SUPL_PRICEBOOK": "SUPL_PRICEBOOK",
+              "SUPL_CHANGE_CONTEXT": "SUPL_VIEW_OPENING",
               // Supervisor legacy
               "SUP_REVIEW": "SV_TAB_REVIEW_QUEUE",
               "SUP_REPORT": "SV_TAB_SUMMARIES",
               "SUP_TXNS": "SV_TAB_SUMMARIES",
+              "SV_REVIEW_SUPPLIES": "SV_TAB_REVIEW_QUEUE",
+              "SV_TXNS": "SV_TAB_SUMMARIES",
             };
             return map[u] || u;
           }
@@ -200,33 +218,36 @@ export async function POST(req: Request) {
                 "1": "SV_REVIEW_CLOSINGS",
                 "2": "SV_REVIEW_DEPOSITS",
                 "3": "SV_REVIEW_EXPENSES",
-                "4": "SV_APPROVE_UNLOCK",
-                "5": "SV_HELP",
-                "6": "SV_HELP",
+                "4": "SV_REVIEW_SUPPLIES",
+                "5": "SV_TXNS",
+                "6": "LOGOUT",
                 "7": "SV_HELP",
               };
               return map[digit] || "SV_HELP";
             } else if (role === "supplier") {
               const map: Record<string, string> = {
-                "1": "SUPL_DELIVERY",
-                "2": "SUPL_VIEW_OPENING",
-                "3": "SUPL_DISPUTES",
-                "4": "SUPL_HELP",
-                "5": "SUPL_HELP",
-                "6": "SUPL_HELP",
-                "7": "SUPL_HELP",
+                "1": "SUPL_OPENING",
+                "2": "SUPL_DELIVERY",
+                "3": "SUPL_TRANSFER",
+                "4": "SUPL_DISPUTES",
+                "5": "SUPL_PRICEBOOK",
+                "6": "SUPL_CHANGE_CONTEXT",
+                "7": "LOGOUT",
               };
               return map[digit] || "SUPL_HELP";
             } else {
               const map: Record<string, string> = {
-                "1": "ATT_TAB_STOCK",
-                "2": "ATT_TAB_SUPPLY",
-                "3": "ATT_TAB_DEPOSITS",
-                "4": "ATT_TAB_EXPENSES",
-                "5": "ATT_TAB_TILL",
-                "6": "ATT_TAB_SUMMARY",
+                "1": "ATT_CLOSING",
+                "2": "ATT_DEPOSIT",
+                "3": "MENU_SUMMARY",
+                "4": "ATT_EXPENSE",
+                "5": "MENU_SUPPLY",
+                "6": "ATT_WASTE",
+                "7": "CHANGE_CONTEXT",
+                "8": "LOGOUT",
+                "9": "HELP",
               };
-              return map[digit] || "ATT_TAB_SUMMARY";
+              return map[digit] || "MENU_SUMMARY";
             }
           }
   const raw = await req.text();
@@ -573,20 +594,26 @@ export async function POST(req: Request) {
                 const idMap: Record<string, string> = {
                   "1": "SUPL_SUBMIT_DELIVERY",
                   "2": "SUPL_VIEW_OPENING",
-                  "3": "SUPL_VIEW_STOCK",
-                  "4": "SUPL_HELP",
-                  "5": "SUPL_HELP",
-                  "6": "SUPL_HELP",
-                  "7": "SUPL_HELP",
+                  "3": "SUPL_TRANSFER",
+                  "4": "SUPL_DISPUTES",
+                  "5": "SUPL_PRICEBOOK",
+                  "6": "SUPL_CHANGE_CONTEXT",
+                  "7": "LOGOUT",
                   // Supervisor
                   "SV_REVIEW_CLOSINGS": "SV_TAB_REVIEW_QUEUE",
                   "SV_REVIEW_DEPOSITS": "SV_TAB_REVIEW_QUEUE",
                   "SV_REVIEW_EXPENSES": "SV_TAB_REVIEW_QUEUE",
+                  "SV_REVIEW_SUPPLIES": "SV_TAB_REVIEW_QUEUE",
+                  "SV_TXNS": "SV_TAB_SUMMARIES",
                   "SV_APPROVE_UNLOCK": "SV_TAB_UNLOCK",
                   // Supplier
                   "SUPL_DELIVERY": "SUP_TAB_SUPPLY_TODAY",
                   "SUPL_VIEW_OPENING": "SUP_TAB_VIEW",
+                  "SUPL_OPENING": "SUP_TAB_VIEW",
+                  "SUPL_TRANSFER": "SUP_TAB_SUPPLY_TODAY",
                   "SUPL_DISPUTES": "SUP_TAB_DISPUTE",
+                  "SUPL_PRICEBOOK": "SUP_TAB_VIEW",
+                  "SUPL_CHANGE_CONTEXT": "SUP_TAB_VIEW",
                   // Common
                   "MENU": "MENU",
                   "LOGIN": "LOGIN",
@@ -601,10 +628,10 @@ export async function POST(req: Request) {
                 // Enforce allow-list for intents and buttons to keep GPT within supported flows
                 const ALLOWED = new Set<string>([
                   // Supervisor / Supplier canonical tokens
-                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_PRICEBOOK','SV_SUMMARY','SV_HELP',
-                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUPL_HISTORY',
+                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_REVIEW_SUPPLIES','SV_TXNS','SV_APPROVE_UNLOCK','SV_PRICEBOOK','SV_SUMMARY','SV_HELP',
+                  'SUPL_OPENING','SUPL_DELIVERY','SUPL_TRANSFER','SUPL_DISPUTES','SUPL_PRICEBOOK','SUPL_CHANGE_CONTEXT','SUPL_VIEW_OPENING','SUPL_HISTORY',
                   // Attendant intents (both legacy ATT_* and canonical ATT_TAB_*)
-                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
+                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_WASTE','CHANGE_CONTEXT','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
                   'MENU','MENU_SUMMARY','MENU_SUPPLY','MENU_TXNS','HELP','LOGOUT',
                   // Supplier intents (additional canonical forms)
                   'SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',

@@ -5,7 +5,16 @@ describe('gpt_dry planner', () => {
   it('maps digit 1 to ATT_CLOSING', () => {
     const r = planDryResponse('1');
     expect(r.ooc.intent).toBe('ATT_CLOSING');
-    expect(r.ooc.buttons).toEqual(['ATT_CLOSING', 'ATT_DEPOSIT', 'ATT_EXPENSE', 'MENU_SUMMARY']);
+    expect(r.ooc.buttons).toEqual([
+      'ATT_CLOSING',
+      'ATT_DEPOSIT',
+      'MENU_SUMMARY',
+      'ATT_EXPENSE',
+      'MENU_SUPPLY',
+      'ATT_WASTE',
+      'CHANGE_CONTEXT',
+      'LOGOUT',
+    ]);
     expect(r.ooc.next_state_hint).toBe('CLOSING_PICK');
   });
 
