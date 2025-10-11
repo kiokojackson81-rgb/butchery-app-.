@@ -548,46 +548,18 @@ export async function POST(req: Request) {
             // by asking GPT to respond with a valid OOC block. This reduces false negatives where
             // the model forgot to include the OOC in the first reply.
             const oocRequired = String(process.env.WA_OOC_REQUIRED || "true").toLowerCase() === "true";
-            if ((!ooc || !ooc.intent) && oocRequired) {
-              try {
-                const retryPrompt = `${text}\n\nPlease reply with an OOC JSON block only (no extra text). Example:\n<<<OOC>${JSON.stringify({ intent: "MENU", buttons: ["ATT_CLOSING"] })}</OOC>>>`;
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "BEFORE_GPT_RETRY", text: retryPrompt }, status: "INFO", type: "BEFORE_GPT" }); } catch {}
-                const retry = await runGptForIncoming(phoneE164, retryPrompt);
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "AFTER_GPT_RETRY", got: !!retry }, status: "INFO", type: "AFTER_GPT" }); } catch {}
-                const retryText = String(retry || "").trim();
-                const retryOoc = parseOOCBlock(retryText);
-                if (retryOoc && retryOoc.intent) {
-                  ooc = retryOoc;
-                  // prefer the retry text as the canonical GPT reply for logging/strip
-                  replyText = retryText;
-                }
-              } catch {}
-            }
-
-            // Persist OOC sample (sanitized)
-            try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-
-            const sendRoleTabsLocal = async () => {
-              if (!TABS_ENABLED) return;
-              const to = toGraphPhone(phoneE164);
-              await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
-            };
-
-            // (oocRequired already computed above)
-            if ((!ooc || !ooc.intent) && oocRequired) {
-              // Invalid OOC → clarifier fallback (ops compose) without calling legacy menus
+                        if ((!ooc || !ooc.intent) && oocRequired) {
+              // Invalid OOC fallback: send a static clarifier so the user still hears from us.
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", preview: replyText.slice(-180) }, status: "WARN", type: "OOC_INVALID" }); } catch {}
               try {
+                const clarifier = generateDefaultClarifier(sessRole as string);
                 const to = toGraphPhone(phoneE164);
-                    // In GPT-only mode prefer GPT to compose a helpful greeting
-                    if (GPT_ONLY) {
-                      try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_ooc_invalid_fallback', sessionLike: _sess }); } catch {}
-                    } else {
-                      const msg = "I didn't quite get that. Please tell me what you'd like to do.";
-                      await sendTextSafe(to, msg, "AI_DISPATCH_TEXT", { gpt_sent: true });
-                    }
+                await sendTextSafe(to, clarifier.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+                if (Array.isArray(clarifier.buttons) && clarifier.buttons.length) {
+                  await sendButtonsFor(to, clarifier.buttons);
+                }
               } catch {}
-              try { if (TABS_ENABLED) await sendRoleTabsLocal(); } catch {}
+              try { if (TABS_ENABLED) await sendRoleTabs(phoneE164!, sessRole, _sess?.outlet); } catch {}
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
               continue;
             }
@@ -671,7 +643,7 @@ export async function POST(req: Request) {
                     } else {
                       const to = toGraphPhone(phoneE164);
                       await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT', { gpt_sent: true });
-                      try { await sendRoleTabsLocal(); } catch {}
+                      try { await sendRoleTabs(phoneE164!, sessRole, _sess?.outlet); } catch {}
                     }
                   } catch {}
                   continue;
@@ -683,7 +655,7 @@ export async function POST(req: Request) {
               try {
                 await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ooc.invalid", reason: chk.reason, details: (chk as any).details, ooc: sanitizeForLog(ooc) }, status: "WARN", type: "OOC_INVALID" });
               } catch {}
-              try { await sendRoleTabsLocal(); } catch {}
+              try { await sendRoleTabs(phoneE164!, sessRole, _sess?.outlet); } catch {}
               continue;
             }
 
@@ -877,7 +849,7 @@ export async function POST(req: Request) {
             continue;
 
             // FREE_TEXT or other → send clarifier with full role tabs
-            try { await sendRoleTabsLocal(); } catch {}
+            try { await sendRoleTabs(phoneE164!, sessRole, _sess?.outlet); } catch {}
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt_only.fallback.free_text" }, status: "INFO", type: "GPT_ONLY_FALLBACK" }); } catch {}
             continue;
           }

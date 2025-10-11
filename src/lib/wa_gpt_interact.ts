@@ -13,6 +13,10 @@ type GptInteractive = {
 
 export async function trySendGptInteractive(to: string, inter: GptInteractive | null | undefined) {
   if (!inter) return false;
+  const sendAndConfirm = async (payload: any) => {
+    const result = await sendInteractive(payload, "AI_DISPATCH_INTERACTIVE");
+    return result?.ok === true;
+  };
   try {
     if (!isValidGptInteractive({ interactive: inter })) return false;
     if (inter.type === 'buttons' && Array.isArray(inter.buttons)) {
@@ -28,21 +32,22 @@ export async function trySendGptInteractive(to: string, inter: GptInteractive | 
           action: { buttons },
         },
       };
-      await sendInteractive(payload, 'AI_DISPATCH_INTERACTIVE');
-      return true;
+      return await sendAndConfirm(payload);
     }
 
     // For lists, use the central builder
-  if (inter.type === 'list' && Array.isArray(inter.sections)) {
+    if (inter.type === 'list' && Array.isArray(inter.sections)) {
       const payload = buildInteractiveListPayload({
         to,
         bodyText: inter.bodyText || 'Choose an action',
         footerText: inter.footerText || undefined,
         buttonLabel: inter.buttonLabel || 'Choose',
-        sections: inter.sections.map((s) => ({ title: s.title || undefined, rows: s.rows.map((r) => ({ id: r.id, title: r.title, description: r.description })) })),
+        sections: inter.sections.map((s) => ({
+          title: s.title || undefined,
+          rows: s.rows.map((r) => ({ id: r.id, title: r.title, description: r.description })),
+        })),
       });
-      await sendInteractive(payload as any, 'AI_DISPATCH_INTERACTIVE');
-      return true;
+      return await sendAndConfirm(payload as any);
     }
   } catch (e) {
     // swallow and fall back to text
