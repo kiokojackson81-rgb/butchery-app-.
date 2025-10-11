@@ -37,38 +37,62 @@ function coerceStructuredReply(raw: unknown): { structured?: any; fallbackText?:
   return { fallbackText: cleaned };
 }
 
+function buildFallbackGreeting(role: string, outlet?: string): string {
+  const roleKey = String(role || "attendant").toLowerCase();
+  const atOutlet = outlet ? ` at ${outlet}` : "";
+  switch (roleKey) {
+    case "supervisor":
+      return `You're logged in as a supervisor${atOutlet}. Reply with:\n1) Review Closings\n2) Review Deposits\n3) Unlock/Adjust\n4) Help`;
+    case "supplier":
+      return `You're logged in as a supplier${atOutlet}. Reply with:\n1) Submit Delivery\n2) View Opening\n3) Disputes\n4) Help`;
+    default:
+      return `You're logged in as an attendant${atOutlet}. Reply with:\n1) Enter Closing\n2) Deposit (paste SMS)\n3) Expense\n4) Summary`;
+  }
+}
+
 /**
  * Send a GPT-composed greeting. If the AI returns a structured interactive payload,
  * attempt to send it (buttons or list). Otherwise fall back to plain text.
  */
 export async function sendGptGreeting(phoneE164: string, role: string, outlet?: string) {
+  const toGraph = toGraphPhone(phoneE164);
+  let sent = false;
   try {
     const prompt = `Prefer returning JSON object with optional fields: { text?: string, interactive?: { type: 'buttons'|'list', buttons?: [{id,title}], sections?: [{title, rows:[{id,title,description}]}], buttonLabel?: string, bodyText?: string, footerText?: string } }.
 Return a short (1-2 sentence) greeting for a user logged in as ${role}${outlet ? ` at ${outlet}` : ''}. If user can act via quick replies, include an interactive payload. Ensure buttons are short and <=3; if more actions are needed, use a 'list' structure. Only emit raw JSON (no explanatory text) when possible.`;
     const reply = await runGptForIncoming(phoneE164, prompt);
     const { structured, fallbackText } = coerceStructuredReply(reply);
-    const to = toGraphPhone(phoneE164);
 
     if (structured && typeof structured === "object") {
       const inter = (structured as any).interactive as any | undefined;
       const text = String((structured as any).text || "").trim();
       if (inter) {
-        const sent = await trySendGptInteractive(to.replace(/^\+/, ""), inter);
-        if (sent) {
-          if (text) await sendTextSafe(to, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
-          return;
+        const sentInteractive = await trySendGptInteractive(toGraph.replace(/^\+/, ""), inter);
+        if (sentInteractive) {
+          sent = true;
+          if (text) {
+            await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+          }
         }
       }
-      if (text) {
-        await sendTextSafe(to, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
-        return;
+      if (!sent && text) {
+        await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        sent = true;
       }
     }
 
-    if (fallbackText) {
-      await sendTextSafe(to, fallbackText, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    if (!sent && fallbackText) {
+      await sendTextSafe(toGraph, fallbackText, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      sent = true;
     }
-  } catch (e) { /* best-effort */ }
+  } catch (e) {
+    try { console.warn("sendGptGreeting fallback", e); } catch {}
+  }
+
+  if (!sent) {
+    const fallback = buildFallbackGreeting(role, outlet);
+    await sendTextSafe(toGraph, fallback, "AI_DISPATCH_TEXT", { gpt_sent: true });
+  }
 }
 
 export default {};
