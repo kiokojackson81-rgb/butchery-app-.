@@ -5,6 +5,7 @@ import { finalizeLoginDirect } from "@/app/api/wa/auth/finalize/route";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { findPersonCodeTolerant } from "@/server/db_person";
 import { logOutbound } from "@/lib/wa";
+import { toE164DB } from "@/server/canon";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
@@ -61,36 +62,68 @@ export async function POST(req: Request) {
       if (!outlet) return NextResponse.json({ ok: false, code: "CODE_NOT_ASSIGNED", message: "Your outlet is not set. Ask Supervisor to assign your outlet." }, { status: 422 });
     }
 
-    // If wa phone provided, attempt direct finalize and bind
-    if (wa) {
-      try { await logOutbound({ direction: "in", payload: { event: "login.page.submit", code: full || num, phone_guess: wa }, status: "INFO" }); } catch {}
-      const fin = await finalizeLoginDirect(wa, pc.code);
-      if (!(fin as any)?.ok) {
-        // fall back to creating a pending session for webhook to finalize on first inbound
-        await (prisma as any).waSession.upsert({
+    const waNormalized = wa ? toE164DB(wa) : null;
+    if (waNormalized) {
+      try {
+        await logOutbound({
+          direction: "in",
+          payload: { event: "login.page.submit", code: full || num, phone_guess: waNormalized },
+          status: "INFO",
+        });
+      } catch {}
+    }
+
+    const mapping = await (prisma as any).phoneMapping
+      .findUnique({ where: { code: pc.code } })
+      .catch(() => null);
+    const mappedPhone = mapping?.phoneE164 ? toE164DB(mapping.phoneE164) : null;
+
+    const candidatePhones = Array.from(
+      new Set(
+        [waNormalized, mappedPhone]
+          .map((p) => (p && /^\+\d{10,15}$/.test(p) ? p : null))
+          .filter(Boolean) as string[],
+      ),
+    );
+
+    let finalizedPhone: string | null = null;
+    if (candidatePhones.length) {
+      for (const phone of candidatePhones) {
+        const fin = await finalizeLoginDirect(phone, pc.code);
+        if ((fin as any)?.ok) {
+          finalizedPhone = phone;
+          try {
+            await sendOpsMessage(phone, { kind: "login_welcome", role: role as any, outlet: outlet || undefined });
+            await logOutbound({ direction: "out", payload: { event: "menu.sent", phone, role, outlet }, status: "SENT", type: "menu.sent" });
+          } catch {}
+          break;
+        }
+      }
+    }
+
+    if (!finalizedPhone) {
+      // Unable to resolve a concrete WhatsApp phone, stage a pending session for manual binding.
+      await (prisma as any).waSession
+        .upsert({
           where: { phoneE164: `+PENDING:${pc.code}` },
           update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
           create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-        }).catch(() => {});
-      } else {
-        // On successful code validation, immediately send welcome via dispatcher
-        try {
-          await sendOpsMessage(wa, { kind: "login_welcome", role: role as any, outlet: outlet || undefined });
-          await logOutbound({ direction: "out", payload: { event: "menu.sent", phone: wa, role, outlet }, status: "SENT", type: "menu.sent" });
-        } catch {}
-      }
-    } else {
-      // No wa phone provided: create or refresh pending session for webhook
-      await (prisma as any).waSession.upsert({
-        where: { phoneE164: `+PENDING:${pc.code}` },
-        update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-        create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-      }).catch(() => {});
+        })
+        .catch(() => {});
     }
 
-  const link = businessDeepLink();
+    const link = businessDeepLink();
     if (!link) return NextResponse.json({ ok: false, code: "CONFIG", message: "WhatsApp not configured" }, { status: 500 });
-    return NextResponse.json({ ok: true, role, outlet, waDeepLink: link });
+    return NextResponse.json({
+      ok: true,
+      role,
+      outlet,
+      waDeepLink: link,
+      finalized: Boolean(finalizedPhone),
+      targetPhone: finalizedPhone,
+      viaExistingMapping: Boolean(finalizedPhone && finalizedPhone === mappedPhone && !waNormalized),
+      pendingSession: !finalizedPhone,
+    });
   } catch (e: any) {
     const code = (e as any)?.code || "GENERIC";
     if (code === "AMBIGUOUS_CODE") return NextResponse.json({ ok: false, code, message: "Multiple codes share those digits. Enter the full code (letters + numbers)." }, { status: 409 });

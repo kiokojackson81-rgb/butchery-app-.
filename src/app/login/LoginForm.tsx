@@ -9,6 +9,13 @@ function normalizeCode(v: string) {
   return String(v || "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
+function phoneEnding(phone: string | null | undefined) {
+  if (!phone) return "";
+  const digits = phone.replace(/[^0-9]/g, "");
+  if (digits.length < 4) return digits || "";
+  return digits.slice(-4);
+}
+
 export default function LoginForm() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +25,17 @@ export default function LoginForm() {
 
   useEffect(() => {
     (document.getElementById("code-input") as HTMLInputElement | null)?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      const wa = url.searchParams.get("wa");
+      if (!wa) {
+        setInfo((prev) => prev || "Tip: open this login link from your WhatsApp chat so we can connect automatically.");
+      }
+    } catch {}
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -40,10 +58,11 @@ export default function LoginForm() {
       // Validate code, resolve role/outlet, send Welcome+menu, and get pure WA deeplink
       const url = new URL(location.href);
       const wa = url.searchParams.get("wa");
+      const nonce = url.searchParams.get("nonce");
       const r = await fetch("/api/wa/auth/login-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: loginCode, src: "web", wa })
+        body: JSON.stringify({ code: loginCode, src: "web", wa, nonce })
       });
       const j = await r.json().catch(() => ({} as any));
       if (!r.ok || !j?.ok) {
@@ -54,11 +73,23 @@ export default function LoginForm() {
         throw new Error(j?.message || "We couldn’t log you in. Try again or contact Admin.");
       }
       const link: string = j?.waDeepLink || "";
+      const finalized = Boolean(j?.finalized);
+      const targetPhone: string | null = j?.targetPhone || null;
+      const viaMapping = Boolean(j?.viaExistingMapping);
+      const pendingSession = Boolean(j?.pendingSession);
       setDeepLink(link);
       try { sessionStorage.setItem("last_login_code", loginCode); } catch {}
 
-      // Show success strip and deep-open WhatsApp immediately
-      setInfo("Success. We’re opening WhatsApp and sending your menu…");
+      if (finalized) {
+        const tail = phoneEnding(targetPhone);
+        const suffix = tail ? ` (WhatsApp ending ${tail})` : "";
+        const mappingNote = viaMapping ? " We recognised your saved device." : "";
+        setInfo(`Success${suffix}.${mappingNote} Opening WhatsApp with your menu…`.trim());
+      } else if (pendingSession) {
+        setInfo("Login accepted. Go back to the WhatsApp chat and tap Login again to finish linking.");
+      } else {
+        setInfo("Login accepted. Opening WhatsApp now…");
+      }
       if (link) {
         try { window.location.href = link; } catch {}
       }
