@@ -23,7 +23,6 @@ import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
 import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
 import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
-import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -328,14 +327,9 @@ export async function POST(req: Request) {
           };
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
             try { console.info("[WA] SENDING tabs", { role }); } catch {}
+            const phoneE164 = to.startsWith("+") ? to : `+${to}`;
             try {
-              await safeSendGreetingOrMenu({
-                phone: to.startsWith("+") ? to : `+${to}`,
-                role,
-                outlet,
-                source: "webhook_send_role_tabs",
-                sessionLike: role === "attendant" ? { outlet } : undefined,
-              });
+              await sendGptGreeting(phoneE164, role, outlet);
             } catch (e) {
               try { console.warn('[WA] sendRoleTabs fallback', String(e)); } catch {}
               try { await sendText(to, "How can I help? Please tell me what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
@@ -519,7 +513,7 @@ export async function POST(req: Request) {
           // GPT-Only Routing: when enabled, bypass legacy fast-paths and send all text to GPT
           if (GPT_ONLY && (type === "text" || type === "interactive")) {
             // Normalize inbound into a text prompt for GPT
-            const text = (() => {
+            let text = (() => {
               if (type === "text") return (m.text?.body ?? "").trim();
               const lr = (m as any)?.interactive?.list_reply?.id as string | undefined;
               const br = (m as any)?.interactive?.button_reply?.id as string | undefined;
@@ -528,35 +522,24 @@ export async function POST(req: Request) {
               return `[button:${id}] ${title || ""}`.trim();
             })();
 
-            // Direct digit mapping (1-7) to flows — when GPT_ONLY is enabled we intentionally
-            // skip the legacy direct-handler path so digits are routed through GPT for consistent
-            // OOC generation and reply composition. When GPT_ONLY is disabled, preserve the
-            // prior faster direct mapping behavior.
-            // Special-case: when GPT_ONLY is disabled we want typed digits (1-7)
-            // to behave exactly like pressing the numeric tab in the UI. This
-            // mirrors the interactive mapping done later for interactive payloads.
+            // Normalize bare digit replies into synthetic button taps so GPT receives a
+            // consistent signal (and can acknowledge the choice) instead of silently
+            // delegating to legacy handlers.
             const digit = String(text || "").trim();
             if (/^[1-7]$/.test(digit)) {
+              const id = mapDigitToId(sessRole, digit);
+              const flowId = canonicalToFlowId(sessRole, id);
+              const title = humanTitle(id);
+              text = `[button:${flowId}] ${title}`.trim();
               try {
-                // Map the digit to the role-specific id and route regardless of GPT_ONLY
-                const id = mapDigitToId(sessRole, digit);
-                const flowId = canonicalToFlowId(sessRole, id);
-                if (sessRole === "supervisor") await handleSupervisorAction(_sess, flowId, phoneE164);
-                else if (sessRole === "supplier") await handleSupplierAction(_sess, flowId, phoneE164);
-                else await handleAuthenticatedInteractive(_sess, flowId);
-                const to = toGraphPhone(phoneE164);
-                // If handler didn't emit outbound, send a tiny ack when tabs disabled
-                try {
-                  if (!__sentOnce && !TABS_ENABLED) {
-                    try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-                  }
-                } catch {}
-                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
-                continue;
-              } catch (e) {
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, digit }, event: "digit.direct.fail", error: String(e) }, status: "ERROR", type: "DIGIT_DIRECT_FAIL" }); } catch {}
-              }
+                await logOutbound({
+                  direction: "in",
+                  templateName: null,
+                  payload: { phone: phoneE164, meta: { phoneE164, digit, mapped: flowId }, event: "digit.normalized" },
+                  status: "INFO",
+                  type: "DIGIT_NORMALIZED",
+                });
+              } catch {}
             }
             // Mark GPT-only path entry
             try { await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, event: "gpt_only.enter", text }, status: "INFO", type: "GPT_ONLY_INBOUND" }); } catch {}
@@ -597,6 +580,10 @@ export async function POST(req: Request) {
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
             const sendRoleTabsLocal = async () => {
+              if (GPT_ONLY) {
+                await sendRoleTabs(toGraphPhone(phoneE164), (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                return;
+              }
               if (!TABS_ENABLED) return;
               const to = toGraphPhone(phoneE164);
               await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
@@ -610,7 +597,10 @@ export async function POST(req: Request) {
                 const to = toGraphPhone(phoneE164);
                     // In GPT-only mode prefer GPT to compose a helpful greeting
                     if (GPT_ONLY) {
-                      try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_ooc_invalid_fallback', sessionLike: _sess }); } catch {}
+                      try {
+                        await sendGptGreeting(phoneE164, (sessRole as any) || 'attendant', _sess?.outlet || undefined);
+                        markSent();
+                      } catch {}
                     } else {
                       const msg = "I didn't quite get that. Please tell me what you'd like to do.";
                       await sendTextSafe(to, msg, "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -680,13 +670,7 @@ export async function POST(req: Request) {
                   allowedButtons.length > 0 &&
                   allowedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b));
                 if (isAttendant && (ATTENDANT_MENU_INTENTS.has(normalizedIntent) || looksLikeMenu)) {
-                  await safeSendGreetingOrMenu({
-                    phone: phoneE164,
-                    role: sessRole,
-                    outlet: _sess?.outlet,
-                    source: "webhook_ai_menu",
-                    sessionLike: _sess,
-                  });
+                  await sendGptGreeting(phoneE164, sessRole, _sess?.outlet || undefined);
                   markSent();
                   continue;
                 }
@@ -696,7 +680,10 @@ export async function POST(req: Request) {
                   try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phoneE164, event: 'ooc.invalid.intent', preview: intentCanon, ooc: sanitizeForLog(ooc) }, status: 'WARN', type: 'OOC_INVALID' }); } catch {}
                   try {
                     if (GPT_ONLY) {
-                      try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_ooc_invalid_intent', sessionLike: _sess }); } catch {}
+                      try {
+                        await sendGptGreeting(phoneE164, (sessRole as any) || 'attendant', _sess?.outlet || undefined);
+                        markSent();
+                      } catch {}
                     } else {
                       const to = toGraphPhone(phoneE164);
                       await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT', { gpt_sent: true });
@@ -894,7 +881,10 @@ export async function POST(req: Request) {
                     try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, event: "SILENCE_GUARD" }, status: "WARN", type: "SILENCE_GUARD" }); } catch {}
                       // In GPT-only mode, prefer the guarded safe helper to compose and send the greeting/menu
                       if (GPT_ONLY) {
-                        try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_silence_guard', sessionLike: _sess }); } catch {}
+                        try {
+                          await sendGptGreeting(phoneE164, (sessRole as any) || 'attendant', _sess?.outlet || undefined);
+                          markSent();
+                        } catch {}
                       } else {
                         const clar = generateDefaultClarifier(sessRole);
                         const to = toGraphPhone(phoneE164);
@@ -1079,13 +1069,7 @@ export async function POST(req: Request) {
 
                 const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
                 if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                  await safeSendGreetingOrMenu({
-                    phone: phoneE164,
-                    role: sessRole,
-                    outlet: _sess?.outlet,
-                    source: "webhook_gpt_selection_menu",
-                    sessionLike: _sess,
-                  });
+                  await sendGptGreeting(phoneE164, sessRole, _sess?.outlet || undefined);
                   markSent();
                   continue;
                 }
@@ -1133,13 +1117,7 @@ export async function POST(req: Request) {
               const to = toGraphPhone(phoneE164);
               const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
               if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                await safeSendGreetingOrMenu({
-                  phone: phoneE164,
-                  role: sessRole,
-                  outlet: _sess?.outlet,
-                  source: "webhook_interactive_menu",
-                  sessionLike: _sess,
-                });
+                await sendGptGreeting(phoneE164, sessRole, _sess?.outlet || undefined);
                 markSent();
                 continue;
               }

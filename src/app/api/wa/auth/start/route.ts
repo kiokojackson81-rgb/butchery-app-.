@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 import { normalizeToPlusE164, toGraphPhone } from "@/lib/wa_phone";
 import { sendText, logOutbound, warmUpSession } from "@/lib/wa";
-import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
+import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,13 +75,15 @@ async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean>
 async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }): Promise<boolean> {
   const toGraph = toGraphPhone(opts.to);
   try { await warmUpSession(toGraph); } catch {}
-  const sent = await safeSendGreetingOrMenu({
-    phone: opts.to,
-    role: opts.role,
-    outlet: opts.outlet,
-    source: "auth_start_login_success",
-    sessionLike: { outlet: opts.outlet },
-  });
+  const sent = await (async () => {
+    try {
+      await sendGptGreeting(opts.to, opts.role, opts.outlet || undefined);
+      return true;
+    } catch (err) {
+      try { console.warn('[wa.auth.start] sendLoginSuccessDM fallback', err); } catch {}
+      return false;
+    }
+  })();
   await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
   return sent;
 }

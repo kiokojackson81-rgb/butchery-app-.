@@ -351,12 +351,20 @@ export async function safeSendGreetingOrMenu({
       return false;
     }
 
+    const preferGpt = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+    if (preferGpt) {
+      await sendGptGreeting(phoneE164, roleKind, outlet || undefined);
+      try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164, source, kind: 'gpt_greeting' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
+      await markMenuSent(phoneE164, source);
+      try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source, via: 'gpt' }); } catch {}
+      return true;
+    }
+
     if (roleKind === "attendant") {
       const sess = sessionLike || { outlet: outlet ?? undefined };
       await sendAttendantMenu(phoneE164, sess, { force: true, source });
     } else {
-      const toGraph = phoneE164.replace(/^\+/, "");
-      await sendGptGreeting(toGraph, roleKind, outlet || undefined);
+      await sendGptGreeting(phoneE164, roleKind, outlet || undefined);
       try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: phoneE164, source, kind: 'gpt_greeting' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
       await markMenuSent(phoneE164, source);
     }
