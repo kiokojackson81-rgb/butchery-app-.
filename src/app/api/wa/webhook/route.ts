@@ -390,6 +390,35 @@ export async function POST(req: Request) {
           try { await touchWaSession(phoneE164); } catch {}
           let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
+          if (!auth.ok) {
+            try {
+              const windowStart = new Date(Date.now() - 2 * 60_000);
+              const recentWelcome = await (prisma as any).waMessageLog
+                .findFirst({
+                  where: {
+                    type: "login_welcome_sent",
+                    createdAt: { gt: windowStart },
+                    payload: { path: ["phone"], equals: phoneE164 } as any,
+                  },
+                })
+                .catch(() => null);
+              if (recentWelcome) {
+                const sessRow = await (prisma as any).waSession
+                  .findUnique({ where: { phoneE164 } })
+                  .catch(() => null);
+                if (sessRow && sessRow.code) {
+                  auth = { ok: true, sess: sessRow } as any;
+                  try {
+                    console.info("[WA] AUTH recovery via welcome log", {
+                      phone: phoneE164,
+                      role: sessRow.role,
+                      outlet: sessRow.outlet,
+                    });
+                  } catch {}
+                }
+              }
+            } catch {}
+          }
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
           // a session row exists in MENU state with credentials we treat as authenticated.
           if (!auth.ok) {
