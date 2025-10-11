@@ -118,9 +118,38 @@ export async function POST(req: Request) {
       if (userTake.length < 3 && normalized.includes("BACK_TO_MENU") === false) {
         userTake.push("BACK_TO_MENU");
       }
+
       // Build reply buttons from selected ids
       const b = userTake.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
-      await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
+      const fallbackText = ["Choose an action:", ...userTake.map((id, idx) => `${idx + 1}) ${humanTitle(id)}`)].join("\n");
+
+      const interactiveEnabled = process.env.WA_INTERACTIVE_ENABLED === "true";
+      let delivered = false;
+
+      if (interactiveEnabled) {
+        try {
+          const result = await sendInteractive(
+            {
+              messaging_product: "whatsapp",
+              to: phoneGraph,
+              type: "interactive",
+              interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } },
+            } as any,
+            "AI_DISPATCH_INTERACTIVE",
+          );
+          const response = (result as any)?.response;
+          delivered =
+            result?.ok === true &&
+            !(response && (response as any).noop === true) &&
+            !(response && (response as any).dryRun === true);
+        } catch (err) {
+          try { console.warn('[WA] sendButtonsFor interactive failed', err instanceof Error ? err.message : err); } catch {}
+        }
+      }
+
+      if (!delivered) {
+        await sendText(phoneGraph, fallbackText, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
     } catch {}
   }
 
