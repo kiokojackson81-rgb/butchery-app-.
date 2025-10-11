@@ -52,9 +52,18 @@ export function parseOOCBlock(text: string): any | null {
     for (const rx of patterns) {
       const m = rx.exec(text);
       if (m && m[1]) {
+        const raw = m[1].trim();
         try {
-          return JSON.parse(m[1].trim());
-        } catch {}
+          return JSON.parse(raw);
+        } catch {
+          // Some GPT replies accidentally drop the comma before next_state_hint,
+          // yielding `},"next_state_hint"` instead of `,"next_state_hint"`.
+          // Apply a targeted repair then retry JSON parse.
+          try {
+            const repaired = raw.replace(/}\s*,\s*"next_state_hint"/g, ',"next_state_hint"');
+            return JSON.parse(repaired);
+          } catch {}
+        }
       }
     }
   } catch {}
