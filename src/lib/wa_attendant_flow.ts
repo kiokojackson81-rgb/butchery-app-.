@@ -169,13 +169,24 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
     }
   }
 
-  const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
+  const useGptOnly =
+    String(process.env.WA_GPT_ONLY ?? 'true').toLowerCase() === 'true' ||
+    String(process.env.WA_STRICT_GPT_ONLY ?? 'false').toLowerCase() === 'true';
   if (useGptOnly) {
     const outlet = sess?.outlet || undefined;
-    // Log that a legacy interactive send would have been blocked.
+    // Log that a legacy interactive send would have been blocked and hand the
+    // full greeting/menu experience to GPT as mandated by the blueprint.
     await logBlockedNonGpt(phoneE164, opts?.source || 'sendAttendantMenu');
-    await safeSendGreetingOrMenu({ phone: phone.replace(/^\+/, ''), role: 'attendant', outlet, force: true, source: opts?.source });
-    try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: phoneE164, source: opts?.source, kind: 'gpt_menu' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
+    await sendGptGreeting(phoneE164, 'attendant', outlet);
+    try {
+      await logOutbound({
+        direction: "out",
+        templateName: null,
+        payload: { phoneE164, source: opts?.source, kind: 'gpt_menu' },
+        status: 'SENT',
+        type: 'MENU_SEND',
+      });
+    } catch {}
     await markMenuSent(phoneE164, opts?.source);
     if (acquiredHere) releaseInFlight(phoneE164);
     return;

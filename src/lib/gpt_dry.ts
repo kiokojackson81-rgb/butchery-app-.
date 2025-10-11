@@ -8,7 +8,16 @@ export type DryOOC = {
   next_state_hint?: string;
 };
 
-const DEFAULT_ATTENDANT_BUTTONS = ["ATT_CLOSING", "ATT_DEPOSIT", "ATT_EXPENSE", "MENU_SUMMARY"] as const;
+const DEFAULT_ATTENDANT_BUTTONS = [
+  "ATT_CLOSING",
+  "ATT_DEPOSIT",
+  "MENU_SUMMARY",
+  "ATT_EXPENSE",
+  "MENU_SUPPLY",
+  "ATT_WASTE",
+  "CHANGE_CONTEXT",
+  "LOGOUT",
+] as const;
 
 function parseAmount(str: string): number | null {
   const s = String(str || "").replace(/[,\s]/g, "");
@@ -40,6 +49,8 @@ const BUTTON_HINTS: Record<string, { text: string; next: string }> = {
   ATT_EXPENSE: { text: "Let's capture that expense.", next: "EXPENSE_CAPTURE" },
   MENU_SUMMARY: { text: "Here's today's summary snapshot.", next: "SUMMARY" },
   MENU_SUPPLY: { text: "Viewing supply options.", next: "SUPPLY" },
+  ATT_WASTE: { text: "Let's log waste details.", next: "CLOSING_PICK" },
+  CHANGE_CONTEXT: { text: "Let’s adjust outlet or date.", next: "CHANGE_CONTEXT" },
   TILL_COUNT: { text: "Till count coming up.", next: "TILL_COUNT" },
   HELP: { text: "How can I help?", next: "MENU" },
   MENU: { text: "Back to the menu.", next: "MENU" },
@@ -49,13 +60,13 @@ const BUTTON_HINTS: Record<string, { text: string; next: string }> = {
 const DIGIT_MAP: Record<string, string> = {
   "1": "ATT_CLOSING",
   "2": "ATT_DEPOSIT",
-  "3": "ATT_EXPENSE",
-  "4": "MENU_SUMMARY",
-  "5": "TILL_COUNT",
-  "6": "MENU_SUPPLY",
-  "7": "HELP",
-  "8": "MENU",
-  "9": "LOGOUT",
+  "3": "MENU_SUMMARY",
+  "4": "ATT_EXPENSE",
+  "5": "MENU_SUPPLY",
+  "6": "ATT_WASTE",
+  "7": "CHANGE_CONTEXT",
+  "8": "LOGOUT",
+  "9": "HELP",
 };
 
 export function planDryResponse(userText: string): { text: string; ooc: DryOOC } {
@@ -150,9 +161,5 @@ export function planDryResponse(userText: string): { text: string; ooc: DryOOC }
   }
 
   // Default fallback
-  return buildReply(
-    "I didn't catch that. Let me know if you need closing, deposit, or expense help.",
-    "FREE_TEXT",
-    "MENU"
-  );
+  return buildReply("I didn’t understand. What would you like to do?", "FREE_TEXT", "MENU");
 }
