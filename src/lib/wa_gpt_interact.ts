@@ -16,12 +16,17 @@ export async function trySendGptInteractive(to: string, inter: GptInteractive | 
 
   const sendAndConfirm = async (payload: any, kind: 'buttons' | 'list') => {
     const result = await sendInteractive(payload, 'AI_DISPATCH_INTERACTIVE');
-    const ok = result?.ok === true;
+    const response = (result as any)?.response;
+    const ok =
+      result?.ok === true &&
+      !(response && (response as any).noop === true) &&
+      !(response && (response as any).dryRun === true);
     if (!ok) {
       try {
         console.warn('[wa_gpt_interact] interactive send failed', {
           kind,
           error: (result as any)?.error || 'unknown-error',
+          response: response || null,
         });
       } catch {}
     }
