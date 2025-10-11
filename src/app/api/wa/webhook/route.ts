@@ -581,7 +581,7 @@ export async function POST(req: Request) {
                 const to = toGraphPhone(phoneE164);
                     // In GPT-only mode prefer GPT to compose a helpful greeting
                     if (GPT_ONLY) {
-                      try { await sendGptGreeting(phoneE164.replace(/^\+/, ''), (sessRole as any) || 'attendant', _sess?.outlet || undefined); } catch {}
+                      try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_ooc_invalid_fallback', sessionLike: _sess }); } catch {}
                     } else {
                       const msg = "I didn't quite get that. Please tell me what you'd like to do.";
                       await sendTextSafe(to, msg, "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -667,7 +667,7 @@ export async function POST(req: Request) {
                   try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phoneE164, event: 'ooc.invalid.intent', preview: intentCanon, ooc: sanitizeForLog(ooc) }, status: 'WARN', type: 'OOC_INVALID' }); } catch {}
                   try {
                     if (GPT_ONLY) {
-                      try { await sendGptGreeting(phoneE164.replace(/^\+/, ''), (sessRole as any) || 'attendant', _sess?.outlet || undefined); } catch {}
+                      try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_ooc_invalid_intent', sessionLike: _sess }); } catch {}
                     } else {
                       const to = toGraphPhone(phoneE164);
                       await sendTextSafe(to, "I didn't quite get that. Please choose an action.", 'AI_DISPATCH_TEXT', { gpt_sent: true });
@@ -861,18 +861,18 @@ export async function POST(req: Request) {
             try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             // Silence guard: if no outbound was produced by handlers or sends, ensure we send a clarifier and log it
             try {
-              if (!__sentOnce) {
-                try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, event: "SILENCE_GUARD" }, status: "WARN", type: "SILENCE_GUARD" }); } catch {}
-                  // In GPT-only mode, allow GPT to compose the clarifier/greeting
-                  if (GPT_ONLY) {
-                    try { await sendGptGreeting(phoneE164.replace(/^\+/, ''), (sessRole as any) || 'attendant', _sess?.outlet || undefined); } catch {}
-                  } else {
-                    const clar = generateDefaultClarifier(sessRole);
-                    const to = toGraphPhone(phoneE164);
-                    await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
-                    await sendButtonsFor(to, clar.buttons);
+                  if (!__sentOnce) {
+                    try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, event: "SILENCE_GUARD" }, status: "WARN", type: "SILENCE_GUARD" }); } catch {}
+                      // In GPT-only mode, prefer the guarded safe helper to compose and send the greeting/menu
+                      if (GPT_ONLY) {
+                        try { await safeSendGreetingOrMenu({ phone: phoneE164, role: (sessRole as any) || 'attendant', outlet: _sess?.outlet || undefined, source: 'webhook_silence_guard', sessionLike: _sess }); } catch {}
+                      } else {
+                        const clar = generateDefaultClarifier(sessRole);
+                        const to = toGraphPhone(phoneE164);
+                        await sendTextSafe(to, clar.text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+                        await sendButtonsFor(to, clar.buttons);
+                      }
                   }
-              }
             } catch (e) { try { console.warn('[WA] SILENCE_GUARD error', String(e)); } catch {} }
             continue;
 

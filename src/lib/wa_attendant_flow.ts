@@ -1,6 +1,6 @@
 // New state machine for attendants.
 import { prisma } from "@/lib/prisma";
-import { sendText, sendInteractive } from "@/lib/wa";
+import { sendText, sendInteractive, logOutbound } from "@/lib/wa";
 import { normCode, toDbPhone } from "@/server/util/normalize";
 import { createLoginLink } from "@/server/wa_links";
 import { touchSession } from "@/server/wa/session";
@@ -141,6 +141,10 @@ async function notifySupAdm(message: string) {
 
 export async function sendAttendantMenu(phone: string, sess: any, opts?: { force?: boolean; source?: string }) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+  // Track whether this function acquired the in-flight lock so we only release
+  // it when appropriate. Callers like safeSendGreetingOrMenu may already hold the lock
+  // and call this with force=true.
+  let acquiredHere = false;
   if (!opts?.force) {
     // pre-check quickly before attempting to acquire in-flight lock
     const allowed = await menuSendAllowed(phoneE164);
@@ -153,19 +157,27 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
       try { console.info?.(`[wa] skip attendant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
       return;
     }
+    acquiredHere = true;
   } else {
-    // force: still acquire lock to avoid duplicates within this instance
-    if (!acquireInFlight(phoneE164)) {
-      try { console.info?.(`[wa] force skip attendant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
-      return;
+    // force: caller may have already acquired the lock. Only acquire if not held.
+    if (!MENU_IN_FLIGHT.has(phoneE164)) {
+      if (!acquireInFlight(phoneE164)) {
+        try { console.info?.(`[wa] force skip attendant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
+        return;
+      }
+      acquiredHere = true;
     }
   }
 
   const useGptOnly = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
   if (useGptOnly) {
     const outlet = sess?.outlet || undefined;
-    await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', outlet);
+    // Log that a legacy interactive send would have been blocked.
+    await logBlockedNonGpt(phoneE164, opts?.source || 'sendAttendantMenu');
+    await safeSendGreetingOrMenu({ phone: phone.replace(/^\+/, ''), role: 'attendant', outlet, force: true, source: opts?.source });
+    try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: phoneE164, source: opts?.source, kind: 'gpt_menu' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
     await markMenuSent(phoneE164, opts?.source);
+    if (acquiredHere) releaseInFlight(phoneE164);
     return;
   }
 
@@ -194,9 +206,10 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
   });
   await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
   try {
+    try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: phoneE164, source: opts?.source, kind: 'interactive_menu' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
     await markMenuSent(phoneE164, opts?.source);
   } finally {
-    releaseInFlight(phoneE164);
+    if (acquiredHere) releaseInFlight(phoneE164);
   }
 }
 
@@ -218,7 +231,7 @@ async function promptLogin(phone: string) {
   );
   // Optional: provide a helper button to re-send the link later
   if (process.env.WA_GPT_ONLY === 'true') {
-    try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant'); } catch {}
+    try { await safeSendGreetingOrMenu({ phone, role: 'attendant', source: 'promptLogin' }); } catch {}
   } else {
     await sendInteractive({
       to: phone.replace(/^\+/, ""),
@@ -244,6 +257,16 @@ function acquireInFlight(phoneE164: string) {
 
 function releaseInFlight(phoneE164: string) {
   MENU_IN_FLIGHT.delete(phoneE164);
+}
+
+// Log when a legacy interactive/menu send is blocked due to WA_GPT_ONLY.
+async function logBlockedNonGpt(phoneE164: string, source?: string) {
+  try {
+    try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164, source, kind: 'blocked_legacy_menu' }, status: 'BLOCKED', type: 'BLOCKED_NON_GPT_MENU' }); } catch {}
+    try { console.info?.(`[wa] blocked legacy non-GPT menu`, { phoneE164, source }); } catch {}
+  } catch (e) {
+    // best-effort
+  }
 }
 
 export async function menuSendAllowed(phoneE164: string, minIntervalMs = 8_000) {
@@ -334,6 +357,7 @@ export async function safeSendGreetingOrMenu({
     } else {
       const toGraph = phoneE164.replace(/^\+/, "");
       await sendGptGreeting(toGraph, roleKind, outlet || undefined);
+      try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: phoneE164, source, kind: 'gpt_greeting' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
       await markMenuSent(phoneE164, source);
     }
 
@@ -585,7 +609,7 @@ export async function handleInboundText(phone: string, text: string) {
           await saveSession(phone, { state: "CLOSING_PICK", ...cur });
           const prods = await getAssignedProducts(s.code || "");
           const remaining = prods.filter((p) => !closed.has(p.key));
-          if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+          if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'closing_qty_already_closed', sessionLike: s }); } catch {} } else {
             await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
           }
           return;
@@ -617,7 +641,7 @@ export async function handleInboundText(phone: string, text: string) {
         lastMessageAt: new Date().toISOString(),
       });
 
-      if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+      if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'closing_qty_followup', sessionLike: s }); } catch {} } else {
         await sendInteractive(buttonsWasteOrSkip(phone, item.name), "AI_DISPATCH_INTERACTIVE");
       }
     } else {
@@ -917,7 +941,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     });
 
     if (process.env.WA_GPT_ONLY === 'true') {
-      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+      try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'menu_submit_closing', sessionLike: s }); } catch {}
     } else {
       const options = prods.slice(0, 10).map((p) => ({
         id: `PROD_${p.key}`,
@@ -937,7 +961,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   }
   if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE" || id === "ATT_EXPENSE") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+    if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'menu_expense', sessionLike: s }); } catch {} } else {
       await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     }
     return true;
@@ -1014,7 +1038,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
       await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
       await saveSession(phone, { state: "MENU", ...cur });
-  await sendGptGreeting(phone.replace(/^\+/, ""), "attendant", s.outlet || undefined);
+      try { await safeSendGreetingOrMenu({ phone, role: 'attendant', outlet: s.outlet, force: true, source: 'prod_day_locked', sessionLike: s }); } catch {}
       return true;
     }
     const prods = await getAssignedProducts(s.code || "");
@@ -1022,11 +1046,11 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     // Guard: already closed product
     if (s.outlet) {
       const closed = await getClosedKeys(cur.date, s.outlet);
-      if (closed.has(key)) {
+        if (closed.has(key)) {
         await sendText(phone, `${name} is already closed for today. Pick another product.`, "AI_DISPATCH_TEXT");
         const remaining = prods.filter((p) => !closed.has(p.key));
         await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-        if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+        if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'prod_already_closed', sessionLike: s }); } catch {} } else {
           await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
         }
         return true;
@@ -1083,7 +1107,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     });
 
     if (process.env.WA_GPT_ONLY === 'true') {
-      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+      try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'prod_prompt_qty', sessionLike: s }); } catch {}
     } else {
       const promptText = buildQuantityPromptText(name);
       const navButtons = buildNavigationRow();
@@ -1100,7 +1124,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
     await saveSession(phone, { state: "CLOSING_WASTE_QTY", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+    if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'waste_yes_followup', sessionLike: s }); } catch {} } else {
       await sendInteractive(promptWaste(phone, cur.currentItem.name), "AI_DISPATCH_INTERACTIVE");
     }
     return true;
@@ -1172,7 +1196,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     ];
     await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
     if (process.env.WA_GPT_ONLY === 'true') {
-      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+      try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'summary_submit_followup', sessionLike: s }); } catch {}
     } else {
       const nextButtons = buildClosingNextActionsButtons();
       const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
@@ -1226,7 +1250,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     };
     await updateWaState(phoneE164, patch);
     if (process.env.WA_GPT_ONLY === 'true') {
-      try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {}
+      try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'summary_modify', sessionLike: s }); } catch {}
     } else {
       const options = items.slice(0, 10).map((r) => ({
         id: `PROD_${r.key}`,
@@ -1243,7 +1267,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   // Expense follow-ups
   if (id === "EXP_ADD_ANOTHER") {
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+    if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'exp_add_another', sessionLike: s }); } catch {} } else {
       await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     }
     return true;
@@ -1300,7 +1324,7 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
     await sendInteractive(summaryPayload as any, "AI_DISPATCH_INTERACTIVE");
   } else {
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-    if (process.env.WA_GPT_ONLY === 'true') { try { await sendGptGreeting(phone.replace(/^\+/, ''), 'attendant', s.outlet || undefined); } catch {} } else {
+    if (process.env.WA_GPT_ONLY === 'true') { try { await safeSendGreetingOrMenu({ phone, role: 'attendant', outlet: s.outlet, force: true, source: 'next_pick_or_summary', sessionLike: s }); } catch {} } else {
       await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
     }
   }
