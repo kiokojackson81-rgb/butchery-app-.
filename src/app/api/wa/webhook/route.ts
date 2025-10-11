@@ -253,7 +253,7 @@ export async function POST(req: Request) {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
+  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? "true").toLowerCase() === "true";
   const TABS_ENABLED = String(process.env.WA_TABS_ENABLED || "false").toLowerCase() === "true";
 
   // Diagnostic: surface key runtime flags so we can see why sends may be suppressed
