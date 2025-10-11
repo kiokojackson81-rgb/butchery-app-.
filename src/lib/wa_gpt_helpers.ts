@@ -3,6 +3,13 @@ import { sendTextSafe } from "@/lib/wa";
 import { toGraphPhone } from "@/server/canon";
 import { trySendGptInteractive } from "./wa_gpt_interact";
 
+export type GptGreetingResult = {
+  ok: boolean;
+  via?: "interactive" | "text";
+  fallback?: boolean;
+  errors?: string[];
+};
+
 function stripOoc(raw: string): string {
   if (!raw) return raw;
   return raw.replace(/<<<OOC>[\s\S]*?<\/OOC>>>/g, "").trim();
@@ -54,9 +61,12 @@ function buildFallbackGreeting(role: string, outlet?: string): string {
  * Send a GPT-composed greeting. If the AI returns a structured interactive payload,
  * attempt to send it (buttons or list). Otherwise fall back to plain text.
  */
-export async function sendGptGreeting(phoneE164: string, role: string, outlet?: string) {
+export async function sendGptGreeting(phoneE164: string, role: string, outlet?: string): Promise<GptGreetingResult> {
   const toGraph = toGraphPhone(phoneE164);
   let sent = false;
+  let via: "interactive" | "text" | undefined;
+  let usedDefaultFallback = false;
+  const errors: string[] = [];
   try {
     const prompt = `Prefer returning JSON object with optional fields: { text?: string, interactive?: { type: 'buttons'|'list', buttons?: [{id,title}], sections?: [{title, rows:[{id,title,description}]}], buttonLabel?: string, bodyText?: string, footerText?: string } }.
 Return a short (1-2 sentence) greeting for a user logged in as ${role}${outlet ? ` at ${outlet}` : ''}. If user can act via quick replies, include an interactive payload. Ensure buttons are short and <=3; if more actions are needed, use a 'list' structure. Only emit raw JSON (no explanatory text) when possible.`;
@@ -70,29 +80,59 @@ Return a short (1-2 sentence) greeting for a user logged in as ${role}${outlet ?
         const sentInteractive = await trySendGptInteractive(toGraph.replace(/^\+/, ""), inter);
         if (sentInteractive) {
           sent = true;
+          via = via || "interactive";
           if (text) {
-            await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+            const res = await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+            if (!res?.ok) {
+              errors.push((res as any)?.error || "text-send-failed");
+            } else if (!via) {
+              via = "text";
+            }
           }
+        } else {
+          errors.push("interactive-send-failed");
         }
       }
       if (!sent && text) {
-        await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
-        sent = true;
+        const res = await sendTextSafe(toGraph, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        if ((res as any)?.ok) {
+          sent = true;
+          if (!via) via = "text";
+        } else {
+          errors.push((res as any)?.error || "text-send-failed");
+        }
       }
     }
 
     if (!sent && fallbackText) {
-      await sendTextSafe(toGraph, fallbackText, "AI_DISPATCH_TEXT", { gpt_sent: true });
-      sent = true;
+      const res = await sendTextSafe(toGraph, fallbackText, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      if ((res as any)?.ok) {
+        sent = true;
+        if (!via) via = "text";
+      } else {
+        errors.push((res as any)?.error || "text-send-failed");
+      }
     }
   } catch (e) {
     try { console.warn("sendGptGreeting fallback", e); } catch {}
+    errors.push(e instanceof Error ? e.message : String(e));
   }
 
   if (!sent) {
     const fallback = buildFallbackGreeting(role, outlet);
-    await sendTextSafe(toGraph, fallback, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    usedDefaultFallback = true;
+    const res = await sendTextSafe(toGraph, fallback, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    if ((res as any)?.ok) {
+      sent = true;
+      if (!via) via = "text";
+    } else {
+      errors.push((res as any)?.error || "text-send-failed");
+    }
   }
+  if (!sent) {
+    try { console.warn("sendGptGreeting failed", { phoneE164, role, outlet, errors }); } catch {}
+  }
+  return { ok: sent, via, fallback: usedDefaultFallback, errors };
 }
 
 export default {};

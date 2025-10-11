@@ -75,16 +75,15 @@ async function waLogHasNonce(phoneE164: string, nonce: string): Promise<boolean>
 async function sendLoginSuccessDM(opts: { to: string; name: string; role: string; outlet: string | null; products: string[]; nonce: string }): Promise<boolean> {
   const toGraph = toGraphPhone(opts.to);
   try { await warmUpSession(toGraph); } catch {}
-  const sent = await (async () => {
-    try {
-      await sendGptGreeting(opts.to, opts.role, opts.outlet || undefined);
-      return true;
-    } catch (err) {
-      try { console.warn('[wa.auth.start] sendLoginSuccessDM fallback', err); } catch {}
-      return false;
-    }
-  })();
-  await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
+  let greetingResult: Awaited<ReturnType<typeof sendGptGreeting>> | null = null;
+  try {
+    greetingResult = await sendGptGreeting(opts.to, opts.role, opts.outlet || undefined);
+  } catch (err) {
+    try { console.warn('[wa.auth.start] sendLoginSuccessDM fallback', err); } catch {}
+    greetingResult = { ok: false, errors: [err instanceof Error ? err.message : String(err)] };
+  }
+  const sent = !!greetingResult?.ok;
+  await logOutbound({ direction: "out", templateName: "login-success", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result", greeting: greetingResult } }, status: sent ? "SENT" : "ERROR" });
   return sent;
 }
 
@@ -93,8 +92,9 @@ async function sendLoginFailDM(opts: { to: string; reason: string; nonce: string
   const body = `Login unsuccessful.\nPlease verify your code and try again: ${loginUrl}\nIf it still fails, contact Admin.`;
   const toGraph = toGraphPhone(opts.to);
   const res = await sendText(toGraph, body, "AI_DISPATCH_TEXT", { gpt_sent: true });
-  await logOutbound({ direction: "out", templateName: "login-fail", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: "SENT" });
-  return (res as any)?.ok === true;
+  const ok = (res as any)?.ok === true;
+  await logOutbound({ direction: "out", templateName: "login-fail", payload: { meta: { phoneE164: opts.to, nonce: opts.nonce, tag: "login-result" } }, status: ok ? "SENT" : "ERROR" });
+  return ok;
 }
 
 export async function POST(req: Request) {

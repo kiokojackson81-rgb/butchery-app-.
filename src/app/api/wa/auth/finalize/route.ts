@@ -91,21 +91,27 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   const to = toGraphPhone(phoneDB);
   try { await warmUpSession(to); } catch {}
+  let greetingResult: Awaited<ReturnType<typeof sendGptGreeting>> | null = null;
   try {
-    await sendGptGreeting(phoneDB, role, outletFinal || undefined);
-  } catch {}
+    greetingResult = await sendGptGreeting(phoneDB, role, outletFinal || undefined);
+  } catch (err) {
+    greetingResult = { ok: false, errors: [err instanceof Error ? err.message : String(err)] };
+  }
 
+  const greetingOk = !!greetingResult?.ok;
   try {
     await logOutbound({
       direction: "out",
       templateName: null,
-      payload: { phone: phoneDB, meta: { phoneE164: phoneDB, outlet: outletFinal, role, tradingPeriodId }, event: "login_welcome_sent" },
-      status: "SENT",
+      payload: { phone: phoneDB, meta: { phoneE164: phoneDB, outlet: outletFinal, role, tradingPeriodId, greeting: greetingResult }, event: "login_welcome_sent" },
+      status: greetingOk ? "SENT" : "ERROR",
       type: "login_welcome_sent",
     });
   } catch {}
 
-  try { await markLastMsg(phoneDB, "welcome_sent"); await touchWaSession(phoneDB); } catch {}
+  if (greetingOk) {
+    try { await markLastMsg(phoneDB, "welcome_sent"); await touchWaSession(phoneDB); } catch {}
+  }
 
   try {
     await logOutbound({ direction: "in", templateName: null, payload: { event: "session.linked", phone: phoneDB, role, outlet: outletFinal, tradingPeriodId }, status: "INFO", type: "SESSION_LINKED" });

@@ -343,8 +343,10 @@ export async function safeSendGreetingOrMenu({
     // reminderSend has a unique constraint on (type, phoneE164, date), so concurrent
     // attempts with the same windowKey will fail for all but one process.
     const windowKey = String(Math.floor(Date.now() / 5000));
+    let guardInserted = false;
     try {
       await (prisma as any).reminderSend.create({ data: { type: `menu_send_v1`, phoneE164: phoneE164, date: windowKey } });
+      guardInserted = true;
     } catch (err) {
       // If create fails (unique constraint), another process already sent within the window
       try { console.info?.(`[wa] greeting suppressed (reminderSend dup)`, { phoneE164, windowKey, source }); } catch {}
@@ -353,11 +355,26 @@ export async function safeSendGreetingOrMenu({
 
     const preferGpt = process.env.WA_GPT_ONLY === 'true' || process.env.WA_STRICT_GPT_ONLY === 'true';
     if (preferGpt) {
-      await sendGptGreeting(phoneE164, roleKind, outlet || undefined);
-      try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164, source, kind: 'gpt_greeting' }, status: 'SENT', type: 'MENU_SEND' }); } catch {}
-      await markMenuSent(phoneE164, source);
-      try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source, via: 'gpt' }); } catch {}
-      return true;
+      const greetingResult = await sendGptGreeting(phoneE164, roleKind, outlet || undefined);
+      try {
+        await logOutbound({
+          direction: "out",
+          templateName: null,
+          payload: { phoneE164, source, kind: 'gpt_greeting', result: greetingResult },
+          status: greetingResult.ok ? 'SENT' : 'ERROR',
+          type: 'MENU_SEND',
+        });
+      } catch {}
+      if (greetingResult.ok) {
+        await markMenuSent(phoneE164, source);
+        try { console.info?.(`[wa] greeting sent`, { phoneE164, role: roleKind, outlet, source, via: greetingResult.via || 'text' }); } catch {}
+        return true;
+      }
+      if (guardInserted) {
+        try { await (prisma as any).reminderSend.deleteMany({ where: { type: `menu_send_v1`, phoneE164, date: windowKey } }); } catch {}
+      }
+      try { console.warn?.(`[wa] greeting failed`, { phoneE164, role: roleKind, outlet, source, errors: greetingResult.errors }); } catch {}
+      return false;
     }
 
     if (roleKind === "attendant") {
