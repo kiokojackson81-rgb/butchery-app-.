@@ -31,6 +31,12 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "playwright: GPT-only (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1",
+			"group": "build"
 		}
 	]
 }
