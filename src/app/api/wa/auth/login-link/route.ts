@@ -73,11 +73,8 @@ export async function POST(req: Request) {
           create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
         }).catch(() => {});
       } else {
-        // On successful code validation, immediately send welcome via dispatcher
-        try {
-          await sendOpsMessage(wa, { kind: "login_welcome", role: role as any, outlet: outlet || undefined });
-          await logOutbound({ direction: "out", payload: { event: "menu.sent", phone: wa, role, outlet }, status: "SENT", type: "menu.sent" });
-        } catch {}
+        // Finalize already triggered safeSendGreetingOrMenu. Avoid double-send here.
+        try { await logOutbound({ direction: "in", payload: { event: "login.finalize.ok", phone: wa, role, outlet }, status: "INFO", type: "LOGIN_FINALIZE_OK" }); } catch {}
       }
     } else {
       // No wa phone provided: create or refresh pending session for webhook

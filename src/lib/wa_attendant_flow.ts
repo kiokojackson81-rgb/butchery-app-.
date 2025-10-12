@@ -296,12 +296,14 @@ export async function safeSendGreetingOrMenu({
   const preAllowed = force || (await menuSendAllowed(phoneE164));
   if (!preAllowed) {
     try { console.info?.(`[wa] greeting suppressed (pre-check)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+    try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 'pre-check' }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
     return false;
   }
 
   // Acquire in-flight lock to avoid concurrent sends from this instance
   if (!acquireInFlight(phoneE164)) {
     try { console.info?.(`[wa] greeting suppressed (in-flight)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+    try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 'in-flight' }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
     return false;
   }
 
@@ -310,6 +312,7 @@ export async function safeSendGreetingOrMenu({
     const allowed = force || (await menuSendAllowed(phoneE164));
     if (!allowed) {
       try { console.info?.(`[wa] greeting suppressed (re-check)`, { phoneE164, role: roleKind, outlet, source }); } catch {}
+      try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 're-check' }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
       return false;
     }
 
@@ -328,6 +331,7 @@ export async function safeSendGreetingOrMenu({
       const isTest = String(process.env.NODE_ENV || "").toLowerCase() === "test";
       if (isUnique) {
         try { console.info?.(`[wa] greeting suppressed (reminderSend dup)`, { phoneE164, windowKey, source }); } catch {}
+        try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 'reminderSend dup', windowKey }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
         return false;
       }
       // For test runs or missing DB, log and proceed (do not suppress)

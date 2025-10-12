@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       outlet = scope?.outletName || null;
     }
 
-    // 4) If phone bound => create/update WaSession & send menu immediately
+    // 4) If phone bound => create/update WaSession & send menu (dedup aware)
     if (mapping?.phoneE164) {
       const phonePlus = mapping.phoneE164; // +E.164 in DB
       // For non-production or dry-run, our WA transport won't hit Graph, but we still normalize to graph format safely.
@@ -68,16 +68,26 @@ export async function POST(req: Request) {
         create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
       });
 
-      try { await warmUpSession(phoneGraph); } catch {}
+      // If a recent finalize ran, skip to avoid double-send. Also avoid force
+      // so the internal 8s suppression window can dedupe rapid successive calls.
+      let skip = false;
       try {
-        await safeSendGreetingOrMenu({
-          phone: phonePlus,
-          role: (role as any) || "attendant",
-          outlet,
-          source: "portal_login_bound",
-          sessionLike: { outlet },
-        });
+        const sess = await (prisma as any).waSession.findUnique({ where: { phoneE164: phonePlus } });
+        const lastFin = (sess as any)?.lastFinalizeAt ? new Date((sess as any).lastFinalizeAt).getTime() : 0;
+        if (lastFin && Date.now() - lastFin < 30_000) skip = true;
       } catch {}
+      try { await warmUpSession(phoneGraph); } catch {}
+      if (!skip) {
+        try {
+          await safeSendGreetingOrMenu({
+            phone: phonePlus,
+            role: (role as any) || "attendant",
+            outlet,
+            source: "portal_login_bound",
+            sessionLike: { outlet },
+          });
+        } catch {}
+      }
 
       return NextResponse.json({ ok: true, bound: true, waBusiness: process.env.NEXT_PUBLIC_WA_BUSINESS || null });
     }
