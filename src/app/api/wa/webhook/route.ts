@@ -9,21 +9,33 @@ import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedIntera
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText, sendInteractive } from "@/lib/wa";
-import { runGptForIncoming } from "@/lib/gpt_router";
-import { saveClosings } from "@/server/closings";
-import { addDeposit, parseMpesaText } from "@/server/deposits";
-import { reviewItem } from "@/server/supervisor/review.service";
-import { notifyAttendants as notifyAttendantsSupervisor, notifySupplier as notifySupplierSupervisor } from "@/server/supervisor/supervisor.notifications";
-import { enqueueOpsEvent } from "@/lib/opsEvents";
+// GPT/OOC removed for legacy-only mode
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
-import { validateOOC, sanitizeForLog } from "@/lib/ooc_guard";
-import { parseOOCBlock, stripOOC, buildUnauthenticatedReply, buildAuthenticatedReply } from "@/lib/ooc_parse";
-import { sendInteractive as sendInteractiveLib } from "@/lib/wa";
-import { buildInteractiveListPayload } from "@/lib/wa_messages";
-import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
-import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
+// OOC helpers removed in legacy-only
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
+
+// Legacy-only build: provide no-op shims for GPT/OOC helpers referenced in disabled branches.
+// This keeps typecheck green while we migrate the file to a pure legacy path.
+async function runGptForIncoming(_phone: string, _text: string): Promise<string> { return ""; }
+function parseOOCBlock(_text: string): any { return { intent: null, buttons: [] }; }
+function stripOOC(text: string): string { return String(text || ""); }
+function sanitizeForLog(o: any): any { try { return JSON.parse(JSON.stringify(o)); } catch { return o; } }
+function validateOOC(_o: any): { ok: boolean; reason?: string } { return { ok: false, reason: "disabled" }; }
+async function reviewItem(..._args: any[]): Promise<any> { return null; }
+async function enqueueOpsEvent(..._args: any[]): Promise<any> { return null; }
+async function notifyAttendantsSupervisor(..._args: any[]): Promise<any> { return null; }
+async function notifySupplierSupervisor(..._args: any[]): Promise<any> { return null; }
+async function saveClosings(..._args: any[]): Promise<any> { return null; }
+function parseMpesaText(..._args: any[]): any { return null; }
+async function addDeposit(..._args: any[]): Promise<any> { return null; }
+async function trySendGptInteractive(..._args: any[]): Promise<boolean> { return false; }
+function buildUnauthenticatedReply(url: string, remind: boolean): { text: string; ooc: any } {
+  const text = remind
+    ? `Please use the login link to continue:\n${url}`
+    : `Still no sign-in detected. Please open:\n${url}`;
+  return { text, ooc: { intent: "LOGIN" } } as any;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -241,7 +253,8 @@ export async function POST(req: Request) {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-  const GPT_ONLY = String(process.env.WA_GPT_ONLY ?? (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
+  // Legacy-only mode: ignore GPT flag
+  const GPT_ONLY = false;
   const TABS_ENABLED = String(process.env.WA_TABS_ENABLED || "false").toLowerCase() === "true";
 
   // Diagnostic: surface key runtime flags so we can see why sends may be suppressed
@@ -443,17 +456,15 @@ export async function POST(req: Request) {
                   await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
                   // send template/reopen via centralized gate (debounced)
                   await promptWebLogin(phoneE164, auth.reason);
-                  // Send the strict short nudge (OOC is logged server-side only)
-                  const reply = buildUnauthenticatedReply(url, false);
+                  // Send a short login nudge
                   const to = toGraphPhone(phoneE164);
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                  const replyText = `Still no sign-in detected. Please open:\n${url}`;
+                  try { await sendTextSafe(to, replyText, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 } else {
-                  // Suppressed duplicate login prompt → still send a lightweight reminder (deduped). OOC logged only.
-                  const reply = buildUnauthenticatedReply(url, true);
+                  // Suppressed duplicate login prompt → still send a lightweight reminder (deduped)
                   const to = toGraphPhone(phoneE164);
-                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: reply.ooc } }, status: "INFO", type: "OOC_INFO" }); } catch {}
-                  try { await sendTextSafe(to, reply.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                  const replyText = `Please use the login link to continue:\n${url}`;
+                  try { await sendTextSafe(to, replyText, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
               } catch {}
               try { await touchWaSession(phoneE164); } catch {}

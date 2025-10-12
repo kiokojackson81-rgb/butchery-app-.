@@ -10,9 +10,24 @@
       "options": { "shell": { "executable": "pwsh" } }
     },
     {
+      "label": "dev:legacy (pwsh, :3002)",
+      "type": "shell",
+      "command": "$env:PORT=\"3002\"; $env:WA_DRY_RUN=\"true\"; $env:WA_GPT_ONLY=\"false\"; $env:WA_AI_ENABLED=\"false\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; npm run dev",
+      "isBackground": true,
+      "group": "build",
+      "options": { "shell": { "executable": "pwsh" } }
+    },
+    {
       "label": "playwright: GPT-only (BASE_URL=:3002)",
       "type": "shell",
       "command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1",
+      "group": "build",
+      "options": { "shell": { "executable": "pwsh" } }
+    },
+    {
+      "label": "playwright: legacy smoke (BASE_URL=:3002)",
+      "type": "shell",
+      "command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1",
       "group": "build",
       "options": { "shell": { "executable": "pwsh" } }
     }
