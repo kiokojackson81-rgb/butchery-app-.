@@ -1000,23 +1000,44 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return true;
     }
-    const summary = await getTodaySupplySummary(s.outlet, cur.date).catch(() => []);
-    if (!summary.length) {
-      // Fall back to yesterday's closing as opening baseline
-      const y = prevDateISO(cur.date);
-      const prev = await (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y }, orderBy: { itemKey: "asc" } });
-      if (!prev.length) {
-        await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT");
-        return true;
-      }
-      const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r: any) => r.itemKey) } } });
-      const nameByKey = new Map(plist.map((p: any) => [p.key, p.name] as const));
-      const text = prev.map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`).join("\n");
-      await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
-      return true;
+    // Show supply exactly as the dashboard Supply tab would:
+    // - Include all assigned products
+    // - Use today's opening quantity if present
+    // - Default missing items to 0 with each product's unit
+    const assigned = await getAssignedProducts(s.code || "");
+    const keys = assigned.map((p) => p.key);
+    const [openRows, prodRows] = await Promise.all([
+      (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date } }).catch(() => []),
+      keys.length
+        ? (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, unit: true } }).catch(() => [])
+        : [],
+    ]);
+    const openByKey = new Map<string, { qty: number; unit?: string }>();
+    for (const r of openRows as any[]) {
+      if (!r?.itemKey) continue;
+      openByKey.set(String(r.itemKey), { qty: Number(r.qty || 0), unit: String(r.unit || "") || undefined });
     }
-    const text = summary.map((r: any) => `- ${r.name}: ${r.qty} ${r.unit}`).join("\n");
-    await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
+    const unitByKey = new Map<string, string>();
+    for (const p of prodRows as any[]) unitByKey.set(String(p.key), String(p.unit || "kg"));
+
+    const lines = assigned.map((p) => {
+      const row = openByKey.get(p.key);
+      const qty = row ? row.qty : 0;
+      const unit = (row?.unit || unitByKey.get(p.key) || "kg").trim();
+      return `- ${p.name}: ${qty} ${unit}`;
+    });
+    await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${lines.join("\n")}` , "AI_DISPATCH_TEXT");
+
+    // After syncing supply, suggest next action
+    const remaining = await getAvailableClosingProducts(s, cur);
+    if (remaining.length > 0) {
+      const payload = buildButtonPayload(phone.replace(/^\+/, ""), "What would you like to do next?", buildClosingNextActionsButtons());
+      await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+    } else {
+      await sendText(phone, "All assigned products have been closed for today.", "AI_DISPATCH_TEXT");
+      const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", buildClosingNextActionsButtons());
+      await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+    }
     return true;
   }
 
