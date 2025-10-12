@@ -55,7 +55,7 @@ export async function GET() {
       } catch {}
 
       const text = [
-        `Hello ${roleName},`,
+        `🌙 Hello ${roleName},`,
         '',
         `This is a friendly reminder from **Baraka Fresh Butchery Ops** 💼`,
         '',
