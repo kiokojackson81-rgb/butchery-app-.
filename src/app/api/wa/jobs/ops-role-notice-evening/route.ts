@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { sendTemplate } from "@/lib/wa";
+import { sendTemplate, sendText } from "@/lib/wa";
 
 // Broadcast the approved template (ops_role_notice) to everyone with a phone mapping
 // at 21:00. We dedupe per day/phone via ReminderSend to avoid double-sends.
@@ -24,13 +24,18 @@ export async function GET() {
 
     const today = new Date();
     const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    const type = "ops-role-notice-21"; // unique type key for 21:00 broadcast
+    const type = "ops-reminder-21-30"; // unique type key for 21:30 broadcast
 
     let sent = 0; let skipped = 0; let errors = 0;
-    const params = [
-      "Please confirm your role to continue.",
-      (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login?src=wa",
-    ];
+
+    function roleLabel(r: string): string {
+      const k = String(r || '').toLowerCase();
+      if (k === 'attendant') return 'Attendant';
+      if (k === 'supplier') return 'Supplier';
+      if (k === 'supervisor') return 'Supervisor';
+      if (k === 'admin') return 'Admin';
+      return k ? k[0].toUpperCase() + k.slice(1) : 'User';
+    }
 
     for (const phone of phones) {
       // Per-day/phone throttling via ReminderSend unique(type, phoneE164, date)
@@ -42,8 +47,33 @@ export async function GET() {
       }
       if (!canSend) { skipped++; continue; }
 
+      // Fetch role for personalized greeting
+      let roleName = 'User';
       try {
-        await sendTemplate({ to: phone, template: "ops_role_notice", params, contextType: "TEMPLATE_REOPEN" });
+        const row = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164: phone } });
+        roleName = roleLabel(row?.role || '');
+      } catch {}
+
+      const text = [
+        `Hello ${roleName},`,
+        '',
+        `This is a friendly reminder from **Baraka Fresh Butchery Ops** 💼`,
+        '',
+        `Kindly remember to **log in to your dashboard** this evening to review and update today’s records.`,
+        `Please make sure all **sales, stock, deposits, and reports** are submitted before closing time.`,
+        '',
+        `🔑 Login using your unique code to perform your role as ${roleName}.`,
+        '',
+        `👉 Login to BarakaOps WhatsApp Dashboard`,
+        `https://barakafresh.co.ke/login?src=wa`,
+        '',
+        `Thank you for keeping operations accurate and consistent every day! 💪`,
+        `— Baraka Fresh Team`,
+      ].join('\n');
+
+      try {
+        // sendText will auto-reopen the window by sending the ops_role_notice template when needed
+        await sendText(phone, text, 'AI_DISPATCH_TEXT');
         sent++;
       } catch {
         errors++;

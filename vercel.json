@@ -24,7 +24,7 @@
     },
     {
       "path": "/api/wa/jobs/ops-role-notice-evening",
-      "schedule": "0 21 * * *"
+      "schedule": "30 21 * * *"
     }
   ],
   "routes": [
