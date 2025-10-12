@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendText, sendInteractive, sendTemplate, logOutbound } from "@/lib/wa";
 import { composeWaMessage, OpsContext } from "@/lib/ai_util";
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
-import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
+// GPT/OOC removed — use simple legacy fallbacks
 import { createLoginLink } from "@/server/wa_links";
 
 function minutesSince(date?: Date | string | null): number {
@@ -69,7 +69,6 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
       if (ctx.kind === "login_welcome") {
         const role = (ctx as any).role as string;
         const outlet = (ctx as any).outlet || undefined;
-        const built = buildAuthenticatedReply(role as any, outlet);
         await safeSendGreetingOrMenu({
           phone: to,
           role,
@@ -78,7 +77,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
           source: "dispatcher_login_welcome",
           sessionLike: role === "attendant" ? { outlet } : undefined,
         });
-        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
+        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx }, status: "SENT", type: "MENU_SEND" }); } catch {}
         result = { ok: true };
       } else if (ctx.kind === "login_prompt") {
         // Send a compact interactive button prompting to open the deep link, then send only the human text (no OOC)
@@ -99,9 +98,8 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
           },
         };
         try { await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE"); } catch { }
-        const built = buildUnauthenticatedReply(deep, false);
-          try { await sendText(to, built.text, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx, ooc: built.ooc }, status: "SENT", type: "OOC_LEGACY" }); } catch {}
+        try { await sendText(to, `Please log in to continue. Tap LOGIN above.`, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx }, status: "SENT", type: "MENU_SEND" }); } catch {}
         result = { ok: true };
       }
     }

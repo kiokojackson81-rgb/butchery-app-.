@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendTextSafe, sendInteractiveSafe, sendTemplate } from "@/lib/wa";
-import { runGptForIncoming } from "@/lib/gpt_router";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,10 +85,7 @@ export async function POST(req: Request) {
     const kind = String(body.kind || 'text');
     const text = String(body.text || 'Diagnostic test message from admin');
 
-    if (kind === 'gpt') {
-      const reply = await runGptForIncoming(to, text);
-      return NextResponse.json({ ok: true, kind: 'gpt', reply });
-    }
+    // 'gpt' kind no longer supported
 
     if (kind === 'template') {
       const tmpl = String(body.template || process.env.WA_TEMPLATE_NAME || 'ops_role_notice');

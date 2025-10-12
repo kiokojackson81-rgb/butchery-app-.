@@ -18,7 +18,15 @@ type GraphButtonPayload = {
   interactive: any; // keep loose; constructed buttons/lists
 };
 
-import { buildAuthenticatedReply, buildUnauthenticatedReply } from "@/lib/ooc_parse";
+// GPT/OOC removed: provide no-op fallbacks to keep callers working during purge
+export function buildAuthenticatedReplyLegacy(role: string, outlet?: string | null) {
+  const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
+  const outletText = outlet ? ` — ${outlet}` : "";
+  return { text: `Login successful for ${roleLabel}${outletText}. Reply MENU for options.` };
+}
+export function buildUnauthenticatedReplyLegacy(deepLink: string) {
+  return { text: `You're not logged in. Tap to sign in: ${deepLink}` };
+}
 
 export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: string }): Promise<{ text?: string; interactive?: GraphButtonPayload; ooc?: string; buttons?: string[] }> {
   // Fast-path some contexts without model calls when obvious
@@ -29,15 +37,15 @@ export async function composeWaMessage(ctx: OpsContext, opts?: { deepLink?: stri
   const deepLink = opts?.deepLink || null;
   // Deterministic login welcome: build exact menu + OOC without calling model
   if (ctx.kind === "login_welcome") {
-    const c = buildAuthenticatedReply(ctx.role, ctx.outlet);
-    return { text: c.text, ooc: c.ooc, buttons: c.buttons };
+  const c = buildAuthenticatedReplyLegacy(ctx.role, ctx.outlet);
+  return { text: c.text };
   }
 
   // Deterministic login prompt: compose strict login nudge with OOC
   if (ctx.kind === "login_prompt") {
-    const deep = opts?.deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
-    const reply = buildUnauthenticatedReply(deep, false);
-    return { text: reply.text, ooc: reply.ooc, buttons: reply.buttons };
+  const deep = opts?.deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
+  const reply = buildUnauthenticatedReplyLegacy(deep);
+  return { text: reply.text };
   }
 
   const userPrompt = buildUserPrompt(ctx, deepLink || undefined);

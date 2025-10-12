@@ -4,7 +4,7 @@ import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
 import { findPersonCodeTolerant } from "@/server/db_person";
 import { warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
-import { sendGptGreeting } from "@/lib/wa_gpt_helpers";
+import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -91,10 +91,7 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   const to = toGraphPhone(phoneDB);
   try { await warmUpSession(to); } catch {}
-  try {
-    // Prefer GPT-composed greeting; fallback logic lives inside sendGptGreeting
-  await sendGptGreeting(phoneDB, role, outletFinal || undefined);
-  } catch {}
+  try { await safeSendGreetingOrMenu({ phone: phoneDB, role, outlet: outletFinal || undefined, force: true, source: "auth_finalize" }); } catch {}
 
   try {
     await logOutbound({

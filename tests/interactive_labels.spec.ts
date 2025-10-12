@@ -9,31 +9,13 @@ vi.mock('@/lib/wa_config', () => ({ getAttendantConfig: async () => ({ enableWas
 vi.mock('@/server/trading_period', () => ({ getPeriodState: async (_outlet: string, _date: string) => 'OPEN' }));
 
 import { sendInteractive } from '@/lib/wa';
-// Mock the new GPT greeting helper so tests remain deterministic
-vi.mock('@/lib/wa_gpt_helpers', () => ({
-  sendGptGreeting: async (phone: string, role: string, outlet?: string) => {
-    // emulate sending an interactive list payload similar to the legacy menu
-    const payload = {
-      interactive: { action: { sections: [{ rows: [
-        { id: 'ATT_TAB_STOCK', title: 'Enter Closing' },
-        { id: 'MENU_SUPPLY', title: 'Supply' },
-        { id: 'ATT_DEPOSIT', title: 'Deposit' },
-        { id: 'ATT_EXPENSE', title: 'Expense' },
-        { id: 'MENU_TXNS', title: 'Till Count' },
-        { id: 'MENU_SUMMARY', title: 'Summary' },
-      ] }] } }
-    } as any;
-    const { sendInteractive } = await import('@/lib/wa');
-    await sendInteractive(payload, 'TEST');
-  }
-}));
-import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
+import { safeSendGreetingOrMenu } from '@/lib/wa_attendant_flow';
 
 describe('interactive menu labels', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('sends attendant menu with dashboard labels', async () => {
-    await sendGptGreeting('+254700000000', 'attendant', 'TestOutlet');
+  await safeSendGreetingOrMenu({ phone: '+254700000000', role: 'attendant', outlet: 'TestOutlet', force: true, source: 'test' });
     expect(sendInteractive).toHaveBeenCalled();
     const payload = (sendInteractive as any).mock.calls[0][0];
     const rows = payload.interactive.action.sections[0].rows.map((r: any) => r.title);

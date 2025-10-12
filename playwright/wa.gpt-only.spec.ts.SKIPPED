@@ -1,0 +1,7 @@
+// GPT-only test intentionally skipped/disabled after migration to legacy-only flows.
+// Keeping file as a breadcrumb for future reference.
+import { test, expect } from '@playwright/test';
+
+test.skip('gpt-only flow (disabled)', async ({ page }) => {
+  expect(true).toBe(true);
+});

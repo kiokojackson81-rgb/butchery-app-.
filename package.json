@@ -10,6 +10,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run -c vitest.config.ts",
+    "test:unit": "vitest run -c vitest.config.ts",
     "show:codes": "tsx scripts/show-codes.ts",
     "show:attendant:codes": "tsx scripts/show-attendant-codes.ts",
     "seed:login": "tsx scripts/seed-login-codes.ts",

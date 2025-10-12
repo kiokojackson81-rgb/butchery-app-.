@@ -1,35 +1,36 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "dev (pwsh, :3002, wa flags)",
-      "type": "shell",
-      "command": "$env:PORT=\"3002\"; $env:WA_DRY_RUN=\"true\"; $env:WA_GPT_ONLY=\"true\"; $env:WA_AI_ENABLED=\"true\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; $env:WA_TABS_ENABLED=\"true\"; npm run dev",
-      "isBackground": true,
-      "group": "build",
-      "options": { "shell": { "executable": "pwsh" } }
-    },
-    {
-      "label": "dev:legacy (pwsh, :3002)",
-      "type": "shell",
-      "command": "$env:PORT=\"3002\"; $env:WA_DRY_RUN=\"true\"; $env:WA_GPT_ONLY=\"false\"; $env:WA_AI_ENABLED=\"false\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; npm run dev",
-      "isBackground": true,
-      "group": "build",
-      "options": { "shell": { "executable": "pwsh" } }
-    },
-    {
-      "label": "playwright: GPT-only (BASE_URL=:3002)",
-      "type": "shell",
-      "command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1",
-      "group": "build",
-      "options": { "shell": { "executable": "pwsh" } }
-    },
-    {
-      "label": "playwright: legacy smoke (BASE_URL=:3002)",
-      "type": "shell",
-      "command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1",
-      "group": "build",
-      "options": { "shell": { "executable": "pwsh" } }
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "dev:legacy (pwsh, :3002)",
+			"type": "shell",
+			"command": "$env:PORT=\"3002\"; $env:WA_DRY_RUN=\"true\"; $env:WA_AI_ENABLED=\"false\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; npm run dev",
+			"isBackground": true,
+			"group": "build",
+			"options": {
+				"shell": {
+					"executable": "pwsh"
+				}
+			}
+		},
+		{
+			"label": "playwright: legacy smoke (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1",
+			"group": "build",
+			"options": {
+				"shell": {
+					"executable": "pwsh"
+				}
+			}
+		},
+		{
+			"label": "playwright: legacy WA only (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
 }
