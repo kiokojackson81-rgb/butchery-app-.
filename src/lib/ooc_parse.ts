@@ -25,7 +25,34 @@ export function buildAuthenticatedReply(role: "attendant"|"supervisor"|"supplier
     : role;
   const text = `Welcome back ${roleLabel}. I'll handle the rest - just tell me what you need.`;
   const args: Record<string, any> = { role, ...(outlet ? { outlet } : {}) };
-  const buttons: string[] = [];
+
+  const menuByRole: Record<typeof role, string[]> = {
+    attendant: [
+      "ATT_CLOSING",
+      "ATT_DEPOSIT",
+      "ATT_EXPENSE",
+      "MENU_SUMMARY",
+      "MENU_SUPPLY",
+      "MENU_TXNS",
+      "HELP",
+    ],
+    supervisor: [
+      "SV_REVIEW_CLOSINGS",
+      "SV_REVIEW_DEPOSITS",
+      "SV_REVIEW_EXPENSES",
+      "SV_APPROVE_UNLOCK",
+      "SV_HELP",
+    ],
+    supplier: [
+      "SUPL_DELIVERY",
+      "SUPL_VIEW_OPENING",
+      "SUPL_DISPUTES",
+      "SUPL_HISTORY",
+      "SUPL_HELP",
+    ],
+  };
+
+  const buttons = menuByRole[role] || [];
   const ooc = `<<<OOC>\n${JSON.stringify({
     intent: "MENU",
     args,

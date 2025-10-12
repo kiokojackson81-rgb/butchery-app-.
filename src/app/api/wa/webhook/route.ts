@@ -24,18 +24,33 @@ import { buildInteractiveListPayload } from "@/lib/wa_messages";
 import { sendGptGreeting } from '@/lib/wa_gpt_helpers';
 import { trySendGptInteractive } from '@/lib/wa_gpt_interact';
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
+import oocSchema from "@/lib/ooc.schema.json";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const rawIntentEnum = (oocSchema as any)?.properties?.intent?.enum ?? [];
+const rawButtonEnum = ((oocSchema as any)?.properties?.buttons?.items as any)?.enum ?? [];
+const SCHEMA_ALLOWED_INTENTS = new Set<string>(rawIntentEnum.map((s: string) => String(s || "").toUpperCase()));
+const SCHEMA_ALLOWED_BUTTONS = new Set<string>(rawButtonEnum.map((s: string) => String(s || "").toUpperCase()));
+
 const ATTENDANT_MENU_BUTTONS = new Set([
   "ATT_CLOSING",
-  "MENU_SUPPLY",
-  "ATT_EXPENSE",
-  "MENU_TXNS",
-  "MENU_SUMMARY",
   "ATT_DEPOSIT",
+  "ATT_EXPENSE",
+  "ATT_TAB_STOCK",
+  "ATT_TAB_SUPPLY",
+  "ATT_TAB_DEPOSITS",
+  "ATT_TAB_EXPENSES",
+  "ATT_TAB_TILL",
+  "ATT_TAB_SUMMARY",
+  "MENU_SUMMARY",
+  "MENU_SUPPLY",
+  "MENU_TXNS",
+  "TILL_COUNT",
+  "LOCK_DAY",
+  "LOCK_DAY_CONFIRM",
   "MENU",
   "HELP",
   "LOGOUT",
@@ -80,9 +95,18 @@ export async function POST(req: Request) {
     ATT_CLOSING: "Enter Closing",
     ATT_DEPOSIT: "Deposit",
     ATT_EXPENSE: "Expense",
+    ATT_TAB_STOCK: "Stock",
+    ATT_TAB_DEPOSITS: "Deposits",
+    ATT_TAB_EXPENSES: "Expenses",
     ATT_TAB_SUMMARY: "Summary",
     MENU_SUMMARY: "Summary",
     ATT_TAB_SUPPLY: "Supply",
+    MENU_SUPPLY: "Supply",
+    ATT_TAB_TILL: "Till",
+    MENU_TXNS: "Till Count",
+    TILL_COUNT: "Till Count",
+    LOCK_DAY: "Lock Day",
+    LOCK_DAY_CONFIRM: "Confirm Lock",
     SV_REVIEW_CLOSINGS: "Review Closings",
     SV_REVIEW_DEPOSITS: "Review Deposits",
     SV_REVIEW_EXPENSES: "Review Expenses",
@@ -93,6 +117,8 @@ export async function POST(req: Request) {
     SUPL_VIEW_OPENING: "View Opening",
     SUPL_DISPUTES: "Disputes",
   SUPL_HISTORY: "History",
+    SV_TAB_HELP: "Help",
+    SUP_TAB_HELP: "Help",
     LOGIN: "Login",
     HELP: "Help",
   };
@@ -599,23 +625,12 @@ export async function POST(req: Request) {
                 ooc = { ...ooc, intent: intentCanon, buttons: buttonsCanon };
 
                 // Enforce allow-list for intents and buttons to keep GPT within supported flows
-                const ALLOWED = new Set<string>([
-                  // Supervisor / Supplier canonical tokens
-                  'SV_REVIEW_CLOSINGS','SV_REVIEW_DEPOSITS','SV_REVIEW_EXPENSES','SV_APPROVE_UNLOCK','SV_PRICEBOOK','SV_SUMMARY','SV_HELP',
-                  'SUPL_DELIVERY','SUPL_VIEW_OPENING','SUPL_DISPUTES','SUPL_HISTORY',
-                  // Attendant intents (both legacy ATT_* and canonical ATT_TAB_*)
-                  'ATT_CLOSING','ATT_DEPOSIT','ATT_EXPENSE','ATT_TAB_STOCK','ATT_TAB_DEPOSITS','ATT_TAB_EXPENSES','ATT_TAB_SUMMARY',
-                  'MENU','MENU_SUMMARY','MENU_SUPPLY','MENU_TXNS','HELP','LOGOUT',
-                  // Supplier intents (additional canonical forms)
-                  'SUP_TAB_SUPPLY_TODAY','SUP_TAB_VIEW','SUP_TAB_DISPUTE',
-                  // Supervisor canonical/tab forms
-                  'SV_TAB_REVIEW_QUEUE','SV_TAB_SUMMARIES','SV_TAB_UNLOCK',
-                  // Common
-                  'LOGIN','FREE_TEXT'
-                ]);
-                // Normalize and filter buttons to allowed set
                 const normalizedIntent = String(ooc.intent || '').toUpperCase();
-                const allowedButtons = Array.isArray(ooc.buttons) ? (ooc.buttons as string[]).map(b=>String(b||'').toUpperCase()).filter(b=>ALLOWED.has(b)) : [];
+                const allowedButtons = Array.isArray(ooc.buttons)
+                  ? (ooc.buttons as string[])
+                      .map((b) => String(b || '').toUpperCase())
+                      .filter((b) => SCHEMA_ALLOWED_BUTTONS.has(b))
+                  : [];
                 ooc.buttons = allowedButtons;
 
                 const isAttendant = sessRole === "attendant";
@@ -635,7 +650,7 @@ export async function POST(req: Request) {
                 }
 
                 // If the intent is not allowed, treat as invalid OOC and fallback
-                if (!ALLOWED.has(normalizedIntent)) {
+                if (!SCHEMA_ALLOWED_INTENTS.has(normalizedIntent)) {
                   try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phoneE164, event: 'ooc.invalid.intent', preview: intentCanon, ooc: sanitizeForLog(ooc) }, status: 'WARN', type: 'OOC_INVALID' }); } catch {}
                   try {
                     if (GPT_ONLY) {

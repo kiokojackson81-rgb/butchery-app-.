@@ -14,6 +14,18 @@ describe('login welcome dispatch', () => {
     expect(res.ooc).toContain('"intent": "MENU"');
     expect(res.ooc).toContain('"next_state_hint": "GPT"');
     expect(Array.isArray(res.buttons)).toBe(true);
-    expect(res.buttons).toHaveLength(0);
+    expect(res.buttons).toEqual([
+      'ATT_CLOSING',
+      'ATT_DEPOSIT',
+      'ATT_EXPENSE',
+      'MENU_SUMMARY',
+      'MENU_SUPPLY',
+      'MENU_TXNS',
+      'HELP',
+    ]);
+    const blockMatch = res.ooc?.match(/<<<OOC>\s*([\s\S]+?)\s*<\/OOC>>>/);
+    expect(blockMatch).toBeTruthy();
+    const parsed = JSON.parse(blockMatch![1]);
+    expect(parsed.buttons).toEqual(res.buttons);
   });
 });
