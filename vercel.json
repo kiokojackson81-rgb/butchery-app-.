@@ -8,23 +8,23 @@
     },
     {
       "path": "/api/wa/jobs/attendant-closing-reminder",
-      "schedule": "0 18 * * *"
+      "schedule": "0 15 * * *"
     },
     {
       "path": "/api/wa/jobs/supervisor-review-reminder",
-      "schedule": "0 19 * * *"
+      "schedule": "0 16 * * *"
     },
     {
       "path": "/api/wa/jobs/supplier-opening-reminder",
-      "schedule": "30 03 * * *"
+      "schedule": "30 0 * * *"
     },
     {
       "path": "/api/wa/jobs/ops-role-notice-morning",
-      "schedule": "0 8 * * *"
+      "schedule": "0 5 * * *"
     },
     {
       "path": "/api/wa/jobs/ops-role-notice-evening",
-      "schedule": "30 21 * * *"
+      "schedule": "30 18 * * *"
     }
   ],
   "routes": [
