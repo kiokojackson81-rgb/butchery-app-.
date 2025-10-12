@@ -5,8 +5,11 @@ import { sendTemplate, sendText } from "@/lib/wa";
 
 // Broadcast the approved template (ops_role_notice) to everyone with a phone mapping
 // at 21:00. We dedupe per day/phone via ReminderSend to avoid double-sends.
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const url = new URL(req.url);
+    const toParam = (url.searchParams.get('to') || '').trim();
+    const singleMode = !!toParam;
     // Fetch all mapped phones regardless of role (attendant, supplier, supervisor, admin, etc.)
     const rows = await (prisma as any).phoneMapping.findMany({
       where: { phoneE164: { not: "" } },
@@ -20,6 +23,18 @@ export async function GET() {
       if (!p) continue;
       const norm = p.startsWith("+") ? p : "+" + p.replace(/[^0-9+]/g, "");
       if (!seen.has(norm)) { seen.add(norm); people.push({ phone: norm, role: String(r.role || '').toLowerCase(), code: r.code || null }); }
+    }
+
+    // If a specific phone is requested, restrict the list to that one. If it isn't mapped,
+    // still proceed in single mode with a generic role so we can simulate the message.
+    if (singleMode) {
+      const norm = toParam.startsWith('+') ? toParam : '+' + toParam.replace(/[^0-9+]/g, '');
+      const found = people.find((p) => p.phone === norm) || null;
+      if (found) {
+        people.splice(0, people.length, found);
+      } else {
+        people.splice(0, people.length, { phone: norm, role: 'user', code: null });
+      }
     }
 
     const today = new Date();
@@ -64,8 +79,16 @@ export async function GET() {
       let canSend = true;
       try {
         await (prisma as any).reminderSend.create({ data: { type, phoneE164: phone, date: dateKey } });
-      } catch {
-        canSend = false; // duplicate -> already sent today
+      } catch (e: any) {
+        // In single-send mode (manual test), ignore DB errors and allow sending.
+        // For duplicates in full broadcast, skip if it's a unique violation; otherwise allow.
+        const msg = String(e?.message || e || '').toLowerCase();
+        const looksDuplicate = msg.includes('unique') || msg.includes('duplicate');
+        if (singleMode) {
+          canSend = true;
+        } else {
+          canSend = looksDuplicate ? false : true;
+        }
       }
       if (!canSend) { skipped++; continue; }
 
@@ -81,7 +104,8 @@ export async function GET() {
       const greetLabel = firstName ? `${firstName} (${roleName})` : roleName;
 
       // Check inactivity (>24h) to choose message body
-      const lastAt = await lastInboundAt(phone);
+  let lastAt: Date | null = null;
+  try { lastAt = await lastInboundAt(phone); } catch { lastAt = null; }
       const isInactive = minutesSince(lastAt) > 24 * 60;
 
       let text: string;
