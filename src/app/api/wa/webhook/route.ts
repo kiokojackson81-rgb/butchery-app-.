@@ -319,7 +319,7 @@ export async function POST(req: Request) {
               throw e;
             }
           };
-          const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
+          const sendRoleTabs = async (to: string, role: string, outlet?: string, opts?: { force?: boolean }) => {
             try { console.info("[WA] SENDING tabs", { role }); } catch {}
             try {
               const sent = await safeSendGreetingOrMenu({
@@ -328,6 +328,7 @@ export async function POST(req: Request) {
                 outlet,
                 source: "webhook_send_role_tabs",
                 sessionLike: role === "attendant" ? { outlet } : undefined,
+                force: opts?.force === true,
               });
               if (!sent) {
                 // If the greeter suppressed due to dedupe/in-flight, still send a
@@ -502,7 +503,7 @@ export async function POST(req: Request) {
                       try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                     }
                   } catch {}
-                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                  try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true }); } catch {}
                 }
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                 continue;
@@ -547,7 +548,7 @@ export async function POST(req: Request) {
                     try { await sendTextSafe(to, "All set — see options below.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                   }
                 } catch {}
-                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined); } catch {}
+                try { await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true }); } catch {}
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, flowId }, event: "digit.direct" }, status: "OK", type: "DIGIT_DIRECT" }); } catch {}
                 continue;
               } catch (e) {
@@ -1086,7 +1087,7 @@ export async function POST(req: Request) {
                       if (!sent) await sendButtonsFor(to, btns as string[]);
                     } catch {}
                   } else if (!handled && !__sentOnce) {
-                    await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                    await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true });
                   }
                 } catch {}
 
@@ -1130,7 +1131,7 @@ export async function POST(req: Request) {
                   await sendButtonsFor(to, btns as string[]);
                 } catch {}
               } else if (!handled && !__sentOnce) {
-                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true });
               }
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             } catch (e) {
@@ -1158,7 +1159,7 @@ export async function POST(req: Request) {
                 if (!TABS_ENABLED) {
                   try { await sendTextSafe(to, "What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
-                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true });
               }
             } catch (e) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.text.fail", error: String(e) }, status: "ERROR", type: "GPT_TEXT_FAIL" }); } catch {}
@@ -1168,7 +1169,7 @@ export async function POST(req: Request) {
                 if (!TABS_ENABLED) {
                   try { await sendTextSafe(to, "What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
-                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined, { force: true });
               } catch {}
             }
             continue;
