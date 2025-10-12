@@ -2,6 +2,7 @@
 // Clean single-definition supervisor WhatsApp flow (review, deposits, summary)
 import { prisma } from "@/lib/prisma";
 import { sendText, sendInteractive } from "@/lib/wa";
+import { createLoginLink } from "@/server/wa_links";
 import { toGraphPhone } from "@/lib/wa_phone";
 import {
   buildSupervisorMenu,
@@ -105,6 +106,17 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
   if (!isSessionValid(sess)) return sendLoginLink(gp);
 
   switch (replyId) {
+    case "LOGOUT": {
+      // Clear session and send a single concise logout message with login link
+      try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { state: 'LOGIN', code: null, outlet: null } }); } catch {}
+      try {
+        const urlObj = await createLoginLink(phoneE164);
+        await sendText(gp, `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } catch {
+        await sendText(gp, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+      return;
+    }
     case "SUP_REVIEW": {
       await saveSession(sess.id, { state: "SUP_REVIEW_PICK_FILTER", cursor: { ...(sess.cursor as any), date: today } });
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildReviewFilterButtons() as any }, "AI_DISPATCH_INTERACTIVE");
