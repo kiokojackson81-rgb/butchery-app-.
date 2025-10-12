@@ -330,9 +330,15 @@ export async function safeSendGreetingOrMenu({
       const isDbMissing = /Environment variable not found: DATABASE_URL/i.test(msg);
       const isTest = String(process.env.NODE_ENV || "").toLowerCase() === "test";
       if (isUnique) {
-        try { console.info?.(`[wa] greeting suppressed (reminderSend dup)`, { phoneE164, windowKey, source }); } catch {}
-        try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 'reminderSend dup', windowKey }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
-        return false;
+        // When the caller explicitly forces (e.g., user typed MENU/1), bypass the
+        // duplicate suppression and proceed to send a fresh menu immediately.
+        if (force) {
+          try { console.info?.(`[wa] reminderSend dup overridden by force`, { phoneE164, windowKey, source }); } catch {}
+        } else {
+          try { console.info?.(`[wa] greeting suppressed (reminderSend dup)`, { phoneE164, windowKey, source }); } catch {}
+          try { await logOutbound({ direction: 'in', templateName: null, payload: { phoneE164, source, reason: 'reminderSend dup', windowKey }, status: 'INFO', type: 'GREETING_SUPPRESSED' }); } catch {}
+          return false;
+        }
       }
       // For test runs or missing DB, log and proceed (do not suppress)
       try { console.info?.(`[wa] reminderSend guard disabled`, { phoneE164, windowKey, source, code, reason: isDbMissing ? 'db_missing' : 'unknown_error' }); } catch {}
