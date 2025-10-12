@@ -17,6 +17,7 @@ import { saveClosings } from "@/server/closings";
 import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
+import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
 import {
@@ -205,7 +206,14 @@ async function getAvailableClosingProducts(sess: any, cursor: Cursor) {
   const prodsAll = await getAssignedProducts(sess.code || "");
   if (!sess.outlet) return prodsAll;
   const closed = await getClosedKeys(cursor.date, sess.outlet);
-  return prodsAll.filter((p) => !closed.has(p.key));
+  // If opening stock exists for the day, only allow those products (dashboard parity)
+  let openingKeys = new Set<string>();
+  try {
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: sess.outlet, date: cursor.date }, select: { itemKey: true } });
+    openingKeys = new Set<string>((rows || []).map((r: any) => r.itemKey).filter(Boolean));
+  } catch {}
+  const restrictByOpening = openingKeys.size > 0;
+  return prodsAll.filter((p) => !closed.has(p.key) && (!restrictByOpening || openingKeys.has(p.key)));
 }
 
 async function promptLogin(phone: string) {
@@ -883,9 +891,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
 
-    const prodsAll = await getAssignedProducts(s.code);
-    const closed = await getClosedKeys(cur.date, s.outlet);
-    const prods = prodsAll.filter((p) => !closed.has(p.key));
+    const prods = await getAvailableClosingProducts(s, cur);
     if (!prods.length) {
       await nextPickOrSummary(phone, s, cur);
       return true;
@@ -954,8 +960,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return true;
     }
-    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { itemKey: "asc" } });
-    if (!rows.length) {
+    const summary = await getTodaySupplySummary(s.outlet, cur.date).catch(() => []);
+    if (!summary.length) {
       // Fall back to yesterday's closing as opening baseline
       const y = prevDateISO(cur.date);
       const prev = await (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y }, orderBy: { itemKey: "asc" } });
@@ -965,17 +971,11 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       }
       const plist = await (prisma as any).product.findMany({ where: { key: { in: prev.map((r: any) => r.itemKey) } } });
       const nameByKey = new Map(plist.map((p: any) => [p.key, p.name] as const));
-      const text = prev
-        .map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`)
-        .join("\n");
+      const text = prev.map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.closingQty}`).join("\n");
       await sendText(phone, `Opening baseline (yesterday closing) for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
       return true;
     }
-    const plist = await (prisma as any).product.findMany({ where: { key: { in: rows.map((r: any) => r.itemKey) } } });
-    const nameByKey = new Map(plist.map((p: any) => [p.key, p.name] as const));
-    const text = rows
-      .map((r: any) => `- ${nameByKey.get(r.itemKey) || r.itemKey}: ${r.qty} ${r.unit}`)
-      .join("\n");
+    const text = summary.map((r: any) => `- ${r.name}: ${r.qty} ${r.unit}`).join("\n");
     await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${text}`, "AI_DISPATCH_TEXT");
     return true;
   }
@@ -1241,14 +1241,9 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
 
 async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
-  const prods = await getAssignedProducts(s.code || "");
+  const prods = await getAvailableClosingProducts(s, cur);
   const inactive = new Set(cur.inactiveKeys || []);
   let remaining = prods.filter((p) => !inactive.has(p.key) && !cur.rows.some((r) => r.key === p.key));
-  // Also exclude products already closed in DB
-  if (s.outlet) {
-    const closed = await getClosedKeys(cur.date, s.outlet);
-    remaining = remaining.filter((p) => !closed.has(p.key));
-  }
   if (!remaining.length) {
     await saveSession(phone, { state: "SUMMARY", ...cur });
     const reviewLines = (cur.rows || []).map((r) => {
