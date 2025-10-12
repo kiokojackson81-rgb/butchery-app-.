@@ -1,5 +1,6 @@
 // server/wa/wa_supplier_flow.ts
 import { prisma } from "@/lib/prisma";
+import { notifySupplyPosted } from "@/server/supply_notify";
 import { sendTextSafe, sendInteractiveSafe, sendText, sendInteractive } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
@@ -313,6 +314,13 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
+    // Optional notify after save
+    try {
+      const setting = await (prisma as any).setting.findUnique({ where: { key: "auto_notify_supply" } });
+      const dbEnabled = setting?.value === true || String(setting?.value).toLowerCase() === "true";
+      const envEnabled = String(process.env.WA_NOTIFY_ON_SUPPLY || "").toLowerCase() === "true";
+      if (dbEnabled || envEnabled) await notifySupplyPosted({ outletName: outlet, date: c.date, supplierCode: sess?.code || null });
+    } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
@@ -335,6 +343,13 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty: totalQty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
+    // Optional notify after save
+    try {
+      const setting = await (prisma as any).setting.findUnique({ where: { key: "auto_notify_supply" } });
+      const dbEnabled = setting?.value === true || String(setting?.value).toLowerCase() === "true";
+      const envEnabled = String(process.env.WA_NOTIFY_ON_SUPPLY || "").toLowerCase() === "true";
+      if (dbEnabled || envEnabled) await notifySupplyPosted({ outletName: outlet, date: c.date, supplierCode: sess?.code || null });
+    } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });

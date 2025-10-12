@@ -72,6 +72,7 @@ export default function AttendantDashboardPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [locked, setLocked] = useState<Record<string, boolean>>({}); // per-item stock row saved flag
   const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: ItemKey; qty: number }>>([]);
+  const [supplyHistory, setSupplyHistory] = useState<Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }>>([]);
 
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [depositsFromServer, setDepositsFromServer] = useState<Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }>>([]);
@@ -255,6 +256,14 @@ export default function AttendantDashboardPage() {
         const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
         setOpeningRowsRaw(r.rows || []);
       } catch { setOpeningRowsRaw([]); }
+    })();
+
+    // Supply history (last 7 days, attendant scope)
+    (async () => {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
+        setSupplyHistory((r as any).rows || []);
+      } catch { setSupplyHistory([]); }
     })();
 
     // deposits from DB (server source of truth)
@@ -443,6 +452,15 @@ export default function AttendantDashboardPage() {
     await refreshPeriodAndHeader(outlet);
     // refresh closing/waste reads from DB for consistency
     try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
+    // refresh opening-effective and supply history after new period start
+    try {
+      const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+      setOpeningRowsRaw(r1.rows || []);
+    } catch { setOpeningRowsRaw([]); }
+    try {
+      const r2 = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
+      setSupplyHistory((r2 as any).rows || []);
+    } catch { setSupplyHistory([]); }
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -816,6 +834,36 @@ export default function AttendantDashboardPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Compact history (last 7 days) */}
+          <div className="mt-6">
+            <h3 className="font-semibold mb-2 text-sm">Recent Supply (last 7 days)</h3>
+            <div className="table-wrap">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Date</th>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {supplyHistory.length === 0 && (
+                    <tr><td className="py-2 text-gray-500" colSpan={4}>No recent records.</td></tr>
+                  )}
+                  {supplyHistory.slice(0, 20).map((r, i) => (
+                    <tr key={`${r.date}-${r.itemKey}-${i}`} className="border-b">
+                      <td className="py-2">{r.date}</td>
+                      <td>{r.name}</td>
+                      <td>{fmt(r.qty)}</td>
+                      <td>{r.unit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       )}
