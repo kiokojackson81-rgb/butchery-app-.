@@ -322,13 +322,18 @@ export async function POST(req: Request) {
           const sendRoleTabs = async (to: string, role: string, outlet?: string) => {
             try { console.info("[WA] SENDING tabs", { role }); } catch {}
             try {
-              await safeSendGreetingOrMenu({
+              const sent = await safeSendGreetingOrMenu({
                 phone: to.startsWith("+") ? to : `+${to}`,
                 role,
                 outlet,
                 source: "webhook_send_role_tabs",
                 sessionLike: role === "attendant" ? { outlet } : undefined,
               });
+              if (!sent) {
+                // If the greeter suppressed due to dedupe/in-flight, still send a
+                // one-line text so the user hears from us.
+                try { await sendText(to, "What would you like to do? Reply MENU or type 1 for Enter Closing.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+              }
             } catch (e) {
               try { console.warn('[WA] sendRoleTabs fallback', String(e)); } catch {}
               try { await sendText(to, "How can I help? Please tell me what you'd like to do.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
@@ -1135,7 +1140,7 @@ export async function POST(req: Request) {
           }
 
           // All text routes now go through GPT-only path above when GPT_ONLY is enabled.
-          // For non-GPT deployments, prefer GPT as well for consistent behavior.
+          // For non-GPT deployments, we attempt GPT once; if empty/disabled, fall back to tabs.
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
             try {
@@ -1147,8 +1152,24 @@ export async function POST(req: Request) {
                 await sendTextSafe(toGraphPhone(phoneE164), display, "AI_DISPATCH_TEXT", { gpt_sent: true });
                 await logOutbound({ direction: "in", templateName: null, payload: { in_reply_to: wamid, phone: phoneE164, meta: { phoneE164 } }, status: "SENT", type: "AI_DISPATCH_TEXT" });
               }
+              else {
+                // GPT empty or disabled → deterministic fallback: send role tabs
+                const to = toGraphPhone(phoneE164);
+                if (!TABS_ENABLED) {
+                  try { await sendTextSafe(to, "What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                }
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+              }
             } catch (e) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.text.fail", error: String(e) }, status: "ERROR", type: "GPT_TEXT_FAIL" }); } catch {}
+              // In case of GPT failure, still provide tabs so the user isn't left with silence
+              try {
+                const to = toGraphPhone(phoneE164);
+                if (!TABS_ENABLED) {
+                  try { await sendTextSafe(to, "What would you like to do?", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                }
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+              } catch {}
             }
             continue;
           }
