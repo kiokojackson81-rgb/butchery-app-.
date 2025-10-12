@@ -691,6 +691,13 @@ export async function POST(req: Request) {
                 const allowedButtons = Array.isArray(ooc.buttons) ? (ooc.buttons as string[]).map(b=>String(b||'').toUpperCase()).filter(b=>ALLOWED.has(b)) : [];
                 ooc.buttons = allowedButtons;
 
+                // If GPT suggested LOGOUT, avoid sending any menu/greeting follow-ups.
+                if (normalizedIntent === 'LOGOUT') {
+                  try { await handleAuthenticatedInteractive(_sess, 'LOGOUT'); } catch {}
+                  markSent();
+                  continue;
+                }
+
                 const isAttendant = sessRole === "attendant";
                 const looksLikeMenu =
                   allowedButtons.length > 0 &&
@@ -870,7 +877,8 @@ export async function POST(req: Request) {
                       await sendTextSafe(to, "Saved.", "AI_DISPATCH_TEXT", { gpt_sent: true });
                     }
                   } catch {}
-                  try { await sendRoleTabs(to, "attendant", _sess?.outlet || undefined); } catch {}
+                  // Do not spam the greeting/menu after confirmations; rely on the next user action
+                  markSent();
                   continue;
                 }
               }
@@ -1098,8 +1106,18 @@ export async function POST(req: Request) {
               } else {
                 await handleAuthenticatedInteractive(_sess, flowPre);
               }
+              // Assume handlers produced user-visible output; mark sent to suppress fallbacks
+              markSent();
             } catch (e) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "interactive.pre.dispatch.fail", flowId: flowPre, error: String(e) }, status: "ERROR", type: "INTERACTIVE_PRE_DISPATCH_FAIL" }); } catch {}
+            }
+
+            // If user selected LOGOUT, the role handler already sent a single logout message.
+            // Suppress any additional copy/buttons or silence guards for this inbound.
+            if (flowPre === "LOGOUT") {
+              try { console.info('[WA] LOGOUT selected; suppressing follow-ups for this message'); } catch {}
+              markSent();
+              continue;
             }
 
             // In GPT-only mode, we still ask GPT for copy/buttons after dispatching above.
@@ -1116,6 +1134,13 @@ export async function POST(req: Request) {
                 const canonical = aliasToCanonical(intentRaw);
                 const flowId = canonicalToFlowId(sessRole, canonical);
                 let handled = false;
+
+                // If this interaction was a LOGOUT, suppress any further sends.
+                if (flowId === "LOGOUT") {
+                  try { console.info('[WA] LOGOUT (GPT interactive) — suppressing follow-ups'); } catch {}
+                  markSent();
+                  continue;
+                }
 
                 const to = toGraphPhone(phoneE164);
                 const display = stripOOC(replyText);
@@ -1146,6 +1171,12 @@ export async function POST(req: Request) {
             }
 
             // Non-GPT deployments: ask GPT for copy/buttons after dispatch for nicer UX.
+            // If the user selected LOGOUT, do not send any further messages.
+            if (flowPre === 'LOGOUT') {
+              try { console.info('[WA] LOGOUT (non-GPT interactive) — suppressing follow-ups'); } catch {}
+              markSent();
+              continue;
+            }
             try {
               const prompt = `user selected ${id}`;
               const r = await runGptForIncoming(phoneE164, prompt);
@@ -1157,6 +1188,7 @@ export async function POST(req: Request) {
               const display = stripOOC(replyText);
               if (display) {
                 try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+                handled = true;
               }
               const btns = Array.isArray(ooc?.buttons) && ooc?.buttons.length ? ooc?.buttons : null;
               if (btns) {
