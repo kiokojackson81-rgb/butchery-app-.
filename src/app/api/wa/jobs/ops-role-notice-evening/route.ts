@@ -11,10 +11,17 @@ export async function GET(req: Request) {
     const toParam = (url.searchParams.get('to') || '').trim();
     const singleMode = !!toParam;
     // Fetch all mapped phones regardless of role (attendant, supplier, supervisor, admin, etc.)
-    const rows = await (prisma as any).phoneMapping.findMany({
-      where: { phoneE164: { not: "" } },
-      select: { phoneE164: true, role: true, code: true },
-    });
+    let rows: any[] = [];
+    try {
+      rows = await (prisma as any).phoneMapping.findMany({
+        where: { phoneE164: { not: "" } },
+        select: { phoneE164: true, role: true, code: true },
+      });
+    } catch (e) {
+      if (!singleMode) throw e;
+      // In single mode with no DB, proceed with empty rows; we'll synthesize the person from ?to later
+      rows = [];
+    }
     // Deduplicate by phone
     const seen = new Set<string>();
     const people: Array<{ phone: string; role: string; code?: string | null }> = [];
