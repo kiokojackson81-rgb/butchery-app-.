@@ -819,11 +819,23 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       if (!available.length) {
         await nextPickOrSummary(phone, s, cur);
       } else {
-        const options = available.slice(0, 10).map((p) => ({
-          id: `PROD_${p.key}`,
-          title: p.name || p.key,
-          description: "Record closing stock",
-        }));
+        // Include opening information per product in the description
+        let openingMap = new Map<string, { qty: number; unit?: string }>();
+        if (s.outlet) {
+          try {
+            const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date } });
+            for (const r of rows || []) openingMap.set(r.itemKey, { qty: Number(r.qty || 0), unit: r.unit || undefined });
+          } catch {}
+        }
+        const options = available.slice(0, 10).map((p) => {
+          const o = openingMap.get(p.key);
+          const desc = o ? `Opening: ${o.qty}${o.unit ? ` ${o.unit}` : ""}` : "Opening: not set";
+          return {
+            id: `PROD_${p.key}`,
+            title: p.name || p.key,
+            description: desc,
+          };
+        });
         const interactive = buildProductPickerBody(options, available.length > 10 ? `Showing 10 of ${available.length}` : undefined);
         const payloadInteractive = buildListPayload(phone.replace(/^\+/, ""), interactive);
         await sendInteractive(payloadInteractive as any, "AI_DISPATCH_INTERACTIVE");
@@ -891,9 +903,33 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
 
-    const prods = await getAvailableClosingProducts(s, cur);
+    // Determine products to offer: if opening rows exist, restrict to them; else show assigned minus closed
+    const assigned = await getAssignedProducts(s.code || "");
+    const closed = await getClosedKeys(cur.date, s.outlet);
+    let openingMap = new Map<string, { qty: number; unit?: string }>();
+    try {
+      const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date } });
+      for (const r of rows || []) openingMap.set(r.itemKey, { qty: Number(r.qty || 0), unit: r.unit || undefined });
+    } catch {}
+    const restrictByOpening = openingMap.size > 0;
+    const prods = (assigned || []).filter((p: any) => !closed.has(p.key) && (!restrictByOpening || openingMap.has(p.key)));
+
+    if (!restrictByOpening) {
+      await sendText(
+        phone,
+        "No opening stock set for today. Listing your assigned products to record closing.",
+        "AI_DISPATCH_TEXT",
+      );
+    }
     if (!prods.length) {
-      await nextPickOrSummary(phone, s, cur);
+      if (restrictByOpening) {
+        await sendText(phone, "Nothing left to close for today.", "AI_DISPATCH_TEXT");
+        const nextButtons = buildClosingNextActionsButtons();
+        const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
+        await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+      } else {
+        await sendText(phone, "No products are assigned to your code. Ask your supervisor to assign products to you.", "AI_DISPATCH_TEXT");
+      }
       return true;
     }
 
@@ -921,11 +957,15 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       lastMessageAt: new Date().toISOString(),
     });
 
-    const options = prods.slice(0, 10).map((p) => ({
-      id: `PROD_${p.key}`,
-      title: p.name || p.key,
-      description: "Record closing stock",
-    }));
+    const options = prods.slice(0, 10).map((p: any) => {
+      const o = openingMap.get(p.key);
+      const desc = o ? `Opening: ${o.qty}${o.unit ? ` ${o.unit}` : ""}` : "Opening: not set";
+      return {
+        id: `PROD_${p.key}`,
+        title: p.name || p.key,
+        description: desc,
+      };
+    });
     const interactive = buildProductPickerBody(options, prods.length > 10 ? `Showing 10 of ${prods.length}` : undefined);
     const payload = buildListPayload(phone.replace(/^\+/, ''), interactive);
     await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
