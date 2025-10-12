@@ -201,20 +201,33 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
     await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "autosend.disabled.context", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "NO_AI_DISPATCH_CONTEXT" });
     return { ok: true, waMessageId, response: { noop: true } } as const;
   }
-  // Respect explicit feature flag for interactive payloads. Interactive
-  // messages are allowed only when WA_INTERACTIVE_ENABLED is set to "true".
-  // Previously we forced interactive NOOPs when WA_GPT_ONLY was enabled; that
-  // prevented deployments from using GPT for inbound routing while still
-  // sending interactive replies. Make the interactive behavior driven by the
-  // `WA_INTERACTIVE_ENABLED` flag so deployers can opt-in to receiving
-  // interactive payloads even in GPT-only deployments.
-  // Global kill-switch for interactive payloads (pure GPT text mode)
+  // Respect explicit feature flag for interactive payloads. When disabled,
+  // construct a readable plain-text fallback so users still receive guidance
+  // and our logs show a SENT message instead of a silent NOOP.
   if (process.env.WA_INTERACTIVE_ENABLED !== "true") {
     const toNorm = normalizeGraphPhone(body?.to || "");
     const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");
-    const waMessageId = `NOOP-${Date.now()}`;
-    await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: "interactive.disabled", _type: contextType || "AI_DISPATCH_INTERACTIVE" }, via: "feature-flag-noop", body }, waMessageId, status: "NOOP", type: "INTERACTIVE_DISABLED" });
-    return { ok: true, waMessageId, response: { noop: true } } as const;
+    // Build a compact fallback text from the interactive payload
+    let header = "Choose an option:";
+    try { header = String(body?.interactive?.body?.text || header); } catch {}
+    let lines: string[] = [];
+    try {
+      const itype = String(body?.interactive?.type || "").toLowerCase();
+      if (itype === "button") {
+        const buttons = Array.isArray(body?.interactive?.action?.buttons) ? body.interactive.action.buttons : [];
+        lines = buttons.slice(0, 10).map((b: any, i: number) => `${i + 1}) ${((b || {}).reply || {}).title || ((b || {}).title) || "Option"}`);
+      } else if (itype === "list") {
+        const sections = Array.isArray(body?.interactive?.action?.sections) ? body.interactive.action.sections : [];
+        const rows = sections.flatMap((s: any) => Array.isArray(s?.rows) ? s.rows : []);
+        lines = rows.slice(0, 10).map((r: any, i: number) => `${i + 1}) ${String(r?.title || r?.id || "Option")} ${r?.description ? `- ${r.description}` : ""}`.trim());
+      }
+    } catch {}
+    const fallback = [header, ...(lines.length ? lines : [])].join("\n").trim();
+    try {
+      await logOutbound({ direction: 'out', templateName: null, payload: { phone: phoneE164, in_reply_to: inReplyTo || null, meta: { phoneE164, reason: 'interactive.disabled.fallback', _type: contextType || 'AI_DISPATCH_INTERACTIVE' }, original_body: body }, status: 'WARN', type: 'SEND_INTERACTIVE_FALLBACK' });
+    } catch {}
+    // Send the text fallback within the same context type so feature flags allow it
+    return _sendTextRaw(toNorm, fallback || header, contextType, inReplyTo);
   }
   const toNorm = normalizeGraphPhone(body?.to || "");
   const phoneE164 = toNorm ? `+${toNorm}` : String(body?.to || "");

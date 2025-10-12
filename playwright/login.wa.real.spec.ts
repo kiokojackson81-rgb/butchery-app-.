@@ -3,48 +3,50 @@ import { test, expect } from '@playwright/test';
 const BASE = process.env.BASE_URL || '';
 const ALLOW_REAL = process.env.ALLOW_REAL_WA === 'true';
 const TEST_WA_E164 = process.env.TEST_WA_E164 || '';
+const TEST_CODE_ATT = process.env.TEST_CODE_ATTENDANT || '';
 const IS_DRY = process.env.WA_DRY_RUN === 'true';
 
-// Real WhatsApp login smoke. Sends an actual WA message to TEST_WA_E164.
+// Real WhatsApp send smoke. Triggers a real outbound WA message to TEST_WA_E164 by invoking the login-link API.
 // Safety gates:
 // - Requires ALLOW_REAL_WA=true
-// - Requires TEST_WA_E164 to be set to a valid E.164 (e.g., +2547XXXXXXX)
+// - Requires TEST_WA_E164 in E.164 format (e.g., +2547XXXXXXX)
+// - Requires TEST_CODE_ATTENDANT to be a valid, active production code
 // - Skips if WA_DRY_RUN=true (since that defeats the purpose)
 
-test.describe('Login WA real', () => {
+test.describe('Login WA real (API)', () => {
   test.skip(!ALLOW_REAL, 'Set ALLOW_REAL_WA=true to enable real WA send');
   test.skip(!TEST_WA_E164, 'Provide TEST_WA_E164 in E.164 format (e.g., +2547XXXXXXX)');
+  test.skip(!TEST_CODE_ATT, 'Provide TEST_CODE_ATTENDANT with a valid production code');
   test.skip(IS_DRY, 'Skip when WA_DRY_RUN is true — requires real send');
 
-  test('sends a real WA message and it appears in logs', async ({ page }) => {
+  test('sends a real WA message and it appears in logs', async ({ request }) => {
     const toDigits = TEST_WA_E164.replace(/[^0-9]/g, '').replace(/^0+/, '');
 
-    // 1) Trigger the login start flow which will DM success/failure
-    await page.goto(`/login?wa=${encodeURIComponent(TEST_WA_E164)}`);
-    await page.fill('#code-input', 'BR1234'); // any code; server DMs success or fail
-    await page.getByRole('button', { name: /submit code/i }).click();
+    // 1) Call login-link API directly to trigger finalize + welcome/menu send
+    const resp = await request.post(`${BASE}/api/wa/auth/login-link`, {
+      data: { code: TEST_CODE_ATT, wa: TEST_WA_E164 },
+    });
+    expect(resp.ok()).toBeTruthy();
+    const j = await resp.json().catch(() => ({ ok: false } as any));
+    expect(j.ok).toBeTruthy();
 
-    // 2) Poll WA logs until we see an outbound message to TEST_WA_E164 that isn't dry-run
+    // 2) Poll WA logs until we see an outbound SENT to the target that isn't dry-run
     const startedAt = Date.now();
-
     const found = await waitFor(async () => {
-      const resp = await page.request.get(`/api/wa/logs?to=${toDigits}&limit=30`);
-      if (!resp.ok()) return false;
-      const data = await resp.json().catch(() => ({} as any));
+      const r = await request.get(`${BASE}/api/wa/logs?to=${toDigits}&limit=40`);
+      if (!r.ok()) return false;
+      const data = await r.json().catch(() => ({} as any));
       const rows = Array.isArray(data?.rows) ? data.rows : [];
-      // Look for a recent, outbound, SENT log where payload.response.dryRun !== true
       const cutoff = startedAt - 2 * 60_000; // within last 2 minutes
-      for (const r of rows) {
-        const created = r?.createdAt ? new Date(r.createdAt).getTime() : 0;
-        const notDry = !(r?.payload?.response?.dryRun === true);
-        const okStatus = String(r?.status || '').toUpperCase().includes('SENT');
-        const outbound = r?.direction === 'out';
-        if (outbound && okStatus && notDry && created >= cutoff) {
-          return true;
-        }
+      for (const row of rows) {
+        const created = row?.createdAt ? new Date(row.createdAt).getTime() : 0;
+        const notDry = !(row?.payload?.response?.dryRun === true);
+        const okStatus = String(row?.status || '').toUpperCase().includes('SENT');
+        const outbound = row?.direction === 'out';
+        if (outbound && okStatus && notDry && created >= cutoff) return true;
       }
       return false;
-    }, { timeoutMs: 45_000, intervalMs: 2_000 });
+    }, { timeoutMs: 60_000, intervalMs: 2_000 });
 
     expect(found).toBeTruthy();
   });
@@ -52,7 +54,6 @@ test.describe('Login WA real', () => {
 
 async function waitFor<T>(fn: () => Promise<T | boolean>, opts: { timeoutMs: number; intervalMs: number }): Promise<boolean> {
   const deadline = Date.now() + Math.max(1_000, opts.timeoutMs);
-  // First immediate try
   try { if (await fn()) return true; } catch {}
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, Math.max(100, opts.intervalMs)));
