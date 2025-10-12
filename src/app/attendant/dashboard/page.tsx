@@ -81,6 +81,7 @@ export default function AttendantDashboardPage() {
 
   const [tab, setTab] = useState<"stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
   const [submitted, setSubmitted] = useState(false);
+  const [activeFrom, setActiveFrom] = useState<string | null>(null);
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -452,6 +453,9 @@ export default function AttendantDashboardPage() {
     await refreshPeriodAndHeader(outlet);
     // refresh closing/waste reads from DB for consistency
     try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
+    // Clear input buffers for deposits and expenses for the new period
+    setDeposits([]);
+    setExpenses([]);
     // refresh opening-effective and supply history after new period start
     try {
       const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
@@ -512,7 +516,9 @@ export default function AttendantDashboardPage() {
   async function refreshPeriodAndHeader(outletName: string) {
     try {
       const pa = await getJSON<{ ok: boolean; active: { periodStartAt: string } | null }>(`/api/period/active?outlet=${encodeURIComponent(outletName)}`);
-      setPeriodStartAt(pa?.active?.periodStartAt ?? null);
+      const startAt = pa?.active?.periodStartAt ?? null;
+      setPeriodStartAt(startAt);
+      setActiveFrom(startAt);
     } catch { setPeriodStartAt(null); }
 
     try {
@@ -771,7 +777,7 @@ export default function AttendantDashboardPage() {
             </div>
           </section>
 
-          {/* Submit button after stock table (mobile sticky bar for reach) */}
+          {/* Submit button after stock table (mobile sticky bar for reach). Always active so attendants can finalize at different times. */}
           <div className="mb-8">
             <div className="hidden sm:block">
               <button onClick={submitStock} className="px-4 py-2 rounded-2xl bg-black text-white">
@@ -813,7 +819,7 @@ export default function AttendantDashboardPage() {
               <tbody>
                 {(openingRowsRaw.filter(r => !!catalog[r.itemKey])).length === 0 && (
                   <tr><td className="py-3 text-gray-500" colSpan={4}>
-                    No opening stock captured by Supplier for this date/outlet.
+                    No opening stock captured for today yet. Opening will start from yesterday's closing plus any new deliveries.
                   </td></tr>
                 )}
                 {openingRowsRaw.filter(r => !!catalog[r.itemKey]).map((r, i) => (

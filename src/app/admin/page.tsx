@@ -849,6 +849,8 @@ export default function AdminPage() {
         <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
         {/* Quick link to WhatsApp management */}
         <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
+        {/* Quick link to Supply History (role-wide) */}
+        <a href="/admin/supply-history" className="px-3 py-2 rounded-2xl text-sm border" title="Browse role-wide supply history">Supply History</a>
       </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}

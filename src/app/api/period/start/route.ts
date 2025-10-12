@@ -15,17 +15,9 @@ export async function POST(req: Request) {
   const date = new Date().toISOString().slice(0, 10);
 
   await prisma.$transaction(async (tx) => {
-    // Upsert opening rows (qty only; buyPrice remains 0 unless supplier provided earlier)
-    const products = await tx.product.findMany();
-    const unitByKey = Object.fromEntries(products.map((p) => [p.key, p.unit]));
-
-    for (const [itemKey, qty] of Object.entries(openingSnapshot || {})) {
-      await tx.supplyOpeningRow.upsert({
-        where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
-        create: { date, outletName: outlet, itemKey, qty: Number(qty || 0), unit: (unitByKey as any)[itemKey] || "kg", buyPrice: 0 },
-        update: { qty: Number(qty || 0) },
-      });
-    }
+    // Do NOT pre-populate today's supply rows on period start.
+    // New trading day begins with supply empty, and opening-effective will derive
+    // opening from yesterday's closing plus any new supply posted today.
 
     // Upsert pricebook snapshot
     for (const [itemKey, row] of Object.entries(pricebookSnapshot || {})) {
