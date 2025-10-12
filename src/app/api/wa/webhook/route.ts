@@ -78,11 +78,19 @@ export async function POST(req: Request) {
   // Helper: human-friendly button titles for known ids
   const buttonTitleMap: Record<string, string> = {
     ATT_CLOSING: "Enter Closing",
+    ATT_TAB_STOCK: "Enter Closing",
     ATT_DEPOSIT: "Deposit",
+    ATT_TAB_DEPOSITS: "Deposit",
     ATT_EXPENSE: "Expense",
+    ATT_TAB_EXPENSES: "Expense",
     ATT_TAB_SUMMARY: "Summary",
     MENU_SUMMARY: "Summary",
-    ATT_TAB_SUPPLY: "Supply",
+    ATT_TAB_SUPPLY: "Supply (view)",
+    MENU_SUPPLY: "Supply (view)",
+    MENU_TXNS: "Till Count",
+    ATT_TAB_TILL: "Till Count",
+    BACK_TO_MENU: "Back to Menu",
+    LOGOUT: "Logout",
     SV_REVIEW_CLOSINGS: "Review Closings",
     SV_REVIEW_DEPOSITS: "Review Deposits",
     SV_REVIEW_EXPENSES: "Review Expenses",
@@ -120,7 +128,8 @@ export async function POST(req: Request) {
       }
       // Build reply buttons from selected ids
       const b = userTake.map((id) => ({ type: "reply", reply: { id, title: humanTitle(id) } }));
-      await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "Choose an action:" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
+      // Copy matches our GPT prompt tone
+      await sendInteractive({ messaging_product: "whatsapp", to: phoneGraph, type: "interactive", interactive: { type: "button", body: { text: "What would you like to do?" }, action: { buttons: b } } } as any, "AI_DISPATCH_INTERACTIVE");
     } catch {}
   }
 
@@ -818,7 +827,7 @@ export async function POST(req: Request) {
                   if (GPT_ONLY) {
                     // Construct a minimal interactive payload from OOC buttons and let
                     // the GPT interactive sender enforce Graph limits and formats.
-                    const inter = { type: 'buttons', buttons: (btns as string[]).map((b: string) => ({ id: b, title: humanTitle(b) })), bodyText: 'Choose an action:' } as any;
+                    const inter = { type: 'buttons', buttons: (btns as string[]).map((b: string) => ({ id: b, title: humanTitle(b) })), bodyText: 'What would you like to do?' } as any;
                     const sent = await trySendGptInteractive(to.replace(/^\+/, ''), inter as any);
                     if (!sent) await sendButtonsFor(to, btns);
                   } else {
@@ -1010,8 +1019,8 @@ export async function POST(req: Request) {
             const id = aliasToCanonical(idRaw);
             if (!id) continue;
 
-            // In GPT-only mode, prefer to route interactive selections through GPT
-            // so all intent resolution, OOC generation and reply composition is centralized.
+            // In GPT-only mode, we still ask GPT for copy/buttons, but we MUST dispatch
+            // the selection to the concrete server flow so state progresses (e.g. closing).
             if (GPT_ONLY) {
               try {
                 const prompt = `user selected ${id}`;
@@ -1020,17 +1029,29 @@ export async function POST(req: Request) {
                 const ooc = parseOOCBlock(replyText);
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
 
-                const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
-                if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                  await safeSendGreetingOrMenu({
-                    phone: phoneE164,
-                    role: sessRole,
-                    outlet: _sess?.outlet,
-                    source: "webhook_gpt_selection_menu",
-                    sessionLike: _sess,
-                  });
-                  markSent();
-                  continue;
+                // Decide the effective intent: prefer OOC.intent, else the button id itself
+                const intentRaw = String((ooc as any)?.intent || id || "");
+                const canonical = aliasToCanonical(intentRaw);
+                const flowId = canonicalToFlowId(sessRole, canonical);
+
+                // Dispatch to concrete handlers so the state machine progresses
+                let handled = false;
+                try {
+                  if (flowId === "MENU") {
+                    await safeSendGreetingOrMenu({ phone: phoneE164, role: sessRole, outlet: _sess?.outlet, source: "webhook_gpt_selection_menu", sessionLike: _sess });
+                    markSent();
+                    handled = true;
+                  } else if (sessRole === "supervisor") {
+                    const res = await handleSupervisorAction(_sess, flowId, phoneE164);
+                    handled = !!res;
+                  } else if (sessRole === "supplier") {
+                    const res = await handleSupplierAction(_sess, flowId, phoneE164);
+                    handled = !!res;
+                  } else {
+                    handled = await handleAuthenticatedInteractive(_sess, flowId);
+                  }
+                } catch (e) {
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "interactive.dispatch.fail", flowId, error: String(e) }, status: "ERROR", type: "INTERACTIVE_DISPATCH_FAIL" }); } catch {}
                 }
 
                 const to = toGraphPhone(phoneE164);
@@ -1038,27 +1059,22 @@ export async function POST(req: Request) {
                 if (display) {
                   try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
-                // If GPT returned buttons via OOC, send them; otherwise use role tabs
+                // If GPT returned buttons via OOC, send them; otherwise send role tabs only if nothing else spoke
                 try {
                   const btns = Array.isArray(ooc?.buttons) && ooc?.buttons.length ? ooc?.buttons : null;
                   if (btns) {
                     try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" }); } catch {}
                     try {
-                      if (GPT_ONLY) {
-                        const inter = { type: 'buttons', buttons: (btns as string[]).map((b: string) => ({ id: b, title: humanTitle(b) })), bodyText: 'Choose an action:' } as any;
-                        const sent = await trySendGptInteractive(to.replace(/^\+/, ''), inter as any);
-                        if (!sent) await sendButtonsFor(to, btns as string[]);
-                      } else {
-                        await sendButtonsFor(to, btns as string[]);
-                      }
+                      const inter = { type: 'buttons', buttons: (btns as string[]).map((b: string) => ({ id: b, title: humanTitle(b) })), bodyText: 'What would you like to do?' } as any;
+                      const sent = await trySendGptInteractive(to.replace(/^\+/, ''), inter as any);
+                      if (!sent) await sendButtonsFor(to, btns as string[]);
                     } catch {}
-                  } else {
-                    // Only send role tabs if handler didn't already send a response
-                    if (!__sentOnce) await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
+                  } else if (!handled && !__sentOnce) {
+                    await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
                   }
                 } catch {}
 
-                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+                try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
               } catch (e) {
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.interactive.fail", error: String(e) }, status: "ERROR", type: "GPT_INTERACTIVE_FAIL" }); } catch {}
                 // fallback to legacy behavior if GPT fails
@@ -1066,7 +1082,8 @@ export async function POST(req: Request) {
               continue;
             }
 
-            // Route interactive selections through GPT for centralized handling.
+            // Non-GPT deployments: still ask GPT for copy/buttons but always dispatch
+            // the selection to the underlying flow so UI buttons work deterministically.
             try {
               const prompt = `user selected ${id}`;
               const r = await runGptForIncoming(phoneE164, prompt);
@@ -1074,18 +1091,18 @@ export async function POST(req: Request) {
               const ooc = parseOOCBlock(replyText);
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc, replyId: id } }, status: "INFO", type: "OOC_INFO" }); } catch {}
               const to = toGraphPhone(phoneE164);
-              const normalizedButtons = Array.isArray(ooc?.buttons) ? (ooc.buttons as string[]).map((b: string) => String(b || "").toUpperCase()) : [];
-              if (sessRole === "attendant" && normalizedButtons.length && normalizedButtons.every((b) => ATTENDANT_MENU_BUTTONS.has(b))) {
-                await safeSendGreetingOrMenu({
-                  phone: phoneE164,
-                  role: sessRole,
-                  outlet: _sess?.outlet,
-                  source: "webhook_interactive_menu",
-                  sessionLike: _sess,
-                });
+              // Determine intent and dispatch
+              const intentRaw = String((ooc as any)?.intent || id || "");
+              const canonical = aliasToCanonical(intentRaw);
+              const flowId = canonicalToFlowId(sessRole, canonical);
+              let handled = false;
+              if (flowId === "MENU") {
+                await safeSendGreetingOrMenu({ phone: phoneE164, role: sessRole, outlet: _sess?.outlet, source: "webhook_interactive_menu", sessionLike: _sess });
                 markSent();
-                continue;
-              }
+                handled = true;
+              } else if (sessRole === "supervisor") handled = !!(await handleSupervisorAction(_sess, flowId, phoneE164));
+              else if (sessRole === "supplier") handled = !!(await handleSupplierAction(_sess, flowId, phoneE164));
+              else handled = await handleAuthenticatedInteractive(_sess, flowId);
               const display = stripOOC(replyText);
               if (display) {
                 try { await sendTextSafe(to, display, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
@@ -1094,16 +1111,12 @@ export async function POST(req: Request) {
               if (btns) {
                 try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, ooc: sanitizeForLog(ooc) } }, status: "INFO", type: "OOC_BUTTONS" }); } catch {}
                 try {
-                  if (GPT_ONLY) {
-                    const inter = { type: 'buttons', buttons: (btns as string[]).map((b: string) => ({ id: b, title: humanTitle(b) })), bodyText: 'Choose an action:' } as any;
-                    const sent = await trySendGptInteractive(to.replace(/^\+/, ''), inter as any);
-                    if (!sent) await sendButtonsFor(to, btns as string[]);
-                  } else {
-                    await sendButtonsFor(to, btns as string[]);
-                  }
+                  await sendButtonsFor(to, btns as string[]);
                 } catch {}
+              } else if (!handled && !__sentOnce) {
+                await sendRoleTabs(to, (sessRole as any) || "attendant", _sess?.outlet || undefined);
               }
-              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: id } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
+              try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, meta: { phoneE164, intent: flowId } }, status: "OK", type: "GPT_ROUTE_SUCCESS" }); } catch {}
             } catch (e) {
               try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "gpt.interactive.fail", error: String(e) }, status: "ERROR", type: "GPT_INTERACTIVE_FAIL" }); } catch {}
             }
