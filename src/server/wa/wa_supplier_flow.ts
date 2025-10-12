@@ -170,9 +170,20 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     case "LOGOUT": {
       // Clear session state and instruct user to login
       try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { state: 'LOGIN', code: null, outlet: null } }); } catch {}
-      await sendTextSafe(gp, "You've been logged out. To continue: tap Login.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-      // Offer quick buttons: Login, Help
-      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: { type: "button", body: { text: "Next?" }, action: { buttons: [ { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "Login" } }, { type: "reply", reply: { id: "SUPL_HELP", title: "Help" } } ] } } as any }, "AI_DISPATCH_INTERACTIVE");
+      try {
+        // Build and send a direct login link in a single message
+        const { default: createLoginLinkMod } = await import("@/server/wa_links");
+        const { toGraphPhone: toGp } = await import("@/lib/wa_phone");
+      } catch {}
+      // Minimal single-message logout with link (no interactive follow-up)
+      try {
+        const mod = await import("@/server/wa_links");
+        const urlObj: any = await (mod as any).createLoginLink(phoneE164);
+        await sendTextSafe(gp, `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } catch {
+        await sendTextSafe(gp, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+      return;
     }
 
     case "SPL_CANCEL":

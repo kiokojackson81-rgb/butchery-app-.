@@ -497,8 +497,19 @@ export async function handleInboundText(phone: string, text: string) {
         data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
       });
     } catch {}
-    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await promptLogin(phone);
+    // Send a single consolidated logout message with the login link
+    try {
+      const urlObj = await createLoginLink(toDbPhone(phone));
+      await sendText(
+        phone,
+        `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`,
+        "AI_DISPATCH_TEXT",
+        { gpt_sent: true }
+      );
+    } catch {
+      // Fallback: minimal text if link generation fails
+      await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
     return;
   }
   const disputeMatch = t.match(/^DISPUTE\b(?:\s+(.*))?$/i);
@@ -806,8 +817,18 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         });
       } catch {}
     }
-    await sendText(phone, "You've been logged out. We'll send you a login link now.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await promptLogin(phone);
+    // Send a single consolidated logout message with the login link
+    try {
+      const urlObj = await createLoginLink(toDbPhone(phone));
+      await sendText(
+        phone,
+        `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`,
+        "AI_DISPATCH_TEXT",
+        { gpt_sent: true }
+      );
+    } catch {
+      await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
     return true;
   }
 
