@@ -45,12 +45,38 @@ export async function POST(req: Request) {
     const keys = rawKeys.map((k) => (k ?? "").trim()).filter((k) => k.length > 0);
     let prunedCount = 0;
 
-    await withRetry(() => prisma.$transaction(async (tx) => {
+    // Preload opening-effective map for validation
+    const openEffMap: Map<string, number> = new Map();
+    try {
+      const y = new Date((day + "T00:00:00.000Z")); y.setUTCDate(y.getUTCDate() - 1);
+      const yStr = y.toISOString().slice(0,10);
+      const [prevClosing, todaySupply] = await Promise.all([
+        (prisma as any).attendantClosing.findMany({ where: { date: yStr, outletName: outletName } }),
+        (prisma as any).supplyOpeningRow.findMany({ where: { date: day, outletName: outletName } }),
+      ]);
+      for (const r of prevClosing || []) {
+        const k = (r as any).itemKey; const q = Number((r as any).closingQty || 0);
+        if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q);
+      }
+      for (const r of todaySupply || []) {
+        const k = (r as any).itemKey; const q = Number((r as any).qty || 0);
+        if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q);
+      }
+    } catch {}
+
+  await withRetry(() => prisma.$transaction(async (tx: any) => {
       for (const itemKey of keys) {
         const rawClosing = Number((safeClosing as any)?.[itemKey] ?? 0);
         const rawWaste = Number((safeWaste as any)?.[itemKey] ?? 0);
         const closingQty = Number.isFinite(rawClosing) ? Math.max(0, rawClosing) : 0;
         const wasteQty = Number.isFinite(rawWaste) ? Math.max(0, rawWaste) : 0;
+
+        // Validate: closing cannot exceed opening-effective minus waste (tolerance 1e-6)
+        const openEff = Number(openEffMap.get(itemKey) || 0);
+        const maxClosing = Math.max(0, openEff - wasteQty);
+        if (closingQty > maxClosing + 1e-6) {
+          throw new Error(`Invalid closing for ${itemKey}: closing ${closingQty} exceeds available ${maxClosing} (OpeningEff ${openEff} - Waste ${wasteQty}).`);
+        }
         await tx.attendantClosing.upsert({
           where: { date_outletName_itemKey: { date: day, outletName, itemKey } },
           create: { date: day, outletName, itemKey, closingQty, wasteQty },
@@ -115,7 +141,8 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, outlet: outletName, date: day, savedCount, prunedCount, closingMap: closingMapOut, wasteMap: wasteMapOut });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
+    const msg = String((e as any)?.message || "Failed");
+    return NextResponse.json({ ok: false, error: msg }, { status: 400 });
   }
 }
 

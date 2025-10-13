@@ -6,6 +6,7 @@ import { logMessage } from "@/lib/wa_log";
 import { promptWebLogin } from "@/server/wa_gate";
 import { createLoginLink } from "@/server/wa_links";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
+import { saveClosings as saveClosingsImpl } from "@/server/closings";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText, sendInteractive } from "@/lib/wa";
@@ -26,7 +27,7 @@ async function reviewItem(..._args: any[]): Promise<any> { return null; }
 async function enqueueOpsEvent(..._args: any[]): Promise<any> { return null; }
 async function notifyAttendantsSupervisor(..._args: any[]): Promise<any> { return null; }
 async function notifySupplierSupervisor(..._args: any[]): Promise<any> { return null; }
-async function saveClosings(..._args: any[]): Promise<any> { return null; }
+async function saveClosings(...args: any[]): Promise<any> { return saveClosingsImpl.apply(null as any, args as any); }
 function parseMpesaText(..._args: any[]): any { return null; }
 async function addDeposit(..._args: any[]): Promise<any> { return null; }
 async function trySendGptInteractive(..._args: any[]): Promise<boolean> { return false; }

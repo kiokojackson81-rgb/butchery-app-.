@@ -45,12 +45,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
     }
 
-    await withRetry(() => prisma.$transaction(async (tx) => {
+    // Build opening-effective for validation
+    const openEffMap: Map<string, number> = new Map();
+    try {
+      const dt = new Date(date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+      const y = dt.toISOString().slice(0,10);
+      const [prev, supply] = await Promise.all([
+        (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }),
+        (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName } }),
+      ]);
+      for (const r of prev || []) { const k = (r as any).itemKey; const q = Number((r as any).closingQty || 0); if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q); }
+      for (const r of supply || []) { const k = (r as any).itemKey; const q = Number((r as any).qty || 0); if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q); }
+    } catch {}
+
+  await withRetry(() => prisma.$transaction(async (tx: any) => {
       for (const itemKey of keys) {
         const rawClosing = Number((safeClosing as any)?.[itemKey] ?? 0);
         const rawWaste = Number((safeWaste as any)?.[itemKey] ?? 0);
         const closingQty = Number.isFinite(rawClosing) ? Math.max(0, rawClosing) : 0;
         const wasteQty = Number.isFinite(rawWaste) ? Math.max(0, rawWaste) : 0;
+        const openEff = Number(openEffMap.get(itemKey) || 0);
+        const maxClosing = Math.max(0, openEff - wasteQty);
+        if (closingQty > maxClosing + 1e-6) {
+          throw new Error(`Invalid closing for ${itemKey}: ${closingQty} exceeds available ${maxClosing} (OpeningEff ${openEff} - Waste ${wasteQty}).`);
+        }
         // Prevent duplicate overwrite if closed exists (idempotent upsert ok, but spec wants single submit per product)
         const exists = await (tx as any).attendantClosing.findUnique({ where: { date_outletName_itemKey: { date, outletName, itemKey } } });
         if (exists) continue; // ignore duplicates silently to keep idempotent
@@ -73,6 +91,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, date, outlet: outletName, closingMap: closingMapOut, wasteMap: wasteMapOut });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
+    const msg = String((e as any)?.message || "Failed");
+    return NextResponse.json({ ok: false, error: msg }, { status: 400 });
   }
 }
