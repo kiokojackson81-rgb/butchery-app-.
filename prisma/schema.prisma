@@ -281,6 +281,33 @@ model ReminderSend {
   @@unique([type, phoneE164, date])
 }
 
+/// Supervisor commission per day/outlet (accumulates into 24th→24th periods)
+model SupervisorCommission {
+  id              String   @id @default(cuid())
+  date            String   // YYYY-MM-DD
+  outletName      String
+  supervisorCode  String?  // PersonCode.code or external code
+  supervisorPhone String?  // E.164 for convenience
+
+  salesKsh        Int      @default(0)  // revenue at sell price
+  expensesKsh     Int      @default(0)
+  wasteKsh        Int      @default(0)  // waste valued at sell price
+  profitKsh       Int      @default(0)  // sales - expenses - waste
+
+  commissionRate  Float    @default(0.10)
+  commissionKsh   Int      @default(0)
+
+  periodKey       String   // e.g., 2025-09-24_to_2025-10-23
+  status          String   @default("calculated") // calculated|adjusted|approved|paid
+  note            String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([date, outletName])
+  @@index([periodKey, supervisorCode])
+}
+
 enum PersonRole {
   attendant
   supervisor

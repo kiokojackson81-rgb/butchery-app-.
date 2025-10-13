@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getPeriodState } from "@/server/trading_period";
+import { upsertAndNotifySupervisorCommission } from "@/server/commission";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -89,7 +90,8 @@ export async function POST(req: Request) {
       wasteMapOut[(r as any).itemKey] = Number((r as any).wasteQty || 0);
     }
 
-    return NextResponse.json({ ok: true, date, outlet: outletName, closingMap: closingMapOut, wasteMap: wasteMapOut });
+  try { await upsertAndNotifySupervisorCommission(date, outletName); } catch {}
+  return NextResponse.json({ ok: true, date, outlet: outletName, closingMap: closingMapOut, wasteMap: wasteMapOut });
   } catch (e) {
     const msg = String((e as any)?.message || "Failed");
     return NextResponse.json({ ok: false, error: msg }, { status: 400 });

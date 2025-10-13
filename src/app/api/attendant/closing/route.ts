@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { sendClosingSubmitted } from "@/lib/wa";
+import { upsertAndNotifySupervisorCommission } from "@/server/commission";
 
 type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
 type PhoneMap = { code: string; phoneE164: string | null };
@@ -139,7 +140,10 @@ export async function POST(req: Request) {
       );
     } catch {}
 
-  return NextResponse.json({ ok: true, outlet: outletName, date: day, savedCount, prunedCount, closingMap: closingMapOut, wasteMap: wasteMapOut });
+    // Fire-and-forget: compute profit, upsert commission, notify supervisors
+    try { await upsertAndNotifySupervisorCommission(day, outletName); } catch {}
+
+    return NextResponse.json({ ok: true, outlet: outletName, date: day, savedCount, prunedCount, closingMap: closingMapOut, wasteMap: wasteMapOut });
   } catch (e) {
     const msg = String((e as any)?.message || "Failed");
     return NextResponse.json({ ok: false, error: msg }, { status: 400 });

@@ -25,6 +25,10 @@
     {
       "path": "/api/wa/jobs/ops-role-notice-evening",
       "schedule": "30 18 * * *"
+    },
+    {
+      "path": "/api/wa/jobs/supervisor-commission-daily",
+      "schedule": "35 18 * * *"
     }
   ],
   "routes": [

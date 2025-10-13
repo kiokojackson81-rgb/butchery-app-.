@@ -7,6 +7,7 @@ import { promptWebLogin } from "@/server/wa_gate";
 import { createLoginLink } from "@/server/wa_links";
 import { ensureAuthenticated, handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { saveClosings as saveClosingsImpl } from "@/server/closings";
+import { upsertAndNotifySupervisorCommission } from "@/server/commission";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierAction, handleSupplierText } from "@/server/wa/wa_supplier_flow";
 import { sendText, sendInteractive } from "@/lib/wa";
@@ -801,7 +802,10 @@ export async function POST(req: Request) {
                     try {
                       const rows = (args.rows || []).map((r: any) => ({ productKey: r.productKey || r.itemKey || r.key, closingQty: Number(r.closingQty || r.closing || 0) || 0, wasteQty: Number(r.wasteQty || r.waste || 0) || 0 }));
                       await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_CALL", kind: "closing", rows }, status: "INFO", type: "ATTENDANT_CREATE_CALL" });
-                      await saveClosings({ date: (args.date || (( _sess && (_sess.cursor||{}).date) || new Date().toISOString().slice(0,10) )), outletName: _sess?.outlet || (args.outlet || undefined), rows });
+                      const _day = (args.date || (( _sess && (_sess.cursor||{}).date) || new Date().toISOString().slice(0,10) ));
+                      const _out = _sess?.outlet || (args.outlet || undefined);
+                      await saveClosings({ date: _day, outletName: _out, rows });
+                      try { if (_day && _out) await upsertAndNotifySupervisorCommission(_day, _out); } catch {}
                       await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "ATTENDANT_CREATE_OK", kind: "closing", rows }, status: "OK", type: "ATTENDANT_CREATE_OK" });
                       handledByServer = true;
                     } catch (e) {

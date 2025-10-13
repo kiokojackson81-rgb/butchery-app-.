@@ -851,6 +851,8 @@ export default function AdminPage() {
         <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
         {/* Quick link to Supply History (role-wide) */}
         <a href="/admin/supply-history" className="px-3 py-2 rounded-2xl text-sm border" title="Browse role-wide supply history">Supply History</a>
+        {/* Commissions management */}
+        <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
       </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
