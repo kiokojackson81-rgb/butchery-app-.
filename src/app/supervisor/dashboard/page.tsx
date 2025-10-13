@@ -110,6 +110,25 @@ export default function SupervisorDashboard() {
     return { start: toYMD(start), end: toYMD(end) };
   }
 
+  // Helpers for navigating between periods (history retained across months)
+  function periodLabel(pr: { start: string; end: string }) {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const s = ymdToDate(pr.start); const e = ymdToDate(pr.end);
+    return `${s.getUTCDate()} ${months[s.getUTCMonth()]} ${s.getUTCFullYear()} → ${e.getUTCDate()} ${months[e.getUTCMonth()]} ${e.getUTCFullYear()}`;
+  }
+  function prevPeriodStart(dstr: string): string {
+    // Pick the day before current period start, then resolve that period's start
+    const pr = commissionPeriodRange(ymdToDate(dstr));
+    const dayBefore = ymdToDate(pr.start); dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+    return commissionPeriodRange(dayBefore).start;
+  }
+  function nextPeriodStart(dstr: string): string {
+    // Pick the day after current period end, then resolve that period's start
+    const pr = commissionPeriodRange(ymdToDate(dstr));
+    const dayAfter = ymdToDate(pr.end); dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+    return commissionPeriodRange(dayAfter).start;
+  }
+
   async function refreshCommissions() {
     try {
       setCommLoading(true); setCommError(null);
@@ -778,6 +797,31 @@ export default function SupervisorDashboard() {
                 <option value="week">Week</option>
                 <option value="period">Period</option>
               </select>
+              {/* Period navigation (history) */}
+              {commRange === 'period' && (() => {
+                const today = new Date();
+                const curr = commissionPeriodRange(ymdToDate(date));
+                const todayPr = commissionPeriodRange(today);
+                const prevStart = prevPeriodStart(date);
+                const nextStart = nextPeriodStart(date);
+                const nextDisabled = nextStart > todayPr.start; // prevent navigating into future period
+                return (
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="btn-mobile px-2 py-1 rounded-xl border text-xs"
+                      title="Previous period"
+                      onClick={() => setDate(prevStart)}
+                    >← Prev</button>
+                    <div className="text-[11px] text-gray-600 px-1">{periodLabel(curr)}</div>
+                    <button
+                      className="btn-mobile px-2 py-1 rounded-xl border text-xs disabled:opacity-50"
+                      title="Next period"
+                      onClick={() => !nextDisabled && setDate(nextStart)}
+                      disabled={nextDisabled}
+                    >Next →</button>
+                  </div>
+                );
+              })()}
               <label className="text-xs text-gray-700">Status</label>
               <select className="input-mobile border rounded-xl p-2 text-sm" value={commStatus} onChange={(e)=>setCommStatus(e.target.value)}>
                 <option value="">(any)</option>

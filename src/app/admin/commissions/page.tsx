@@ -27,6 +27,34 @@ type ApiResponse = {
 
 function todayISO(): string { return new Date().toISOString().slice(0,10); }
 
+// Period utilities: 24th → 23rd (inclusive) with simple navigation
+function ymdToDate(s: string): Date { return new Date(`${s}T00:00:00.000Z`); }
+function toYMD(d: Date): string { return d.toISOString().slice(0,10); }
+function commissionPeriodRange(d: Date): { start: string; end: string } {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+  let start = new Date(Date.UTC(y, m, 24));
+  let end = new Date(Date.UTC(y, m + 1, 23));
+  if (day < 24) { start = new Date(Date.UTC(y, m - 1, 24)); end = new Date(Date.UTC(y, m, 23)); }
+  return { start: toYMD(start), end: toYMD(end) };
+}
+function periodLabel(pr: { start: string; end: string }) {
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const s = ymdToDate(pr.start); const e = ymdToDate(pr.end);
+  return `${s.getUTCDate()} ${months[s.getUTCMonth()]} ${s.getUTCFullYear()} → ${e.getUTCDate()} ${months[e.getUTCMonth()]} ${e.getUTCFullYear()}`;
+}
+function prevPeriodStart(dstr: string): string {
+  const pr = commissionPeriodRange(ymdToDate(dstr));
+  const dayBefore = ymdToDate(pr.start); dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+  return commissionPeriodRange(dayBefore).start;
+}
+function nextPeriodStart(dstr: string): string {
+  const pr = commissionPeriodRange(ymdToDate(dstr));
+  const dayAfter = ymdToDate(pr.end); dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+  return commissionPeriodRange(dayAfter).start;
+}
+
 export default function AdminCommissionsPage() {
   const [date, setDate] = useState<string>(todayISO());
   const [supervisor, setSupervisor] = useState<string>("");
@@ -141,7 +169,31 @@ export default function AdminCommissionsPage() {
         <div className="flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs text-gray-300">Date (for period)</label>
-            <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="border rounded px-2 py-1 bg-transparent" />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-xs border rounded px-2 py-1"
+                title="Previous period"
+                onClick={() => setDate(prevPeriodStart(date))}
+              >← Prev</button>
+              <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="border rounded px-2 py-1 bg-transparent" />
+              {(() => {
+                const today = new Date();
+                const nextStart = nextPeriodStart(date);
+                const todayPr = commissionPeriodRange(today);
+                const nextDisabled = nextStart > todayPr.start; // avoid navigating beyond current period
+                return (
+                  <button
+                    type="button"
+                    className="text-xs border rounded px-2 py-1 disabled:opacity-50"
+                    title="Next period"
+                    disabled={nextDisabled}
+                    onClick={() => { if (!nextDisabled) setDate(nextStart); }}
+                  >Next →</button>
+                );
+              })()}
+            </div>
+            <div className="text-[11px] text-gray-400 mt-1">{periodLabel(commissionPeriodRange(ymdToDate(date)))}</div>
           </div>
           <div>
             <label className="block text-xs text-gray-300">Supervisor Code</label>
