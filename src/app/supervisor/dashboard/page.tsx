@@ -49,6 +49,7 @@ type KPIRow = {
   cashAtTill: number;
   variance: number;
   wasteQty: number;
+  potatoesExpectedDeposit?: number;
 };
 
 function ymd() {
@@ -304,6 +305,7 @@ export default function SupervisorDashboard() {
                   ),
                   cashAtTill: 0, // computed below
                   varianceKsh: Number(data?.totals?.expectedDeposit ?? 0), // keep name for legacy UI
+                  potatoesExpectedDeposit: Number(data?.totals?.potatoesExpectedDeposit ?? 0),
                 } as any;
                 summary.cashAtTill = Math.max(0, (summary.expectedKsh || 0) - (summary.depositedKsh || 0) - (summary.expensesKsh || 0));
                 safeWriteJSON(summaryKey(date, outletName), summary);
@@ -354,6 +356,7 @@ export default function SupervisorDashboard() {
         expensesKsh: number;
         cashAtTill: number;
         varianceKsh: number;
+        potatoesExpectedDeposit?: number;
       } | null>(summaryKey(date, outletName), null);
 
       // Fallbacks
@@ -392,6 +395,8 @@ export default function SupervisorDashboard() {
           ),
         variance: summary?.varianceKsh ?? 0,
         wasteQty,
+        // New KPI: potatoes expected deposit (Ksh)
+        potatoesExpectedDeposit: Number(summary?.potatoesExpectedDeposit || 0),
       });
     });
     return rows;

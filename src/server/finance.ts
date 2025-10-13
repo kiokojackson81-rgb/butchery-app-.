@@ -51,6 +51,22 @@ export async function computeDayTotals(args: { date: string; outletName: string 
     weightSales += soldQty * price;
   }
 
+  // Potatoes-specific expected deposit logic
+  // Formula (per business rule):
+  // sales_qty = (yesterday closing + today supply) - today closing  [do NOT subtract waste]
+  // expected_deposit = sales_qty * 0.75 * 130
+  let potatoesExpectedDeposit = 0;
+  try {
+    const POTATOES_KEY = "potatoes";
+    const openPotatoes = Number(openMap.get(POTATOES_KEY) || 0);
+    const clPot: any = closingMap.get(POTATOES_KEY) || {};
+    const closingPot = Number(clPot?.closingQty || 0);
+    const soldNoWaste = Math.max(0, openPotatoes - closingPot);
+    const yieldFactor = 0.75; // 75% yield
+    const rateKsh = 130;      // Ksh per kg
+    potatoesExpectedDeposit = soldNoWaste * yieldFactor * rateKsh;
+  } catch {}
+
   const expensesSum = expenses.reduce((a: number, e: any) => a + (e.amount || 0), 0);
   const tillSalesGross = 0;
   const verifiedDeposits = deposits.filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (d.amount || 0), 0);
@@ -58,5 +74,5 @@ export async function computeDayTotals(args: { date: string; outletName: string 
   const netTill = tillSalesGross - verifiedDeposits;
   const expectedDeposit = todayTotalSales - netTill;
 
-  return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit };
+  return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
 }

@@ -1359,8 +1359,8 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {repRows.length === 0 ? (
-                  <tr><td className="py-3 text-gray-500" colSpan={7}>No outlets.</td></tr>
+                  {repRows.length === 0 ? (
+                    <tr><td className="py-3 text-gray-500" colSpan={7}>No outlets.</td></tr>
                 ) : (
                   repRows.map(r => (
                     <tr key={r.outlet} className="border-b">
