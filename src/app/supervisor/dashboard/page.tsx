@@ -96,6 +96,19 @@ export default function SupervisorDashboard() {
   function toYMD(d: Date): string { return d.toISOString().slice(0,10); }
   function startOfISOWeek(d: Date): Date { const dt = new Date(d); const day = dt.getUTCDay() || 7; if (day !== 1) dt.setUTCDate(dt.getUTCDate() - (day - 1)); dt.setUTCHours(0,0,0,0); return dt; }
   function endOfISOWeek(d: Date): Date { const s = startOfISOWeek(d); const e = new Date(s); e.setUTCDate(s.getUTCDate()+6); return e; }
+  // Commission period: 24th → 23rd (inclusive)
+  function commissionPeriodRange(d: Date): { start: string; end: string } {
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth(); // 0-based
+    const day = d.getUTCDate();
+    let start = new Date(Date.UTC(y, m, 24));
+    let end = new Date(Date.UTC(y, m + 1, 23));
+    if (day < 24) {
+      start = new Date(Date.UTC(y, m - 1, 24));
+      end = new Date(Date.UTC(y, m, 23));
+    }
+    return { start: toYMD(start), end: toYMD(end) };
+  }
 
   async function refreshCommissions() {
     try {
@@ -772,6 +785,17 @@ export default function SupervisorDashboard() {
                 <option value="approved">approved</option>
                 <option value="paid">paid</option>
               </select>
+              {/* Quick status chips */}
+              <div className="hidden sm:flex items-center gap-1 ml-1">
+                {[
+                  {k:"", label:"All"},
+                  {k:"calculated", label:"Calculated"},
+                  {k:"approved", label:"Approved"},
+                  {k:"paid", label:"Paid"},
+                ].map(c => (
+                  <button key={c.k} onClick={()=>setCommStatus(c.k)} className={`text-[11px] px-2 py-0.5 rounded-full border ${commStatus===c.k? 'bg-black text-white':'bg-transparent'}`}>{c.label}</button>
+                ))}
+              </div>
               <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={refreshCommissions} disabled={commLoading}>{commLoading ? 'Loading…' : 'Refresh'}</button>
             </div>
           </div>
@@ -781,8 +805,9 @@ export default function SupervisorDashboard() {
             const d0 = toYMD(dateObj);
             const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
             const w0 = toYMD(ws); const w1 = toYMD(we);
+            const pr = commissionPeriodRange(dateObj);
             const inRange = (dstr: string) => {
-              if (commRange === 'period') return true;
+              if (commRange === 'period') return dstr >= pr.start && dstr <= pr.end;
               if (commRange === 'day') return dstr === d0;
               if (commRange === 'week') return dstr >= w0 && dstr <= w1;
               return true;
@@ -793,6 +818,7 @@ export default function SupervisorDashboard() {
               <div className="text-sm text-gray-700 mb-2">
                 Totals — Sales: Ksh {fmt(totals.sales)} · Expenses: Ksh {fmt(totals.expenses)} · Waste: Ksh {fmt(totals.waste)} · Profit: Ksh {fmt(totals.profit)} · Commission: Ksh {fmt(totals.comm)}
                 {commRange === 'week' && <span className="ml-2 text-gray-500">Week: {w0} → {w1}</span>}
+                {commRange === 'period' && <span className="ml-2 text-gray-500">Period: {pr.start} → {pr.end}</span>}
               </div>
             );
           })()}
@@ -817,8 +843,9 @@ export default function SupervisorDashboard() {
                   const dateObj = ymdToDate(date);
                   const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
                   const w0 = toYMD(ws); const w1 = toYMD(we);
+                  const pr = commissionPeriodRange(dateObj);
                   const inRange = (dstr: string) => {
-                    if (commRange === 'period') return true;
+                    if (commRange === 'period') return dstr >= pr.start && dstr <= pr.end;
                     if (commRange === 'day') return dstr === toYMD(dateObj);
                     if (commRange === 'week') return dstr >= w0 && dstr <= w1;
                     return true;
