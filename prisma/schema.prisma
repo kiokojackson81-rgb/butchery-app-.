@@ -193,6 +193,8 @@ model SupplyRequest {
 model Attendant {
   id         String      @id @default(cuid())
   name       String
+  salaryAmount    Float        @default(0)
+  salaryFrequency SalaryFrequency @default(daily)
   outletId   String?
   loginCode  String?     @unique
   createdAt  DateTime    @default(now())
@@ -318,4 +320,204 @@ enum DepositStatus {
   VALID
   PENDING
   INVALID
+}
+
+enum SalaryFrequency {
+  daily
+  weekly
+  monthly
+}
+
+/// =========================
+/// Decision & Performance Intelligence models
+/// Note: We align with existing conventions (date as String YYYY-MM-DD, productKey, outletName)
+/// to avoid breaking current flows and to simplify joins.
+
+/// Per-outlet financial targets and defaults
+model OutletTargets {
+  id           String   @id @default(cuid())
+  outletName   String   @unique
+  gpTargetDay  Float    @default(0)
+  npTargetDay  Float    @default(0)
+  wastePctMax  Float    @default(0.08) // default 8%
+  depositRatio Float    @default(1.0)
+  createdAt    DateTime @default(now())
+}
+
+/// Product-specific deposit expectations (e.g., potatoes)
+model ProductDepositRule {
+  id         String   @id @default(cuid())
+  productKey String   @unique
+  ratio      Float    // e.g., 0.75
+  multiplier Float?   // e.g., 130 for potatoes
+  createdAt  DateTime @default(now())
+}
+
+/// Per-outlet/per-product waste ceilings
+model WasteThreshold {
+  id          String   @id @default(cuid())
+  productKey  String
+  outletName  String
+  maxWastePct Float    // 0-1
+  createdAt   DateTime @default(now())
+
+  @@unique([productKey, outletName])
+}
+
+/// Computed financial metrics for outlet/day
+model OutletPerformance {
+  id               String   @id @default(cuid())
+  date             String   // YYYY-MM-DD
+  outletName       String
+  totalSales       Float    @default(0)
+  totalCost        Float    @default(0)
+  grossProfit      Float    @default(0)
+  expenses         Float    @default(0)
+  netProfit        Float    @default(0)
+  deposits         Float    @default(0)
+  expectedDeposit  Float    @default(0)
+  deficit          Float    @default(0)
+  variancePct      Float    @default(0)
+  wasteCost        Float    @default(0)
+  wastePct         Float    @default(0)
+  createdAt        DateTime @default(now())
+
+  @@unique([date, outletName])
+}
+
+/// Shift metadata to attribute KPIs
+model Shift {
+  id           String    @id @default(cuid())
+  date         String    // YYYY-MM-DD
+  outletName   String
+  attendantId  String
+  attendant    Attendant @relation(fields: [attendantId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  @@unique([date, outletName, attendantId])
+}
+
+/// Link attendants to products for attribution
+model ProductAssignment {
+  id           String    @id @default(cuid())
+  attendantId  String
+  outletName   String
+  productKey   String
+  shareRule    Float     @default(1.0) // split factor among attendants
+  isPrimary    Boolean   @default(true)
+  attendant    Attendant @relation(fields: [attendantId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  @@unique([attendantId, outletName, productKey])
+}
+
+/// Daily KPI per attendant per outlet
+model AttendantKPI {
+  id               String    @id @default(cuid())
+  date             String    // YYYY-MM-DD
+  attendantId      String
+  outletName       String
+  sales            Float     @default(0)
+  gp               Float     @default(0)
+  expenses         Float     @default(0)
+  np               Float     @default(0)
+  salaryDay        Float     @default(0)
+  roiVsSalary      Float     @default(0)
+  wasteCost        Float     @default(0)
+  wastePct         Float     @default(0)
+  depositExpected  Float     @default(0)
+  depositActual    Float     @default(0)
+  depositGap       Float     @default(0)
+  redFlags         String[]
+  createdAt        DateTime  @default(now())
+  attendant        Attendant @relation(fields: [attendantId], references: [id])
+
+  @@unique([date, attendantId, outletName])
+}
+
+/// Daily supply snapshot per product for reorder logic
+model ProductSupplyStat {
+  id               String   @id @default(cuid())
+  date             String   // YYYY-MM-DD
+  outletName       String
+  productKey       String
+  salesQty         Float    @default(0)
+  wasteQty         Float    @default(0)
+  openingQty       Float    @default(0)
+  supplyQty        Float    @default(0)
+  closingQty       Float    @default(0)
+  ma7_salesQty     Float?
+  ma14_salesQty    Float?
+  leadTimeDays     Int?
+  safetyStock      Float?
+  reorderPoint     Float?
+  parLevel         Float?
+  currentIntervalId String?
+  intervalDayIndex  Int?
+  createdAt        DateTime @default(now())
+
+  @@unique([date, outletName, productKey])
+}
+
+/// System-generated supply recommendations
+model SupplyRecommendation {
+  id            String   @id @default(cuid())
+  date          String   // YYYY-MM-DD
+  outletName    String
+  productKey    String
+  action        String
+  reason        String
+  suggestedQty  Float    @default(0)
+  confidence    Float    @default(0)
+  createdAt     DateTime @default(now())
+
+  @@unique([date, outletName, productKey])
+}
+
+/// Performance across supply intervals (between supplies)
+model SupplyIntervalPerformance {
+  id               String   @id @default(cuid())
+  outletName       String
+  productKey       String
+  startSupplyId    String
+  endSupplyId      String?
+  startedAt        DateTime
+  endedAt          DateTime?
+  openingQty       Float    @default(0)
+  addlSupplyQty    Float    @default(0)
+  salesQty         Float    @default(0)
+  wasteQty         Float    @default(0)
+  closingQty       Float    @default(0)
+  stockoutEvents   Int      @default(0)
+  avgDailyVelocity Float    @default(0)
+  sellThroughPct   Float    @default(0)
+  revenue          Float    @default(0)
+  costOfGoods      Float    @default(0)
+  grossProfit      Float    @default(0)
+  gpPct            Float    @default(0)
+  depositExpected  Float    @default(0)
+  depositActual    Float    @default(0)
+  depositGap       Float    @default(0)
+  priceChanges     Int      @default(0)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now())
+
+  @@unique([outletName, productKey, startSupplyId])
+}
+
+/// Day-close tracking per outlet/day (separate from legacy ActivePeriod)
+model DayClosePeriod {
+  id           String   @id @default(cuid())
+  outletName   String
+  businessDate String   // YYYY-MM-DD
+  status       String   // OPEN|SUBMITTED|LOCKED
+  submittedAt  DateTime?
+  lockedAt     DateTime?
+  lockedBy     String?
+  closingNotes String?
+  closingHash  String?
+  createdAt    DateTime @default(now())
+
+  @@unique([outletName, businessDate])
 }

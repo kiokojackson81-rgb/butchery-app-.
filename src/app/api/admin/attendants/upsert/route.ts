@@ -120,6 +120,8 @@ type CleanPerson = {
   name: string;
   active: boolean;
   outlet?: string;
+  salaryAmount?: number;
+  salaryFrequency?: "daily" | "weekly" | "monthly";
 };
 
 export async function POST(req: Request) {
@@ -150,6 +152,11 @@ export async function POST(req: Request) {
         name: typeof p?.name === "string" ? p.name.trim() : "",
         active: p?.active !== false,
         outlet: typeof p?.outlet === "string" ? p.outlet.trim() || undefined : undefined,
+        salaryAmount: Number.isFinite(p?.salaryAmount) ? Number(p?.salaryAmount) : undefined,
+        salaryFrequency: typeof p?.salaryFrequency === "string" ? ((): any => {
+          const f = String(p?.salaryFrequency || "").toLowerCase();
+          return f === "weekly" || f === "monthly" ? f : f === "daily" ? "daily" : undefined;
+        })() : undefined,
       };
 
       cleanByCode.set(canonical, record);
@@ -178,6 +185,10 @@ export async function POST(req: Request) {
         active: entry.active,
       };
       if (entry.outlet) base.outlet = entry.outlet;
+      if (entry.role === "attendant") {
+        if (typeof entry.salaryAmount === "number") base.salaryAmount = entry.salaryAmount;
+        if (entry.salaryFrequency) base.salaryFrequency = entry.salaryFrequency;
+      }
       return base;
     });
 
@@ -234,12 +245,23 @@ export async function POST(req: Request) {
           if (existing) {
             const updated = await (prisma as any).attendant.update({
               where: { id: existing.id },
-              data: { name: entry.name || existing.name, outletId },
+              data: {
+                name: entry.name || existing.name,
+                outletId,
+                ...(typeof entry.salaryAmount === "number" ? { salaryAmount: entry.salaryAmount } : {}),
+                ...(entry.salaryFrequency ? { salaryFrequency: entry.salaryFrequency } : {}),
+              },
             });
             attId = updated?.id;
           } else {
             const created = await (prisma as any).attendant.create({
-              data: { name: entry.name || "Attendant", loginCode: code, outletId },
+              data: {
+                name: entry.name || "Attendant",
+                loginCode: code,
+                outletId,
+                salaryAmount: typeof entry.salaryAmount === "number" ? entry.salaryAmount : 0,
+                salaryFrequency: entry.salaryFrequency ?? "daily",
+              },
             }).catch(() => null);
             attId = created?.id;
           }

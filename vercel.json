@@ -30,6 +30,11 @@
       "path": "/api/wa/jobs/supervisor-commission-daily",
       "schedule": "35 18 * * *"
     }
+    ,
+    {
+      "path": "/api/wa/jobs/nightly-compute",
+      "schedule": "0 20 * * *"
+    }
   ],
   "routes": [
     { "src": "/api/whatsapp/webhook", "dest": "/api/wa/webhook" }

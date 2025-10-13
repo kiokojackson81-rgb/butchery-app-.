@@ -30,7 +30,7 @@ type FixedExpense = {
   id: string;
   name: string;        // "Rent", "Electricity", ...
   amount: number;      // Ksh
-  frequency: "daily" | "monthly";
+  frequency: "daily" | "weekly" | "monthly";
   active: boolean;
 };
 
@@ -50,6 +50,9 @@ type PersonCode = {
   code: string;
   role: "attendant" | "supervisor" | "supplier";
   active: boolean;
+  // Optional payroll fields (attendants only)
+  salaryAmount?: number;
+  salaryFrequency?: "daily" | "weekly" | "monthly";
 };
 
 /** Attendant scope (code -> outlet + product keys) */
@@ -364,6 +367,10 @@ export default function AdminPage() {
         code: c.code.trim(),
         name: c.name,
         active: c.active,
+        ...(c.role === "attendant" ? {
+          salaryAmount: typeof c.salaryAmount === 'number' ? c.salaryAmount : undefined,
+          salaryFrequency: c.salaryFrequency,
+        } : {}),
       }));
     if (!payload.length) {
       alert('Add at least one code before saving.');
@@ -405,6 +412,8 @@ export default function AdminPage() {
           code: typeof row?.code === 'string' ? row.code : '',
           role: row?.role === 'supervisor' || row?.role === 'supplier' ? row.role : 'attendant',
           active: row?.active === false ? false : true,
+          salaryAmount: typeof row?.salaryAmount === 'number' ? row.salaryAmount : prev?.salaryAmount,
+          salaryFrequency: typeof row?.salaryFrequency === 'string' ? (row.salaryFrequency as any) : prev?.salaryFrequency,
         } as PersonCode;
       });
 
@@ -934,6 +943,8 @@ export default function AdminPage() {
                     <th>Login Code</th>
                     <th>Phone (WhatsApp)</th>
                     <th>Role</th>
+                    <th>Salary (Ksh)</th>
+                    <th>Freq</th>
                     <th>Status</th>
                     <th style={{width:1}}></th>
                   </tr>
@@ -982,6 +993,41 @@ export default function AdminPage() {
                           <option value="supervisor">supervisor</option>
                           <option value="supplier">supplier</option>
                         </select>
+                      </td>
+                      {/* Salary (attendants only) */}
+                      <td>
+                        {c.role === "attendant" ? (
+                          <input
+                            className="input-mobile border rounded-xl p-2 w-32"
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={typeof c.salaryAmount === 'number' ? c.salaryAmount : '' as any}
+                            placeholder="—"
+                            onChange={(e)=>{
+                              const val = e.target.value === '' ? undefined : Number(e.target.value);
+                              updateCode(c.id, { salaryAmount: typeof val === 'number' && !Number.isNaN(val) ? val : undefined });
+                            }}
+                          />
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {c.role === "attendant" ? (
+                          <select
+                            className="input-mobile border rounded-xl p-2"
+                            value={c.salaryFrequency || ''}
+                            onChange={(e)=>updateCode(c.id, { salaryFrequency: e.target.value as any })}
+                          >
+                            <option value="">—</option>
+                            <option value="daily">daily</option>
+                            <option value="weekly">weekly</option>
+                            <option value="monthly">monthly</option>
+                          </select>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
                       </td>
                       <td>
                         <label className="inline-flex items-center gap-2 text-sm">
@@ -1543,6 +1589,7 @@ export default function AdminPage() {
                               value={e.frequency}
                               onChange={ev => updateExpense(e.id, { frequency: ev.target.value as FixedExpense["frequency"] })}>
                         <option value="daily">daily</option>
+                        <option value="weekly">weekly</option>
                         <option value="monthly">monthly</option>
                       </select>
                     </td>

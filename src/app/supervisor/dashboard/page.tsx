@@ -84,6 +84,11 @@ export default function SupervisorDashboard() {
   const [pricesFilter, setPricesFilter] = useState<string>("");
   const [showInactive, setShowInactive] = useState<boolean>(false);
 
+  // Day-close status (per outlet/date)
+  const [dayStatus, setDayStatus] = useState<{ status: string; submittedAt?: string; lockedAt?: string } | null>(null);
+  const [dayBusy, setDayBusy] = useState(false);
+  const [dayErr, setDayErr] = useState<string | null>(null);
+
   // Commissions state (supervisor view)
   type CommissionRow = { id: string; date: string; outletName: string; salesKsh: number; expensesKsh: number; wasteKsh: number; profitKsh: number; commissionRate: number; commissionKsh: number; status?: string | null; note?: string | null };
   const [commRows, setCommRows] = useState<CommissionRow[]>([]);
@@ -151,6 +156,50 @@ export default function SupervisorDashboard() {
     if (tab !== "commissions") return;
     refreshCommissions();
   }, [tab, date, selectedOutlet, commStatus]);
+
+  // Day status loader
+  async function refreshDayStatus() {
+    try {
+      setDayErr(null);
+      if (!date || selectedOutlet === "__ALL__") { setDayStatus(null); return; }
+      const qs = new URLSearchParams({ date, outlet: selectedOutlet });
+      const r = await fetch(`/api/day/status?${qs.toString()}`, { cache: "no-store" });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || "Failed");
+      setDayStatus(j.row || null);
+    } catch (e: any) {
+      setDayErr(String(e?.message || e)); setDayStatus(null);
+    }
+  }
+  useEffect(() => { refreshDayStatus(); }, [date, selectedOutlet]);
+
+  async function submitCurrentDay() {
+    if (!date || selectedOutlet === "__ALL__") return;
+    try {
+      setDayBusy(true); setDayErr(null);
+      const r = await fetch(`/api/day/submit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet: selectedOutlet, businessDate: date }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || "Submit failed");
+      await refreshDayStatus();
+    } catch (e: any) {
+      setDayErr(String(e?.message || e));
+    } finally { setDayBusy(false); }
+  }
+
+  async function lockCurrentDay() {
+    if (!date || selectedOutlet === "__ALL__") return;
+    if (!confirm(`Lock ${selectedOutlet} — ${date}? This finalizes the day.`)) return;
+    try {
+      setDayBusy(true); setDayErr(null);
+      const lockedBy = (typeof window !== 'undefined' ? (sessionStorage.getItem('supervisor_code') || sessionStorage.getItem('supervisor_name') || 'supervisor') : 'supervisor');
+      const r = await fetch(`/api/day/lock`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet: selectedOutlet, businessDate: date, lockedBy }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || "Lock failed");
+      await refreshDayStatus();
+    } catch (e: any) {
+      setDayErr(String(e?.message || e));
+    } finally { setDayBusy(false); }
+  }
 
   // Load review lists + outlets
   useEffect(() => {
@@ -508,8 +557,19 @@ export default function SupervisorDashboard() {
           <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={logout}>
             Logout
           </button>
+          {selectedOutlet !== "__ALL__" && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-xs text-gray-600">Status:</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${dayStatus?.status === 'LOCKED' ? 'bg-green-600 text-white' : dayStatus?.status === 'SUBMITTED' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-white'}`}>
+                {dayStatus?.status || 'OPEN'}
+              </span>
+              <button disabled={dayBusy || dayStatus?.status === 'SUBMITTED' || dayStatus?.status === 'LOCKED'} onClick={submitCurrentDay} className="btn-mobile px-3 py-2 rounded-xl border text-sm disabled:opacity-50">Submit Day</button>
+              <button disabled={dayBusy || dayStatus?.status === 'LOCKED'} onClick={lockCurrentDay} className="btn-mobile px-3 py-2 rounded-xl border text-sm disabled:opacity-50">Lock Day</button>
+            </div>
+          )}
         </div>
       </header>
+      {dayErr && <div className="text-red-600 text-sm mb-3">{dayErr}</div>}
 
       {/* KPI Summary */}
       <section className="rounded-2xl border p-4 mb-6">
