@@ -855,7 +855,10 @@ export default function AdminPage() {
         <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
         <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
         <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
-        <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Backup / Restore</TabBtn>
+  {/* Data tab contains Backup/Restore and admin tools */}
+  <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
+  {/* Quick link to Performance dashboards (admin guarded page) */}
+  <a href="/admin/performance" className="px-3 py-2 rounded-2xl text-sm border" title="View performance dashboards">Performance</a>
         {/* Quick link to WhatsApp management */}
         <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
         {/* Quick link to Supply History (role-wide) */}

@@ -551,6 +551,7 @@ export default function SupervisorDashboard() {
             ))}
           </select>
           {/* Thin persistence controls removed: now automatic */}
+          <a className="btn-mobile px-3 py-2 rounded-xl border text-sm" href="/supervisor/performance" title="Open performance dashboards" target="_self">Performance</a>
           <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={downloadPDF}>
             Download PDF
           </button>

@@ -43,6 +43,20 @@ export default function PerformancePage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  function pdfUrl(): string {
+    const sp = new URLSearchParams();
+    // For outlets/attendants tabs: use range; for waste: include date
+    if (tab === 'waste') {
+      if (date) sp.set('date', date);
+    } else {
+      if (from) sp.set('from', from);
+      if (to) sp.set('to', to);
+    }
+    if (outlet) sp.set('outlet', outlet);
+    if (tab === 'intervals' && product) sp.set('product', product);
+    return `/api/performance/pdf?${sp.toString()}`;
+  }
+
   async function loadOutlets() {
     setLoading(true); setErr(null);
     try {
@@ -122,6 +136,7 @@ export default function PerformancePage() {
           {tab === 'intervals' && (
             <input className="input-mobile border rounded-xl p-2 text-sm w-40" placeholder="Product key (optional)" value={product} onChange={e=>setProduct(e.target.value)} />
           )}
+          <a href={pdfUrl()} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl border text-sm">Download PDF</a>
         </div>
       </header>
 
