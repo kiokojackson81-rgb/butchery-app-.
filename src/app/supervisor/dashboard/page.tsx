@@ -89,7 +89,13 @@ export default function SupervisorDashboard() {
   const [commStatus, setCommStatus] = useState<string>("");
   const [commLoading, setCommLoading] = useState(false);
   const [commError, setCommError] = useState<string | null>(null);
-  const [commSort, setCommSort] = useState<{ key: keyof CommissionRow | "date" | "outletName" | "commissionKsh"; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
+  const [commSort, setCommSort] = useState<{ key: keyof CommissionRow | "date" | "outletName" | "commissionKsh" | "profitKsh" | "status"; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
+  const [commRange, setCommRange] = useState<"day" | "week" | "period">("period");
+
+  function ymdToDate(s: string): Date { return new Date(`${s}T00:00:00.000Z`); }
+  function toYMD(d: Date): string { return d.toISOString().slice(0,10); }
+  function startOfISOWeek(d: Date): Date { const dt = new Date(d); const day = dt.getUTCDay() || 7; if (day !== 1) dt.setUTCDate(dt.getUTCDate() - (day - 1)); dt.setUTCHours(0,0,0,0); return dt; }
+  function endOfISOWeek(d: Date): Date { const s = startOfISOWeek(d); const e = new Date(s); e.setUTCDate(s.getUTCDate()+6); return e; }
 
   async function refreshCommissions() {
     try {
@@ -753,6 +759,12 @@ export default function SupervisorDashboard() {
           <div className="flex items-center justify-between mb-3 mobile-scroll-x gap-2">
             <h2 className="font-semibold">My Commissions — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})</h2>
             <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-700">Range</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={commRange} onChange={(e)=>setCommRange(e.target.value as any)}>
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+                <option value="period">Period</option>
+              </select>
               <label className="text-xs text-gray-700">Status</label>
               <select className="input-mobile border rounded-xl p-2 text-sm" value={commStatus} onChange={(e)=>setCommStatus(e.target.value)}>
                 <option value="">(any)</option>
@@ -764,6 +776,26 @@ export default function SupervisorDashboard() {
             </div>
           </div>
           {commError && <div className="text-red-600 text-sm mb-2">{commError}</div>}
+          {(() => {
+            const dateObj = ymdToDate(date);
+            const d0 = toYMD(dateObj);
+            const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
+            const w0 = toYMD(ws); const w1 = toYMD(we);
+            const inRange = (dstr: string) => {
+              if (commRange === 'period') return true;
+              if (commRange === 'day') return dstr === d0;
+              if (commRange === 'week') return dstr >= w0 && dstr <= w1;
+              return true;
+            };
+            const filtered = commRows.filter(r => inRange(r.date));
+            const totals = filtered.reduce((a,r)=>{ a.sales+=r.salesKsh; a.expenses+=r.expensesKsh; a.waste+=r.wasteKsh; a.profit+=r.profitKsh; a.comm+=r.commissionKsh; return a; }, { sales:0, expenses:0, waste:0, profit:0, comm:0 });
+            return (
+              <div className="text-sm text-gray-700 mb-2">
+                Totals — Sales: Ksh {fmt(totals.sales)} · Expenses: Ksh {fmt(totals.expenses)} · Waste: Ksh {fmt(totals.waste)} · Profit: Ksh {fmt(totals.profit)} · Commission: Ksh {fmt(totals.comm)}
+                {commRange === 'week' && <span className="ml-2 text-gray-500">Week: {w0} → {w1}</span>}
+              </div>
+            );
+          })()}
           <div className="table-wrap">
             <table className="w-full text-sm border">
               <thead>
@@ -773,37 +805,58 @@ export default function SupervisorDashboard() {
                   <th className="p-2">Sales</th>
                   <th className="p-2">Expenses</th>
                   <th className="p-2">Waste</th>
-                  <th className="p-2">Profit</th>
+                  <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'profitKsh', dir: s.key==='profitKsh' && s.dir==='asc' ? 'desc' : 'asc' }))}>Profit</th>
                   <th className="p-2">Rate</th>
                   <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'commissionKsh', dir: s.key==='commissionKsh' && s.dir==='asc' ? 'desc' : 'asc' }))}>Commission</th>
-                  <th className="p-2">Status</th>
+                  <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'status', dir: s.key==='status' && s.dir==='asc' ? 'desc' : 'asc' }))}>Status</th>
                   <th className="p-2">Note</th>
                 </tr>
               </thead>
               <tbody>
-                {commRows.length === 0 ? (
-                  <tr><td className="p-2 text-gray-500" colSpan={10}>No commission entries.</td></tr>
-                ) : (
-                  [...commRows].sort((a,b)=>{
+                {(() => {
+                  const dateObj = ymdToDate(date);
+                  const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
+                  const w0 = toYMD(ws); const w1 = toYMD(we);
+                  const inRange = (dstr: string) => {
+                    if (commRange === 'period') return true;
+                    if (commRange === 'day') return dstr === toYMD(dateObj);
+                    if (commRange === 'week') return dstr >= w0 && dstr <= w1;
+                    return true;
+                  };
+                  const visible = commRows.filter(r => inRange(r.date));
+                  if (visible.length === 0) return (<tr><td className="p-2 text-gray-500" colSpan={10}>No commission entries.</td></tr>);
+                  const sorted = [...visible].sort((a,b)=>{
                     const dir = commSort.dir === 'asc' ? 1 : -1;
                     const ka: any = (a as any)[commSort.key];
                     const kb: any = (b as any)[commSort.key];
+                    if (ka == null && kb != null) return -1*dir;
+                    if (ka != null && kb == null) return 1*dir;
                     if (ka < kb) return -1*dir; if (ka > kb) return 1*dir; return 0;
-                  }).map(r => (
-                    <tr key={r.id} className="border-b">
-                      <td className="p-2">{r.date}</td>
-                      <td className="p-2">{r.outletName}</td>
-                      <td className="p-2">Ksh {fmt(r.salesKsh)}</td>
-                      <td className="p-2">Ksh {fmt(r.expensesKsh)}</td>
-                      <td className="p-2">Ksh {fmt(r.wasteKsh)}</td>
-                      <td className="p-2">Ksh {fmt(r.profitKsh)}</td>
-                      <td className="p-2">{(r.commissionRate*100).toFixed(1)}%</td>
-                      <td className="p-2">Ksh {fmt(r.commissionKsh)}</td>
-                      <td className="p-2">{r.status || 'calculated'}</td>
-                      <td className="p-2">{r.note || '—'}</td>
-                    </tr>
-                  ))
-                )}
+                  });
+                  const chip = (s?: string | null) => {
+                    const st = String(s || 'calculated');
+                    const cls = st === 'paid' ? 'bg-green-600 text-white' : st === 'approved' ? 'bg-emerald-600 text-white' : st === 'adjusted' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-white';
+                    return <span className={`text-[11px] px-2 py-0.5 rounded-full ${cls}`}>{st}</span>;
+                  };
+                  return (
+                    <>
+                      {sorted.map(r => (
+                        <tr key={r.id} className="border-b">
+                          <td className="p-2">{r.date}</td>
+                          <td className="p-2">{r.outletName}</td>
+                          <td className="p-2">Ksh {fmt(r.salesKsh)}</td>
+                          <td className="p-2">Ksh {fmt(r.expensesKsh)}</td>
+                          <td className="p-2">Ksh {fmt(r.wasteKsh)}</td>
+                          <td className="p-2">Ksh {fmt(r.profitKsh)}</td>
+                          <td className="p-2">{(r.commissionRate*100).toFixed(1)}%</td>
+                          <td className="p-2">Ksh {fmt(r.commissionKsh)}</td>
+                          <td className="p-2">{chip(r.status)}</td>
+                          <td className="p-2">{r.note || '—'}</td>
+                        </tr>
+                      ))}
+                    </>
+                  );
+                })()}
               </tbody>
             </table>
           </div>
@@ -928,17 +981,15 @@ function QuickClosingUpdate({ date, outlet }: { date: string; outlet: string }) 
         cache: "no-store",
         body: JSON.stringify({ date, outlet, itemKey, closingQty: closing === "" ? undefined : Number(closing), wasteQty: waste === "" ? undefined : Number(waste), reason }),
       });
-      const j = await res.json().catch(()=>({ ok: false }));
-      if (!j?.ok) throw new Error(j?.error || "Failed");
-      alert("Updated.");
-      setItemKey(""); setClosing(""); setWaste(""); setReason("");
+      if (!res.ok) throw new Error(await res.text());
+      alert("Saved");
     } catch (e: any) {
-      alert(e?.message || "Update failed");
+      alert(e?.message || String(e));
     }
   };
   return (
-    <div className="flex flex-wrap items-center gap-2 mobile-scroll-x">
-      <input className="input-mobile border rounded-xl p-2 text-sm w-40" placeholder="item key (e.g., beef)" value={itemKey} onChange={(e)=>setItemKey(e.target.value)} />
+    <div className="flex items-center gap-2 flex-wrap">
+      <input className="input-mobile border rounded-xl p-2 text-sm w-28" placeholder="item key (e.g., beef)" value={itemKey} onChange={(e)=>setItemKey(e.target.value)} />
       <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="closing" value={closing} onChange={(e)=>setClosing(e.target.value)} />
       <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="waste" value={waste} onChange={(e)=>setWaste(e.target.value)} />
       <input className="input-mobile border rounded-xl p-2 text-sm w-72" placeholder="reason (optional)" value={reason} onChange={(e)=>setReason(e.target.value)} />
@@ -946,7 +997,6 @@ function QuickClosingUpdate({ date, outlet }: { date: string; outlet: string }) 
     </div>
   );
 }
-
 /* ===== Review Table (existing) ===== */
 function ReviewTable({
   title,
@@ -959,57 +1009,52 @@ function ReviewTable({
 }) {
   return (
     <section className="rounded-2xl border p-4">
-      <h2 className="font-semibold mb-3">{title}</h2>
-      <table className="w-full text-sm border">
-        <thead>
-          <tr className="text-left border-b">
-            <th className="p-2">Date</th>
-            <th>Outlet</th>
-            <th>Item</th>
-            <th>Amount</th>
-            <th>Note</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.length === 0 && (
-            <tr>
-              <td colSpan={7} className="p-2 text-gray-500">
-                No items to review
-              </td>
+      <h2 className="font-semibold mb-2">{title}</h2>
+      <div className="table-wrap">
+        <table className="w-full text-sm border">
+          <thead>
+            <tr className="text-left border-b">
+              <th className="p-2">Date</th>
+              <th className="p-2">Outlet</th>
+              <th className="p-2">Item</th>
+              <th className="p-2">Amount</th>
+              <th className="p-2">Note</th>
+              <th className="p-2">State</th>
+              <th className="p-2">Actions</th>
             </tr>
-          )}
-          {data.map((r) => (
-            <tr key={r.id} className="border-b">
-              <td className="p-2">{r.date}</td>
-              <td className="p-2">{r.outlet}</td>
-              <td className="p-2">{r.item || "—"}</td>
-              <td className="p-2">Ksh {fmt(r.amount)}</td>
-              <td className="p-2">{r.note || "—"}</td>
-              <td className="p-2">{r.state}</td>
-              <td className="p-2 flex gap-2">
-                {r.state === "pending" && (
-                  <>
-                    <button
-                      onClick={() => onAction(r.id, "approved")}
-                      className="text-xs border rounded px-2 py-1 bg-green-600 text-white"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => onAction(r.id, "rejected")}
-                      className="text-xs border rounded px-2 py-1 bg-red-600 text-white"
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((r) => (
+              <tr key={r.id} className="border-b">
+                <td className="p-2">{r.date}</td>
+                <td className="p-2">{r.outlet}</td>
+                <td className="p-2">{r.item || "—"}</td>
+                <td className="p-2">Ksh {fmt(r.amount)}</td>
+                <td className="p-2">{r.note || "—"}</td>
+                <td className="p-2">{r.state}</td>
+                <td className="p-2 flex gap-2">
+                  {r.state === "pending" && (
+                    <>
+                      <button
+                        onClick={() => onAction(r.id, "approved")}
+                        className="text-xs border rounded px-2 py-1 bg-green-600 text-white"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => onAction(r.id, "rejected")}
+                        className="text-xs border rounded px-2 py-1 bg-red-600 text-white"
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
