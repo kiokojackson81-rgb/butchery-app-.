@@ -134,26 +134,26 @@ export default function AdminCommissionsPage() {
     <main className="mobile-container p-6 max-w-7xl mx-auto">
       <h1 className="text-2xl font-semibold mb-2">Supervisor Commissions</h1>
       {period ? (
-        <p className="text-sm text-gray-600 mb-4">Period: {period.start} → {period.end}</p>
+        <p className="text-sm text-gray-300 mb-4">Period: {period.start} → {period.end}</p>
       ) : null}
 
       <section className="rounded-2xl border p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="block text-xs text-gray-600">Date (for period)</label>
-            <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="border rounded px-2 py-1" />
+            <label className="block text-xs text-gray-300">Date (for period)</label>
+            <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="border rounded px-2 py-1 bg-transparent" />
           </div>
           <div>
-            <label className="block text-xs text-gray-600">Supervisor Code</label>
-            <input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="e.g. SUP123" className="border rounded px-2 py-1" />
+            <label className="block text-xs text-gray-300">Supervisor Code</label>
+            <input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="e.g. SUP123" className="border rounded px-2 py-1 bg-transparent" />
           </div>
           <div>
-            <label className="block text-xs text-gray-600">Outlet</label>
-            <input value={outlet} onChange={(e) => setOutlet(e.target.value)} placeholder="e.g. Bright" className="border rounded px-2 py-1" />
+            <label className="block text-xs text-gray-300">Outlet</label>
+            <input value={outlet} onChange={(e) => setOutlet(e.target.value)} placeholder="e.g. Bright" className="border rounded px-2 py-1 bg-transparent" />
           </div>
           <div>
-            <label className="block text-xs text-gray-600">Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="border rounded px-2 py-1">
+            <label className="block text-xs text-gray-300">Status</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="border rounded px-2 py-1 bg-transparent">
               <option value="">(any)</option>
               <option value="calculated">calculated</option>
               <option value="adjusted">adjusted</option>
@@ -165,22 +165,22 @@ export default function AdminCommissionsPage() {
           <a href={pdfUrl()} target="_blank" rel="noreferrer" className="bg-gray-700 text-white px-3 py-2 rounded">Download PDF</a>
           <a href={csvUrl()} target="_blank" rel="noreferrer" className="bg-gray-700 text-white px-3 py-2 rounded">Download CSV</a>
           <div>
-            <label className="block text-xs text-gray-600">Note (optional)</label>
-            <input value={bulkNote} onChange={(e)=>setBulkNote(e.target.value)} placeholder="e.g., Paid via M-Pesa REF..." className="border rounded px-2 py-1 w-64" />
+            <label className="block text-xs text-gray-300">Note (optional)</label>
+            <input value={bulkNote} onChange={(e)=>setBulkNote(e.target.value)} placeholder="e.g., Paid via M-Pesa REF..." className="border rounded px-2 py-1 w-64 bg-transparent" />
           </div>
           <button onClick={markPaid} disabled={loading || selectedIds.length === 0} className="bg-green-600 text-white px-3 py-2 rounded">Mark Paid ({selectedIds.length})</button>
           <button onClick={() => markStatus('approved')} disabled={loading || selectedIds.length === 0} className="bg-emerald-600 text-white px-3 py-2 rounded">Mark Approved</button>
           <button onClick={() => markStatus('calculated')} disabled={loading || selectedIds.length === 0} className="bg-slate-600 text-white px-3 py-2 rounded">Reset to Calculated</button>
         </div>
-        {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+        {error ? <p className="mt-2 text-sm text-red-500">{error}</p> : null}
       </section>
 
       <section className="rounded-2xl border p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm text-gray-700">
+          <div className="text-sm text-gray-300">
             Totals — Sales: Ksh {totals.sales.toLocaleString()} · Expenses: Ksh {totals.expenses.toLocaleString()} · Waste: Ksh {totals.waste.toLocaleString()} · Profit: Ksh {totals.profit.toLocaleString()} · Commission: Ksh {totals.comm.toLocaleString()}
             {selectedIds.length > 0 && (
-              <span className="ml-3 text-slate-600">Selected Commission: Ksh {selectedTotals.comm.toLocaleString()}</span>
+              <span className="ml-3 text-gray-300">Selected Commission: Ksh {selectedTotals.comm.toLocaleString()}</span>
             )}
           </div>
           <div>
@@ -189,9 +189,9 @@ export default function AdminCommissionsPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table className="w-full text-sm border">
+          <table className="w-full text-sm border border-white/10">
             <thead>
-              <tr className="bg-gray-100 text-left">
+              <tr className="text-left bg-white/10 text-white">
                 <th className="p-2">Sel</th>
                 <th className="p-2">Date</th>
                 <th className="p-2">Outlet</th>
@@ -209,7 +209,7 @@ export default function AdminCommissionsPage() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-t">
+                <tr key={r.id} className="border-t border-white/10">
                   <td className="p-2 align-top"><input type="checkbox" checked={!!selected[r.id]} onChange={(e) => toggle(r.id, e.target.checked)} /></td>
                   <td className="p-2 align-top">{r.date}</td>
                   <td className="p-2 align-top">{r.outletName}</td>
@@ -223,7 +223,7 @@ export default function AdminCommissionsPage() {
                   <td className="p-2 align-top">{r.status || "calculated"}</td>
                   <td className="p-2 align-top break-words max-w-[16rem]">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-700">{r.note || "—"}</span>
+                      <span className="text-xs text-gray-300">{r.note || "—"}</span>
                       <button
                         className="text-xs underline"
                         onClick={async () => {

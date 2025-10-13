@@ -67,7 +67,7 @@ export default function SupervisorDashboard() {
 
   /* ========= Tabs (added "supply") ========= */
   const [tab, setTab] = useState<
-    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply" | "prices"
+    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply" | "prices" | "commissions"
   >("waste");
 
   /* ========= Review lists (existing) ========= */
@@ -82,6 +82,36 @@ export default function SupervisorDashboard() {
   const [pricesError, setPricesError] = useState<string | null>(null);
   const [pricesFilter, setPricesFilter] = useState<string>("");
   const [showInactive, setShowInactive] = useState<boolean>(false);
+
+  // Commissions state (supervisor view)
+  type CommissionRow = { id: string; date: string; outletName: string; salesKsh: number; expensesKsh: number; wasteKsh: number; profitKsh: number; commissionRate: number; commissionKsh: number; status?: string | null; note?: string | null };
+  const [commRows, setCommRows] = useState<CommissionRow[]>([]);
+  const [commStatus, setCommStatus] = useState<string>("");
+  const [commLoading, setCommLoading] = useState(false);
+  const [commError, setCommError] = useState<string | null>(null);
+  const [commSort, setCommSort] = useState<{ key: keyof CommissionRow | "date" | "outletName" | "commissionKsh"; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
+
+  async function refreshCommissions() {
+    try {
+      setCommLoading(true); setCommError(null);
+      const code = (typeof window !== 'undefined' ? (sessionStorage.getItem('supervisor_code') || "").trim() : "");
+      const qs = new URLSearchParams();
+      if (date) qs.set('date', date);
+      if (selectedOutlet !== "__ALL__") qs.set('outlet', selectedOutlet);
+      if (commStatus) qs.set('status', commStatus);
+      if (code) qs.set('supervisor', code);
+      const r = await fetch(`/api/commission?${qs.toString()}`, { cache: 'no-store' });
+      const j = await r.json().catch(()=>({ ok: false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setCommRows(Array.isArray(j.rows) ? j.rows : []);
+    } catch (e: any) {
+      setCommError(String(e?.message || e)); setCommRows([]);
+    } finally { setCommLoading(false); }
+  }
+  useEffect(() => {
+    if (tab !== "commissions") return;
+    refreshCommissions();
+  }, [tab, date, selectedOutlet, commStatus]);
 
   // Load review lists + outlets
   useEffect(() => {
@@ -520,6 +550,9 @@ export default function SupervisorDashboard() {
         <TabBtn active={tab === "prices"} onClick={() => setTab("prices")}>
           Prices
         </TabBtn>
+        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")}>
+          Commissions
+        </TabBtn>
       </nav>
 
       {tab === "waste" && (
@@ -712,6 +745,68 @@ export default function SupervisorDashboard() {
             </div>
           )}
           <p className="text-xs text-gray-500 mt-2">Auto-refreshes every 5s.</p>
+        </section>
+      )}
+
+      {tab === "commissions" && (
+        <section className="rounded-2xl border p-4">
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x gap-2">
+            <h2 className="font-semibold">My Commissions — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-700">Status</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={commStatus} onChange={(e)=>setCommStatus(e.target.value)}>
+                <option value="">(any)</option>
+                <option value="calculated">calculated</option>
+                <option value="approved">approved</option>
+                <option value="paid">paid</option>
+              </select>
+              <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={refreshCommissions} disabled={commLoading}>{commLoading ? 'Loading…' : 'Refresh'}</button>
+            </div>
+          </div>
+          {commError && <div className="text-red-600 text-sm mb-2">{commError}</div>}
+          <div className="table-wrap">
+            <table className="w-full text-sm border">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'date', dir: s.key==='date' && s.dir==='asc' ? 'desc' : 'asc' }))}>Date</th>
+                  <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'outletName', dir: s.key==='outletName' && s.dir==='asc' ? 'desc' : 'asc' }))}>Outlet</th>
+                  <th className="p-2">Sales</th>
+                  <th className="p-2">Expenses</th>
+                  <th className="p-2">Waste</th>
+                  <th className="p-2">Profit</th>
+                  <th className="p-2">Rate</th>
+                  <th className="p-2 cursor-pointer" onClick={()=>setCommSort(s=>({ key: 'commissionKsh', dir: s.key==='commissionKsh' && s.dir==='asc' ? 'desc' : 'asc' }))}>Commission</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {commRows.length === 0 ? (
+                  <tr><td className="p-2 text-gray-500" colSpan={10}>No commission entries.</td></tr>
+                ) : (
+                  [...commRows].sort((a,b)=>{
+                    const dir = commSort.dir === 'asc' ? 1 : -1;
+                    const ka: any = (a as any)[commSort.key];
+                    const kb: any = (b as any)[commSort.key];
+                    if (ka < kb) return -1*dir; if (ka > kb) return 1*dir; return 0;
+                  }).map(r => (
+                    <tr key={r.id} className="border-b">
+                      <td className="p-2">{r.date}</td>
+                      <td className="p-2">{r.outletName}</td>
+                      <td className="p-2">Ksh {fmt(r.salesKsh)}</td>
+                      <td className="p-2">Ksh {fmt(r.expensesKsh)}</td>
+                      <td className="p-2">Ksh {fmt(r.wasteKsh)}</td>
+                      <td className="p-2">Ksh {fmt(r.profitKsh)}</td>
+                      <td className="p-2">{(r.commissionRate*100).toFixed(1)}%</td>
+                      <td className="p-2">Ksh {fmt(r.commissionKsh)}</td>
+                      <td className="p-2">{r.status || 'calculated'}</td>
+                      <td className="p-2">{r.note || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>
