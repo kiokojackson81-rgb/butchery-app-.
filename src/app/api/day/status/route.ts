@@ -1,6 +1,7 @@
 // src/app/api/day/status/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isAuthorizedByKey } from "@/lib/apiGuard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,9 @@ export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
+    if (!isAuthorizedByKey(req, "ADMIN_API_KEY")) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
     const { searchParams } = new URL(req.url);
     const outlet = String(searchParams.get("outlet") || searchParams.get("outletName") || "").trim();
     const date = String(searchParams.get("date") || searchParams.get("businessDate") || "").slice(0, 10);

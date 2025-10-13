@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { isAuthorizedByKey } from "@/lib/apiGuard";
 import { computeAllOutletsPerformance } from "@/lib/analytics/performance.service";
 import { computeAllAttendantKPIs } from "@/lib/analytics/attendant-kpi.service";
 import { buildDailyProductSupplyStats, computeSupplyRecommendations } from "@/lib/analytics/supply-insights.service";
@@ -35,13 +36,9 @@ export async function GET(req: Request) {
     const date = (url.searchParams.get("date") || todayISO()).slice(0, 10);
     const outlet = (url.searchParams.get("outlet") || "").trim() || undefined;
 
-    // Optional lightweight protection: require header when CRON_SECRET is set
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-      const key = req.headers.get("x-cron-key") || url.searchParams.get("key") || "";
-      if (key !== cronSecret) {
-        return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-      }
+    // Optional lightweight protection: require header/qs when CRON_SECRET is set
+    if (!isAuthorizedByKey(req, "CRON_SECRET", "x-cron-key", "key")) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
     await runNightly(date, outlet);
