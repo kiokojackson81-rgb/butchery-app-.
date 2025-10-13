@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 import { canonFull } from "@/lib/codeNormalize";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON, removeItem as lsRemoveItem } from "@/utils/safeStorage";
@@ -126,6 +126,7 @@ function seedDefaultExpenses(): FixedExpense[] {
 /** =============== Page =============== */
 export default function AdminPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // ---------- warm welcome (kept) ----------
   const [welcome, setWelcome] = useState<string>("");
@@ -135,6 +136,19 @@ export default function AdminPage() {
   }, []);
 
   const [tab, setTab] = useState<AdminTab>("outlets");
+  // Respect URL ?tab=... and ?opsTab=... on load
+  useEffect(() => {
+    const t = (searchParams.get("tab") || "").toLowerCase();
+    const allowedTabs = new Set<AdminTab>(["outlets","products","pricebook","ops","expenses","performance","data"]);
+    if (allowedTabs.has(t as AdminTab)) {
+      setTab(t as AdminTab);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const opsTabFromURL = useMemo<"supply"|"reports"|"history"|undefined>(() => {
+    const o = (searchParams.get("opsTab") || "").toLowerCase();
+    return o === "supply" || o === "reports" || o === "history" ? (o as any) : undefined;
+  }, [searchParams]);
 
   const [outlets, setOutlets]   = useState<Outlet[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1310,6 +1324,7 @@ export default function AdminPage() {
             outlets={outlets}
             supply={{ supDate, setSupDate, supOutletName, setSupOutletName, ALL, supplyItems, supTotals }}
             reports={{ repDate, setRepDate, repMode, setRepMode, repRows, repTotals, salesByItem, expensesMonitor, profitEstimate, raiseExpenseDispute }}
+            initialOpsTab={opsTabFromURL}
           />
         </section>
       )}
@@ -1620,9 +1635,10 @@ function OpsCombined(props: {
     profitEstimate: { revenue: number; supplyTotal: number; expensesTotal: number; grossProfit: number; netAfterExpenses: number };
     raiseExpenseDispute: (outletName: string) => void;
   };
+  initialOpsTab?: "supply" | "reports" | "history";
 }) {
-  const { outlets, supply, reports } = props;
-  const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history">("supply");
+  const { outlets, supply, reports, initialOpsTab } = props;
+  const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history">(initialOpsTab || "supply");
 
   return (
     <div>
