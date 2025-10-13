@@ -39,8 +39,7 @@ type AdminTab =
   | "outlets"
   | "products"
   | "pricebook"
-  | "supply"
-  | "reports"
+  | "ops"
   | "expenses"
   | "performance"
   | "data";
@@ -854,8 +853,8 @@ export default function AdminPage() {
         <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
         <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
         <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
-        <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
-        <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
+        {/* Combined Ops: Supply View, Reports, Supply History */}
+        <TabBtn active={tab==="ops"}       onClick={() => setTab("ops")}>Supply & Reports</TabBtn>
     <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
     {/* Performance now embedded as a tab */}
     <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
@@ -863,8 +862,6 @@ export default function AdminPage() {
     <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
         {/* Quick link to WhatsApp management */}
         <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
-        {/* Quick link to Supply History (role-wide) */}
-        <a href="/admin/supply-history" className="px-3 py-2 rounded-2xl text-sm border" title="Browse role-wide supply history">Supply History</a>
         {/* Commissions management */}
         <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
       </nav>
@@ -1306,243 +1303,14 @@ export default function AdminPage() {
         </section>
       )}
 
-      {/* ---------- SUPPLY VIEW (read-only) ---------- */}
-      {tab === "supply" && (
+      {/* ---------- OPS (Supply View + Reports + Supply History) ---------- */}
+      {tab === "ops" && (
         <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
-            <h2 className="font-semibold">Supply View</h2>
-            <div className="flex items-center gap-2">
-              <input
-                className="input-mobile border rounded-xl p-2 text-sm"
-                type="date"
-                value={supDate}
-                onChange={(e)=>setSupDate(e.target.value)}
-              />
-              <select
-                className="input-mobile border rounded-xl p-2 text-sm"
-                value={supOutletName}
-                onChange={(e)=>setSupOutletName(e.target.value)}
-              >
-                <option value={ALL}>All outlets</option>
-                {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="table-wrap">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2">Item</th>
-                  <th>Qty</th>
-                  <th>Unit</th>
-                  <th>Buy Price</th>
-                  <th>Total (Ksh)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {supplyItems.length === 0 ? (
-                  <tr><td className="py-3 text-gray-500" colSpan={5}>No opening recorded by Supplier for this date/outlet.</td></tr>
-                ) : (
-                  supplyItems.map((r, i) => (
-                    <tr key={`${r.itemKey}-${i}`} className="border-b">
-                      <td className="py-2">{r.name}</td>
-                      <td>{fmt(r.qty)}</td>
-                      <td>{r.unit}</td>
-                      <td>{fmt(r.buyPrice)}</td>
-                      <td>{fmt(r.amount)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-              {supplyItems.length > 0 && (
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td className="py-2">Totals</td>
-                    <td>{fmt(supTotals.qty)}</td>
-                    <td></td>
-                    <td></td>
-                    <td>{fmt(supTotals.amount)}</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-          <p className="text-xs text-gray-600 mt-2">Read-only mirror of supplier opening for attendants.</p>
-        </section>
-      )}
-
-      {/* ---------- REPORTS (read-only) ---------- */}
-      {tab === "reports" && (
-        <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
-            <h2 className="font-semibold">Reports</h2>
-            <div className="flex items-center gap-2">
-              <input
-                className="input-mobile border rounded-xl p-2 text-sm"
-                type="date"
-                value={repDate}
-                onChange={(e)=>setRepDate(e.target.value)}
-              />
-              <select
-                className="input-mobile border rounded-xl p-2 text-sm"
-                value={repMode}
-                onChange={(e)=>setRepMode(e.target.value as RangeMode)}
-              >
-                <option value="day">Day</option>
-                <option value="week">Week</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Summary per outlet */}
-          <div className="table-wrap mb-6">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2">Outlet</th>
-                  <th>Expected (Ksh)</th>
-                  <th>Deposited (Ksh)</th>
-                  <th>Expenses (Ksh)</th>
-                  <th>Cash At Till (Ksh)</th>
-                  <th>Variance (Ksh)</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                  {repRows.length === 0 ? (
-                    <tr><td className="py-3 text-gray-500" colSpan={7}>No outlets.</td></tr>
-                ) : (
-                  repRows.map(r => (
-                    <tr key={r.outlet} className="border-b">
-                      <td className="py-2">{r.outlet}</td>
-                      <td>{fmt(r.expectedKsh)}</td>
-                      <td>{fmt(r.depositedKsh)}</td>
-                      <td>{fmt(r.expensesKsh)}</td>
-                      <td>{fmt(r.cashAtTill)}</td>
-                      <td className={r.varianceKsh === 0 ? "text-green-700" : r.varianceKsh < 0 ? "text-red-700" : "text-yellow-700"}>
-                        {fmt(r.varianceKsh)}
-                      </td>
-                      <td>
-                        {!r.hasData ? (
-                          <span className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-800">no data</span>
-                        ) : r.varianceKsh < 0 ? (
-                          <span className="px-2 py-1 rounded text-xs bg-red-200 text-red-800">deficit</span>
-                        ) : r.varianceKsh > 0 ? (
-                          <span className="px-2 py-1 rounded text-xs bg-yellow-200 text-yellow-800">excess</span>
-                        ) : (
-                          <span className="px-2 py-1 rounded text-xs bg-green-200 text-green-800">balanced</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-              {repRows.length > 0 && (
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td className="py-2">Totals</td>
-                    <td>{fmt(repTotals.expectedKsh)}</td>
-                    <td>{fmt(repTotals.depositedKsh)}</td>
-                    <td>{fmt(repTotals.expensesKsh)}</td>
-                    <td>{fmt(repTotals.cashAtTill)}</td>
-                    <td>{fmt(repTotals.varianceKsh)}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-
-          {/* Sales by item + waste */}
-          <div className="rounded-xl border p-3 mb-6">
-            <h3 className="font-semibold mb-2">Sales by Item (and Waste)</h3>
-            <div className="table-wrap">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b">
-                    <th className="py-2">Item</th>
-                    <th>Sold Qty</th>
-                    <th>Waste</th>
-                    <th>Unit</th>
-                    <th>Revenue (Ksh)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {salesByItem.length === 0 ? (
-                    <tr><td className="py-3 text-gray-500" colSpan={5}>No data for range.</td></tr>
-                  ) : salesByItem.map(r => (
-                    <tr key={r.key} className="border-b">
-                      <td className="py-2">{r.name}</td>
-                      <td>{fmt(r.soldQty)}</td>
-                      <td>{fmt(r.wasteQty)}</td>
-                      <td>{r.unit}</td>
-                      <td>{fmt(r.revenue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                {salesByItem.length > 0 && (
-                  <tfoot>
-                    <tr className="font-semibold">
-                      <td className="py-2">Totals</td>
-                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.soldQty,0))}</td>
-                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.wasteQty,0))}</td>
-                      <td></td>
-                      <td>{fmt(salesByItem.reduce((a,r)=>a+r.revenue,0))}</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </div>
-
-          {/* Expenses monitor */}
-          <div className="rounded-xl border p-3 mb-6">
-            <h3 className="font-semibold mb-2">Expenses Monitor (range)</h3>
-            <div className="table-wrap">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b">
-                    <th className="py-2">Outlet</th>
-                    <th>Total Expenses (Ksh)</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expensesMonitor.perOutlet.map(row => (
-                    <tr key={row.outlet} className="border-b">
-                      <td className="py-2">{row.outlet}</td>
-                      <td>{fmt(row.total)}</td>
-                      <td>
-                        <button className="btn-mobile border rounded-lg px-2 py-1 text-xs" onClick={()=>raiseExpenseDispute(row.outlet)}>
-                          Dispute/Adjust
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td className="py-2">All outlets</td>
-                    <td>{fmt(expensesMonitor.totalAll)}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-
-          {/* Profit snapshot */}
-          <div className="rounded-xl border p-3">
-            <h3 className="font-semibold mb-2">Profit Snapshot (range)</h3>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <KPI label="Revenue (Ksh)"        value={fmt(profitEstimate.revenue)} />
-              <KPI label="Supply Cost (Ksh)"    value={fmt(profitEstimate.supplyTotal)} />
-              <KPI label="Gross Profit (Ksh)"   value={fmt(profitEstimate.grossProfit)} />
-              <KPI label="Expenses (Ksh)"       value={fmt(profitEstimate.expensesTotal)} />
-              <KPI label="Net After Exp (Ksh)"  value={fmt(profitEstimate.netAfterExpenses)} />
-            </div>
-          </div>
+          <OpsCombined
+            outlets={outlets}
+            supply={{ supDate, setSupDate, supOutletName, setSupOutletName, ALL, supplyItems, supTotals }}
+            reports={{ repDate, setRepDate, repMode, setRepMode, repRows, repTotals, salesByItem, expensesMonitor, profitEstimate, raiseExpenseDispute }}
+          />
         </section>
       )}
 
@@ -1825,3 +1593,441 @@ function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, 
 
 // Lazy client-only import for the embedded Performance tab
 const EmbeddedPerformance = dynamic(() => import("@/components/performance/PerformanceView"), { ssr: false });
+
+/**
+ * Combined Ops component: groups Supply View, Reports, and Supply History under one umbrella with sub-tabs.
+ */
+function OpsCombined(props: {
+  outlets: Outlet[];
+  supply: {
+    supDate: string;
+    setSupDate: (v: string) => void;
+    supOutletName: string;
+    setSupOutletName: (v: string) => void;
+    ALL: string;
+    supplyItems: Array<{ itemKey: string; name: string; unit: Unit; qty: number; buyPrice: number; amount: number }>;
+    supTotals: { qty: number; amount: number };
+  };
+  reports: {
+    repDate: string;
+    setRepDate: (v: string) => void;
+    repMode: "day" | "week";
+    setRepMode: (v: "day" | "week") => void;
+    repRows: Array<{ outlet: string; expectedKsh: number; depositedKsh: number; expensesKsh: number; cashAtTill: number; varianceKsh: number; hasData: boolean }>;
+    repTotals: { expectedKsh: number; depositedKsh: number; expensesKsh: number; cashAtTill: number; varianceKsh: number };
+    salesByItem: Array<{ key: string; name: string; unit: Unit; soldQty: number; wasteQty: number; revenue: number }>;
+    expensesMonitor: { perOutlet: Array<{ outlet: string; total: number }>; totalAll: number };
+    profitEstimate: { revenue: number; supplyTotal: number; expensesTotal: number; grossProfit: number; netAfterExpenses: number };
+    raiseExpenseDispute: (outletName: string) => void;
+  };
+}) {
+  const { outlets, supply, reports } = props;
+  const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history">("supply");
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-4 mobile-scroll-x">
+        <TabBtn active={opsTab === "supply"} onClick={() => setOpsTab("supply")}>Supply View</TabBtn>
+        <TabBtn active={opsTab === "reports"} onClick={() => setOpsTab("reports")}>Reports</TabBtn>
+        <TabBtn active={opsTab === "history"} onClick={() => setOpsTab("history")}>Supply History</TabBtn>
+      </div>
+
+      {opsTab === "supply" && (
+        <section>
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+            <h2 className="font-semibold">Supply View</h2>
+            <div className="flex items-center gap-2">
+              <input
+                className="input-mobile border rounded-xl p-2 text-sm"
+                type="date"
+                value={supply.supDate}
+                onChange={(e)=>supply.setSupDate(e.target.value)}
+              />
+              <select
+                className="input-mobile border rounded-xl p-2 text-sm"
+                value={supply.supOutletName}
+                onChange={(e)=>supply.setSupOutletName(e.target.value)}
+              >
+                <option value={supply.ALL}>All outlets</option>
+                {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="table-wrap">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Item</th>
+                  <th>Qty</th>
+                  <th>Unit</th>
+                  <th>Buy Price</th>
+                  <th>Total (Ksh)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supply.supplyItems.length === 0 ? (
+                  <tr><td className="py-3 text-gray-500" colSpan={5}>No opening recorded by Supplier for this date/outlet.</td></tr>
+                ) : (
+                  supply.supplyItems.map((r, i) => (
+                    <tr key={`${r.itemKey}-${i}`} className="border-b">
+                      <td className="py-2">{r.name}</td>
+                      <td>{fmt(r.qty)}</td>
+                      <td>{r.unit}</td>
+                      <td>{fmt(r.buyPrice)}</td>
+                      <td>{fmt(r.amount)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {supply.supplyItems.length > 0 && (
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">Totals</td>
+                    <td>{fmt(supply.supTotals.qty)}</td>
+                    <td></td>
+                    <td></td>
+                    <td>{fmt(supply.supTotals.amount)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+          <p className="text-xs text-gray-600 mt-2">Read-only mirror of supplier opening for attendants.</p>
+        </section>
+      )}
+
+      {opsTab === "reports" && (
+        <section>
+          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+            <h2 className="font-semibold">Reports</h2>
+            <div className="flex items-center gap-2">
+              <input
+                className="input-mobile border rounded-xl p-2 text-sm"
+                type="date"
+                value={reports.repDate}
+                onChange={(e)=>reports.setRepDate(e.target.value)}
+              />
+              <select
+                className="input-mobile border rounded-xl p-2 text-sm"
+                value={reports.repMode}
+                onChange={(e)=>reports.setRepMode(e.target.value as any)}
+              >
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Summary per outlet */}
+          <div className="table-wrap mb-6">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Outlet</th>
+                  <th>Expected (Ksh)</th>
+                  <th>Deposited (Ksh)</th>
+                  <th>Expenses (Ksh)</th>
+                  <th>Cash At Till (Ksh)</th>
+                  <th>Variance (Ksh)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                  {reports.repRows.length === 0 ? (
+                    <tr><td className="py-3 text-gray-500" colSpan={7}>No outlets.</td></tr>
+                ) : (
+                  reports.repRows.map(r => (
+                    <tr key={r.outlet} className="border-b">
+                      <td className="py-2">{r.outlet}</td>
+                      <td>{fmt(r.expectedKsh)}</td>
+                      <td>{fmt(r.depositedKsh)}</td>
+                      <td>{fmt(r.expensesKsh)}</td>
+                      <td>{fmt(r.cashAtTill)}</td>
+                      <td className={r.varianceKsh === 0 ? "text-green-700" : r.varianceKsh < 0 ? "text-red-700" : "text-yellow-700"}>
+                        {fmt(r.varianceKsh)}
+                      </td>
+                      <td>
+                        {!r.hasData ? (
+                          <span className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-800">no data</span>
+                        ) : r.varianceKsh < 0 ? (
+                          <span className="px-2 py-1 rounded text-xs bg-red-200 text-red-800">deficit</span>
+                        ) : r.varianceKsh > 0 ? (
+                          <span className="px-2 py-1 rounded text-xs bg-yellow-200 text-yellow-800">excess</span>
+                        ) : (
+                          <span className="px-2 py-1 rounded text-xs bg-green-200 text-green-800">balanced</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {reports.repRows.length > 0 && (
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">Totals</td>
+                    <td>{fmt(reports.repTotals.expectedKsh)}</td>
+                    <td>{fmt(reports.repTotals.depositedKsh)}</td>
+                    <td>{fmt(reports.repTotals.expensesKsh)}</td>
+                    <td>{fmt(reports.repTotals.cashAtTill)}</td>
+                    <td>{fmt(reports.repTotals.varianceKsh)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* Sales by item + waste */}
+          <div className="rounded-xl border p-3 mb-6">
+            <h3 className="font-semibold mb-2">Sales by Item (and Waste)</h3>
+            <div className="table-wrap">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Item</th>
+                    <th>Sold Qty</th>
+                    <th>Waste</th>
+                    <th>Unit</th>
+                    <th>Revenue (Ksh)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.salesByItem.length === 0 ? (
+                    <tr><td className="py-3 text-gray-500" colSpan={5}>No data for range.</td></tr>
+                  ) : reports.salesByItem.map(r => (
+                    <tr key={r.key} className="border-b">
+                      <td className="py-2">{r.name}</td>
+                      <td>{fmt(r.soldQty)}</td>
+                      <td>{fmt(r.wasteQty)}</td>
+                      <td>{r.unit}</td>
+                      <td>{fmt(r.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {reports.salesByItem.length > 0 && (
+                  <tfoot>
+                    <tr className="font-semibold">
+                      <td className="py-2">Totals</td>
+                      <td>{fmt(reports.salesByItem.reduce((a,r)=>a+r.soldQty,0))}</td>
+                      <td>{fmt(reports.salesByItem.reduce((a,r)=>a+r.wasteQty,0))}</td>
+                      <td></td>
+                      <td>{fmt(reports.salesByItem.reduce((a,r)=>a+r.revenue,0))}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* Expenses monitor */}
+          <div className="rounded-xl border p-3 mb-6">
+            <h3 className="font-semibold mb-2">Expenses Monitor (range)</h3>
+            <div className="table-wrap">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Outlet</th>
+                    <th>Total Expenses (Ksh)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.expensesMonitor.perOutlet.map(row => (
+                    <tr key={row.outlet} className="border-b">
+                      <td className="py-2">{row.outlet}</td>
+                      <td>{fmt(row.total)}</td>
+                      <td>
+                        <button className="btn-mobile border rounded-lg px-2 py-1 text-xs" onClick={()=>reports.raiseExpenseDispute(row.outlet)}>
+                          Dispute/Adjust
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="py-2">All outlets</td>
+                    <td>{fmt(reports.expensesMonitor.totalAll)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Profit snapshot */}
+          <div className="rounded-xl border p-3">
+            <h3 className="font-semibold mb-2">Profit Snapshot (range)</h3>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <KPI label="Revenue (Ksh)"        value={fmt(reports.profitEstimate.revenue)} />
+              <KPI label="Supply Cost (Ksh)"    value={fmt(reports.profitEstimate.supplyTotal)} />
+              <KPI label="Gross Profit (Ksh)"   value={fmt(reports.profitEstimate.grossProfit)} />
+              <KPI label="Expenses (Ksh)"       value={fmt(reports.profitEstimate.expensesTotal)} />
+              <KPI label="Net After Exp (Ksh)"  value={fmt(reports.profitEstimate.netAfterExpenses)} />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {opsTab === "history" && (
+        <section>
+          <SupplyHistoryEmbed />
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SupplyHistoryEmbed() {
+  type Row = {
+    date: string;
+    outlet: string;
+    itemKey: string;
+    name: string;
+    qty: number;
+    unit: string;
+    buyPrice: number;
+    sellPrice?: number;
+    totalBuy?: number;
+    totalSell?: number;
+    marginKsh?: number;
+  };
+
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const dateNDaysAgoISO = (days: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - days); return d.toISOString().slice(0, 10); };
+
+  const [from, setFrom] = React.useState(dateNDaysAgoISO(6));
+  const [to, setTo] = React.useState(todayISO());
+  const [outlet, setOutlet] = React.useState("");
+  const [sort, setSort] = React.useState<"date_desc"|"date_asc"|"outlet_asc"|"outlet_desc"|"name_asc"|"name_desc">("date_desc");
+  const [rows, setRows] = React.useState<Row[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function load() {
+    try {
+      setLoading(true); setError(null);
+      const qs = new URLSearchParams();
+      if (from) qs.set("from", from);
+      if (to) qs.set("to", to);
+      if (outlet.trim()) qs.set("outlet", outlet.trim());
+      if (sort) qs.set("sort", sort);
+      qs.set("limit", "200");
+      const r = await fetch(`/api/supply/history/all?${qs.toString()}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      const data = (await r.json()) as { ok: boolean; rows: Row[] };
+      if (!data || data.ok !== true) throw new Error("Failed to load");
+      setRows(data.rows || []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const totals = React.useMemo(() => {
+    let qty = 0, buy = 0, sell = 0, margin = 0;
+    for (const r of rows) {
+      qty += Number(r.qty || 0);
+      buy += Number(r.totalBuy || r.qty * r.buyPrice || 0);
+      sell += Number(r.totalSell || (r.sellPrice != null ? r.qty * r.sellPrice : 0));
+      const m = r.sellPrice != null ? (r.qty * (r.sellPrice - r.buyPrice)) : 0;
+      margin += m;
+    }
+    return { qty, buy, sell, margin };
+  }, [rows]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+        <h2 className="font-semibold">Supply History</h2>
+      </div>
+
+      <div className="rounded-2xl border p-3 mb-4">
+        <div className="grid sm:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">From</label>
+            <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={from} onChange={e=>setFrom(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">To</label>
+            <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={to} onChange={e=>setTo(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Outlet</label>
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="All" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Sort</label>
+            <select className="input-mobile border rounded-xl p-2 w-full" value={sort} onChange={e=>setSort(e.target.value as any)}>
+              <option value="date_desc">Date ↓</option>
+              <option value="date_asc">Date ↑</option>
+              <option value="outlet_asc">Outlet A→Z</option>
+              <option value="outlet_desc">Outlet Z→A</option>
+              <option value="name_asc">Product A→Z</option>
+              <option value="name_desc">Product Z→A</option>
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button className="btn-mobile px-3 py-2 rounded-xl border w-full" onClick={load} disabled={loading}>Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid sm:grid-cols-4 gap-3 mb-4">
+        <KPI label="Total Qty" value={fmt(totals.qty)} />
+        <KPI label="Total Buy (Ksh)" value={`Ksh ${fmt(totals.buy)}`} />
+        <KPI label="Total Sell (Ksh)" value={`Ksh ${fmt(totals.sell)}`} />
+        <KPI label="Margin (Ksh)" value={`Ksh ${fmt(totals.margin)}`} />
+      </div>
+
+      <div className="table-wrap">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left border-b">
+              <th className="py-2">Date</th>
+              <th>Outlet</th>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Unit</th>
+              <th>Buy/Unit</th>
+              <th>Sell/Unit</th>
+              <th>Total Buy</th>
+              <th>Total Sell</th>
+              <th>Margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {error && (
+              <tr><td className="py-2 text-red-700" colSpan={10}>{error}</td></tr>
+            )}
+            {!error && rows.length === 0 && (
+              <tr><td className="py-2 text-gray-500" colSpan={10}>No records.</td></tr>
+            )}
+            {rows.map((r, i) => (
+              <tr key={`${r.date}-${r.outlet}-${r.itemKey}-${i}`} className="border-b">
+                <td className="py-2 whitespace-nowrap">{r.date}</td>
+                <td>{r.outlet}</td>
+                <td>{r.name}</td>
+                <td>{fmt(r.qty)}</td>
+                <td>{r.unit}</td>
+                <td>Ksh {fmt(r.buyPrice)}</td>
+                <td>{r.sellPrice != null ? `Ksh ${fmt(r.sellPrice)}` : "—"}</td>
+                <td>{r.totalBuy != null ? `Ksh ${fmt(r.totalBuy)}` : `Ksh ${fmt(r.qty * r.buyPrice)}`}</td>
+                <td>{r.totalSell != null ? `Ksh ${fmt(r.totalSell)}` : (r.sellPrice != null ? `Ksh ${fmt(r.qty * r.sellPrice)}` : "—")}</td>
+                <td>{r.sellPrice != null ? `Ksh ${fmt(r.qty * (r.sellPrice - r.buyPrice))}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-500 mt-3">
+        Note: Supplier filter is not shown here because opening rows don’t store supplier attribution. For supplier-submitted orders, use supply.create views.
+      </p>
+    </div>
+  );
+}
