@@ -69,12 +69,12 @@ export async function upsertAndNotifySupervisorCommission(date: string, outletNa
   if (!supervisors.length) return; // nothing to notify
 
   const { salesKsh, expensesKsh, wasteKsh, profitKsh } = await computeOutletProfit(date, outletName);
-  const { key: periodKey } = getCommissionPeriodFor(date);
+  const { start: periodStart, end: periodEnd, key: periodKey } = getCommissionPeriodFor(date);
   const rateDefault = 0.10;
   const commissionKsh = Math.max(0, Math.round(profitKsh * rateDefault));
 
   await Promise.allSettled(supervisors.map(async (s) => {
-    const rec = await (prisma as any).supervisorCommission.upsert({
+  const rec = await (prisma as any).supervisorCommission.upsert({
       where: { /* no unique compound; emulate via find+create/update */ id: "" as any },
       // Workaround: manual upsert using findFirst then create/update
     } as any).catch(async () => {
@@ -85,6 +85,15 @@ export async function upsertAndNotifySupervisorCommission(date: string, outletNa
       return (prisma as any).supervisorCommission.create({ data: { date, outletName, supervisorCode: s.code ?? null, supervisorPhone: s.phoneE164 || null, salesKsh, expensesKsh, wasteKsh, profitKsh, commissionRate: rateDefault, commissionKsh, periodKey, status: "calculated" } });
     });
 
+    // Compute period-to-date commission "so far" for this supervisor across outlets
+    let ptdTotal = 0;
+    try {
+      if (s.code) {
+        const ptdRows = await (prisma as any).supervisorCommission.findMany({ where: { periodKey, supervisorCode: s.code } });
+        ptdTotal = (ptdRows || []).reduce((a: number, r: any) => a + (Number(r?.commissionKsh) || 0), 0);
+      }
+    } catch {}
+
     // Build WhatsApp message
     const name = s.code || "Supervisor";
     const msg = [
@@ -93,8 +102,9 @@ export async function upsertAndNotifySupervisorCommission(date: string, outletNa
       `Total sales: Ksh ${salesKsh.toLocaleString()}.`,
       `Profit after expenses and waste: Ksh ${profitKsh.toLocaleString()}.`,
       `Your commission (10%): Ksh ${commissionKsh.toLocaleString()}.`,
+      s.code ? `Commission so far (${periodStart} → ${periodEnd}): Ksh ${ptdTotal.toLocaleString()}.` : undefined,
       `— Baraka Fresh Ops`
-    ].join("\n");
+    ].filter(Boolean).join("\n");
     try {
       if (s.phoneE164) await sendText(s.phoneE164, msg, "AI_DISPATCH_TEXT");
     } catch {}
