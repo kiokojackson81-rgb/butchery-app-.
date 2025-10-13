@@ -66,7 +66,17 @@ export async function GET(req: Request) {
     const whereInt: any = {};
     if (outlet) whereInt.outletName = outlet;
     if (product) whereInt.productKey = product;
-    const intervals = await (prisma as any).supplyIntervalPerformance.findMany({ where: whereInt, orderBy: [{ outletName: "asc" }, { productKey: "asc" }, { startedAt: "asc" }] });
+    let intervals: any[] = [];
+    try {
+      intervals = await (prisma as any).supplyIntervalPerformance.findMany({ where: whereInt, orderBy: [{ outletName: "asc" }, { productKey: "asc" }, { startedAt: "asc" }] });
+    } catch (err: any) {
+      const msg = String(err?.message || err || "");
+      if (/does not exist/i.test(msg) && /SupplyIntervalPerformance/i.test(msg)) {
+        intervals = [];
+      } else {
+        throw err;
+      }
+    }
 
     // Build PDF
     const doc = new jsPDF({ unit: "pt", format: "a4" });

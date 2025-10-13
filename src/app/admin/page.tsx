@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 import { canonFull } from "@/lib/codeNormalize";
@@ -41,6 +42,7 @@ type AdminTab =
   | "supply"
   | "reports"
   | "expenses"
+  | "performance"
   | "data";
 
 /** People & Codes */
@@ -854,11 +856,11 @@ export default function AdminPage() {
         <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
         <TabBtn active={tab==="supply"}    onClick={() => setTab("supply")}>Supply View</TabBtn>
         <TabBtn active={tab==="reports"}   onClick={() => setTab("reports")}>Reports</TabBtn>
-        <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
-  {/* Data tab contains Backup/Restore and admin tools */}
-  <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
-  {/* Quick link to Performance dashboards (admin guarded page) */}
-  <a href="/admin/performance" className="px-3 py-2 rounded-2xl text-sm border" title="View performance dashboards">Performance</a>
+    <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
+    {/* Performance now embedded as a tab */}
+    <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
+    {/* Data tab contains Backup/Restore and admin tools */}
+    <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
         {/* Quick link to WhatsApp management */}
         <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
         {/* Quick link to Supply History (role-wide) */}
@@ -1617,6 +1619,15 @@ export default function AdminPage() {
         </section>
       )}
 
+      {/* ---------- PERFORMANCE (embedded) ---------- */}
+      {tab === "performance" && (
+        <section className="rounded-2xl border p-4">
+          {/* Lazy import to avoid SSR issues in client-only component */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <EmbeddedPerformance />
+        </section>
+      )}
+
       {/* ---------- DATA ---------- */}
       {tab === "data" && (
         <section className="rounded-2xl border p-4">
@@ -1811,3 +1822,6 @@ function clearAll() {
   alert("All admin data cleared from this browser.");
 }
 function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
+
+// Lazy client-only import for the embedded Performance tab
+const EmbeddedPerformance = dynamic(() => import("@/components/performance/PerformanceView"), { ssr: false });
