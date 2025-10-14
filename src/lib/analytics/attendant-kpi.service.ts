@@ -29,8 +29,37 @@ export async function computeAttendantKPI(date: DayKey, outletName: string, atte
   const freq = String(a.salaryFrequency || 'daily');
   const salaryDay = freq === 'weekly' ? (amt / 7) : freq === 'monthly' ? (amt / 30) : amt;
   const roiVsSalary = salaryDay > 0 ? np / salaryDay : 0;
-  const depositExpected = Number(perf?.expectedDeposit || 0) * factor;
+  let depositExpected = Number(perf?.expectedDeposit || 0) * factor;
   const depositActual = Number(perf?.deposits || 0) * factor;
+  // Commission: compute total weight over assigned products and config
+  const productKeys: string[] = (assignments || []).map((a: any) => String(a.productKey)).filter(Boolean);
+  // Load per-product daily salesQty from ProductSupplyStat
+  let totalWeight = 0;
+  if (productKeys.length) {
+    const stats = await (prisma as any).productSupplyStat.findMany({ where: { date, outletName, productKey: { in: productKeys } } });
+    // Weight attribution: split by shareRule if multiple attendants share a product
+    const shareByKey = new Map<string, number>();
+    for (const a of assignments || []) {
+      const pk = String((a as any).productKey);
+      const s = Number((a as any).shareRule ?? 1) || 1;
+      shareByKey.set(pk, (shareByKey.get(pk) || 0) + s);
+    }
+    for (const s of stats || []) {
+      const pk = String((s as any).productKey);
+      const salesQty = Number((s as any).salesQty || 0); // already in kg units per domain
+      const myShare = Number(((assignments || []).find((a: any) => String(a.productKey) === pk)?.shareRule) ?? 1) || 1;
+      const denom = Number(shareByKey.get(pk) || myShare) || 1;
+      totalWeight += salesQty * (myShare / denom);
+    }
+  }
+  // Commission config defaults
+  const cfg = await (prisma as any).commissionConfig.findUnique({ where: { attendantId } }).catch(() => null);
+  const commissionTarget = Number(cfg?.targetKg ?? 25);
+  const commissionRate = Number(cfg?.ratePerKg ?? 50);
+  const commissionKg = Math.max(0, totalWeight - commissionTarget);
+  const commissionAmount = Math.max(0, commissionKg * commissionRate);
+  // Adjust required deposit by commission (attendant keeps commission cash)
+  depositExpected = Math.max(0, depositExpected - commissionAmount);
   const depositGap = Math.max(0, depositExpected - depositActual);
   const wasteCost = Number(perf?.wasteCost || 0) * factor;
   const wastePct = Number(perf?.wastePct || 0);
@@ -43,8 +72,8 @@ export async function computeAttendantKPI(date: DayKey, outletName: string, atte
 
   await (prisma as any).attendantKPI.upsert({
     where: { date_attendantId_outletName: { date, attendantId, outletName } },
-    update: { sales, gp, expenses, np, salaryDay, roiVsSalary, wasteCost, wastePct, depositExpected, depositActual, depositGap, redFlags },
-    create: { date, attendantId, outletName, sales, gp, expenses, np, salaryDay, roiVsSalary, wasteCost, wastePct, depositExpected, depositActual, depositGap, redFlags },
+    update: { sales, gp, expenses, np, salaryDay, roiVsSalary, wasteCost, wastePct, depositExpected, depositActual, depositGap, redFlags, totalWeight, commissionTarget, commissionRate, commissionKg, commissionAmount },
+    create: { date, attendantId, outletName, sales, gp, expenses, np, salaryDay, roiVsSalary, wasteCost, wastePct, depositExpected, depositActual, depositGap, redFlags, totalWeight, commissionTarget, commissionRate, commissionKg, commissionAmount },
   });
 
   return { ok: true } as const;

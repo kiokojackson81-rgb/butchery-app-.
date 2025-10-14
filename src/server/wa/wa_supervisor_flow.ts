@@ -263,15 +263,69 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
 }
 
-async function computeSummaryText(date: string, outlet?: string) {
+export async function computeSummaryText(date: string, outlet?: string) {
   const whereOutlet: any = outlet ? { outletName: outlet } : {};
-  const closings = await (prisma as any).attendantClosing.count({ where: { date, ...whereOutlet } });
-  const expenses = await (prisma as any).attendantExpense.findMany({ where: { date, ...whereOutlet } });
+
+  // Core activity lines
+  const [closings, expenses, deposits, deliveries] = await Promise.all([
+    (prisma as any).attendantClosing.count({ where: { date, ...whereOutlet } }),
+    (prisma as any).attendantExpense.findMany({ where: { date, ...whereOutlet } }),
+    (prisma as any).attendantDeposit.findMany({ where: { date, status: "VALID", ...whereOutlet } }),
+    (prisma as any).supplyOpeningRow.count({ where: { date, ...(outlet ? { outletName: outlet } : {}) } }),
+  ]);
   const expenseSum = (expenses || []).reduce((s: number, e: any) => s + (e.amount || 0), 0);
-  const deposits = await (prisma as any).attendantDeposit.findMany({ where: { date, status: "VALID", ...whereOutlet } });
   const depositSum = (deposits || []).reduce((s: number, d: any) => s + (d.amount || 0), 0);
-  const deliveries = await (prisma as any).supplyOpeningRow.count({ where: { date, ...(outlet ? { outletName: outlet } : {}) } });
+
+  // Commission totals from OutletPerformance (fallback to sum of KPIs)
+  let totalCommission = 0;
+  if (outlet) {
+    const perf = await (prisma as any).outletPerformance.findUnique({ where: { date_outletName: { date, outletName: outlet } } }).catch(() => null);
+    totalCommission = Number(perf?.totalCommission || 0);
+  } else {
+    const perfs = await (prisma as any).outletPerformance.findMany({ where: { date } }).catch(() => []);
+    totalCommission = (perfs || []).reduce((s: number, p: any) => s + Number(p?.totalCommission || 0), 0);
+  }
+  if (!totalCommission) {
+    const kpis = await (prisma as any).attendantKPI.findMany({ where: { date, ...whereOutlet } }).catch(() => []);
+    totalCommission = (kpis || []).reduce((s: number, k: any) => s + Number(k?.commissionAmount || 0), 0);
+  }
+
+  // Top performers by weight and commission
+  const topKPIs = await (prisma as any).attendantKPI.findMany({
+    where: { date, ...whereOutlet },
+    include: { attendant: true },
+    orderBy: { commissionAmount: "desc" },
+    take: 5,
+  }).catch(() => [] as any[]);
+
+  let topCommissionLine = "Top commission: -";
+  let topWeightLine = "Top weight: -";
+  if (topKPIs && topKPIs.length) {
+    const byCommission = [...topKPIs].sort((a: any, b: any) => Number(b.commissionAmount || 0) - Number(a.commissionAmount || 0))[0];
+    const byWeight = [...topKPIs].sort((a: any, b: any) => Number(b.totalWeight || 0) - Number(a.totalWeight || 0))[0];
+    if (byCommission) {
+      const name = (byCommission.attendant as any)?.name || "Attendant";
+      const amt = Math.round(Number(byCommission.commissionAmount || 0));
+      topCommissionLine = `Top commission: ${name} — KSh ${amt}`;
+    }
+    if (byWeight) {
+      const name = (byWeight.attendant as any)?.name || "Attendant";
+      const kg = Number(byWeight.totalWeight || 0);
+      topWeightLine = `Top weight: ${name} — ${kg.toFixed(1)} kg`;
+    }
+  }
+
   const head = outlet ? `${outlet} • ${date}` : `All Outlets • ${date}`;
-  return `${head}\nDeliveries: ${deliveries}\nClosings: ${closings}\nExpenses: KSh ${expenseSum}\nDeposits: KSh ${depositSum}`;
+  const commissionLine = `Commission: KSh ${Math.round(totalCommission)}`;
+  return [
+    head,
+    `Deliveries: ${deliveries}`,
+    `Closings: ${closings}`,
+    `Expenses: KSh ${expenseSum}`,
+    `Deposits: KSh ${depositSum}`,
+    commissionLine,
+    topWeightLine,
+    topCommissionLine,
+  ].join("\n");
 }
  

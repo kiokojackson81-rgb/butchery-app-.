@@ -32,12 +32,12 @@ export async function GET(req: Request) {
     const whereOutlet: any = {};
     if (from || to) whereOutlet.date = { gte: from || undefined, lte: to || undefined };
     if (outlet) whereOutlet.outletName = outlet;
-    const outlets = await (prisma as any).outletPerformance.findMany({ where: whereOutlet, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
+  const outlets = await (prisma as any).outletPerformance.findMany({ where: whereOutlet, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
 
     const whereAtt: any = {};
     if (from || to) whereAtt.date = { gte: from || undefined, lte: to || undefined };
     if (outlet) whereAtt.outletName = outlet;
-    const attendants = await (prisma as any).attendantKPI.findMany({ where: whereAtt, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
+  const attendants = await (prisma as any).attendantKPI.findMany({ where: whereAtt, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
 
     let waste: Array<{ outletName: string; productKey: string; wasteQty: number; wasteValue: number }> = [];
     if (date) {

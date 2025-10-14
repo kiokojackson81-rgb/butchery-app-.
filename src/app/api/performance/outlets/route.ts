@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     const where: any = {};
     if (from || to) where.date = { gte: from || undefined, lte: to || undefined };
     if (outletName) where.outletName = outletName;
-    const rows = await (prisma as any).outletPerformance.findMany({ where, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
+  const rows = await (prisma as any).outletPerformance.findMany({ where, orderBy: [{ date: "asc" }, { outletName: "asc" }] });
     return NextResponse.json({ ok: true, rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });

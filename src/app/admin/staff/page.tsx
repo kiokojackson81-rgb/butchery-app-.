@@ -74,6 +74,8 @@ export default function AdminStaffPage() {
   const [list, setList] = useState<Staff[]>([]);
   const [filterOutlet, setFilterOutlet] = useState<Outlet | "ALL">("ALL");
   const [scope, setScope] = useState<ScopeMap>({}); // NEW
+  // Commission config cache keyed by canonical code
+  const [commissionByCode, setCommissionByCode] = useState<Record<string, { targetKg: number; ratePerKg: number; loading?: boolean }>>({});
 
   const fetchSetting = useCallback(async (key: string) => {
     try {
@@ -242,6 +244,45 @@ export default function AdminStaffPage() {
     return !!(canonical && scope[canonical]);
   };
 
+  // ===== Commission config helpers =====
+  async function loadCommission(code: string) {
+    const canonical = canonFull(code); if (!canonical) return;
+    setCommissionByCode((m) => ({ ...m, [canonical]: { ...(m[canonical] || { targetKg: 25, ratePerKg: 50 }), loading: true } }));
+    try {
+      const url = new URL("/api/admin/commission-config", window.location.origin);
+      url.searchParams.set("code", canonical);
+      const res = await fetch(url.toString(), { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      const cfg = json?.config || null;
+      const targetKg = Number(cfg?.targetKg ?? 25);
+      const ratePerKg = Number(cfg?.ratePerKg ?? 50);
+      setCommissionByCode((m) => ({ ...m, [canonical]: { targetKg, ratePerKg, loading: false } }));
+    } catch {
+      setCommissionByCode((m) => ({ ...m, [canonical]: { ...(m[canonical] || { targetKg: 25, ratePerKg: 50 }), loading: false } }));
+    }
+  }
+  async function saveCommission(code: string) {
+    const canonical = canonFull(code); if (!canonical) return;
+    const cur = commissionByCode[canonical] || { targetKg: 25, ratePerKg: 50 };
+    setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: true } }));
+    try {
+      const res = await fetch("/api/admin/commission-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-auth": "true" },
+        cache: "no-store",
+        body: JSON.stringify({ code: canonical, targetKg: cur.targetKg, ratePerKg: cur.ratePerKg, isActive: true }),
+      });
+      const ok = res.ok;
+      if (!ok) throw new Error(await res.text());
+      setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
+      alert("Commission settings saved \u2705");
+    } catch (e) {
+      console.error(e);
+      setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
+      alert("Failed to save commission settings");
+    }
+  }
+
   // Bulk sync (optional convenience)
   const syncAllScopes = () => {
     const payload: ScopeMap = {};
@@ -363,6 +404,50 @@ export default function AdminStaffPage() {
                   );
                 })}
               </div>
+            </div>
+
+            {/* Commission settings */}
+            <div className="mt-4 p-3 rounded-xl border">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-medium">Commission Settings</div>
+                <div className="flex items-center gap-2">
+                  <button className="btn-mobile border rounded-xl px-2 py-1 text-xs" onClick={()=>loadCommission(s.code)}>Load</button>
+                  <button className="btn-mobile border rounded-xl px-2 py-1 text-xs" onClick={()=>saveCommission(s.code)}>Save</button>
+                </div>
+              </div>
+              {(() => {
+                const canonical = canonFull(s.code);
+                const cur = (canonical && commissionByCode[canonical]) || { targetKg: 25, ratePerKg: 50 };
+                return (
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500">Daily target (kg)</label>
+                      <input type="number" min={0} step={0.1} className="input-mobile border rounded-xl p-2 w-full"
+                        value={cur.targetKg}
+                        onChange={(e)=>{
+                          const v = Number(e.target.value || 0);
+                          if (!canonical) return;
+                          setCommissionByCode(m => ({ ...m, [canonical]: { ...(m[canonical] || { ratePerKg: 50 }), targetKg: v } }));
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Rate per kg (Ksh)</label>
+                      <input type="number" min={0} step={1} className="input-mobile border rounded-xl p-2 w-full"
+                        value={cur.ratePerKg}
+                        onChange={(e)=>{
+                          const v = Number(e.target.value || 0);
+                          if (!canonical) return;
+                          setCommissionByCode(m => ({ ...m, [canonical]: { ...(m[canonical] || { targetKg: 25 }), ratePerKg: v } }));
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <span className="text-xs text-gray-500">{cur.loading ? 'Loading…' : ' '}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* NEW: Scope controls (do NOT change login) */}

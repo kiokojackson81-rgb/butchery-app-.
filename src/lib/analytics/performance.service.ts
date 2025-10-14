@@ -22,17 +22,28 @@ export async function computeOutletPerformance(date: DayKey, outletName: string)
   const totalSales = Number((totals as any)?.expectedSales || 0);
   const totalCost = 0; // Not tracked in current schema; future: derive from buyPrice*qty
   const grossProfit = totalSales - totalCost;
-  const netProfit = grossProfit - expensesSum;
+  let netProfit = grossProfit - expensesSum;
 
   // Expected deposit: from computeDayTotals or fallback ratio rules
   let expectedDeposit = Number((totals as any)?.expectedDeposit || 0);
   if (!Number.isFinite(expectedDeposit) || expectedDeposit < 0) expectedDeposit = 0;
-  const deficit = Math.max(0, expectedDeposit - depositsSum);
-  const variancePct = expectedDeposit > 0 ? deficit / expectedDeposit : 0;
 
   // Waste basis not fully available at cost; approximate from closings wasteQty * sellPrice if needed later
   const wasteCost = 0;
   const wastePct = 0;
+
+  // Compute commissions (sum from attendant KPIs if available)
+  let totalCommission = 0;
+  try {
+    const kpis = await (prisma as any).attendantKPI.findMany({ where: { date, outletName } });
+    totalCommission = (kpis || []).reduce((a: number, r: any) => a + (Number(r?.commissionAmount) || 0), 0);
+  } catch {}
+  netProfit = netProfit - totalCommission;
+
+  // Required deposit is reduced by commissions that attendants keep
+  const requiredDeposit = Math.max(0, expectedDeposit - totalCommission);
+  const deficit = Math.max(0, requiredDeposit - depositsSum);
+  const variancePct = requiredDeposit > 0 ? deficit / requiredDeposit : 0;
 
   await (prisma as any).outletPerformance.upsert({
     where: { date_outletName: { date, outletName } },
@@ -48,6 +59,7 @@ export async function computeOutletPerformance(date: DayKey, outletName: string)
       variancePct,
       wasteCost,
       wastePct,
+      totalCommission,
     },
     create: {
       date,
@@ -63,6 +75,7 @@ export async function computeOutletPerformance(date: DayKey, outletName: string)
       variancePct,
       wasteCost,
       wastePct,
+      totalCommission,
     },
   });
 

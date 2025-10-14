@@ -6,12 +6,14 @@ type OutletPerf = {
   id: string; date: string; outletName: string;
   totalSales: number; totalCost: number; grossProfit: number; expenses: number; netProfit: number;
   deposits: number; expectedDeposit: number; deficit: number; variancePct: number; wasteCost: number; wastePct: number;
+  totalCommission?: number;
 };
 
 type AttendantKPI = {
   id: string; date: string; outletName: string; attendantId: string;
   sales: number; gp: number; expenses: number; np: number; salaryDay: number; roiVsSalary: number;
   wasteCost: number; wastePct: number; depositExpected: number; depositActual: number; depositGap: number; redFlags?: string[];
+  totalWeight?: number; commissionTarget?: number; commissionRate?: number; commissionKg?: number; commissionAmount?: number;
 };
 
 type WasteRow = { outletName: string; productKey: string; wasteQty: number; wasteValue: number };
@@ -111,8 +113,8 @@ export default function PerformanceView() {
   const outletAgg = useMemo(() => outletRows.reduce((a, r) => {
     a.sales += Number(r.totalSales||0); a.exp += Number(r.expenses||0); a.np += Number(r.netProfit||0);
     a.dep += Number(r.deposits||0); a.expDep += Number(r.expectedDeposit||0); a.def += Number(r.deficit||0);
-    a.waste += Number(r.wasteCost||0); return a;
-  }, { sales:0, exp:0, np:0, dep:0, expDep:0, def:0, waste:0 }), [outletRows]);
+    a.waste += Number(r.wasteCost||0); a.comm += Number(r.totalCommission||0); return a;
+  }, { sales:0, exp:0, np:0, dep:0, expDep:0, def:0, waste:0, comm:0 }), [outletRows]);
 
   return (
     <div className="performance-view">
@@ -150,7 +152,7 @@ export default function PerformanceView() {
       {tab === 'outlets' && (
         <section className="rounded-2xl border p-4">
           <h3 className="font-semibold mb-2">Outlet Performance</h3>
-          <div className="text-sm text-gray-700 mb-2">Totals — Sales: Ksh {fmt(outletAgg.sales)} · Expenses: Ksh {fmt(outletAgg.exp)} · Net Profit: Ksh {fmt(outletAgg.np)} · Deposits: Ksh {fmt(outletAgg.dep)} · Expected: Ksh {fmt(outletAgg.expDep)} · Deficit: Ksh {fmt(outletAgg.def)} · Waste: Ksh {fmt(outletAgg.waste)}</div>
+          <div className="text-sm text-gray-700 mb-2">Totals — Sales: Ksh {fmt(outletAgg.sales)} · Expenses: Ksh {fmt(outletAgg.exp)} · Net Profit: Ksh {fmt(outletAgg.np)} · Deposits: Ksh {fmt(outletAgg.dep)} · Expected: Ksh {fmt(outletAgg.expDep)} · Deficit: Ksh {fmt(outletAgg.def)} · Waste: Ksh {fmt(outletAgg.waste)} · Commission: Ksh {fmt(outletAgg.comm)}</div>
           <div className="table-wrap">
             <table className="w-full text-sm border">
               <thead>
@@ -164,11 +166,12 @@ export default function PerformanceView() {
                   <th className="p-2">Expected</th>
                   <th className="p-2">Deficit</th>
                   <th className="p-2">Waste</th>
+                  <th className="p-2">Commission</th>
                 </tr>
               </thead>
               <tbody>
                 {outletRows.length === 0 ? (
-                  <tr><td className="p-2 text-gray-500" colSpan={9}>{loading? 'Loading…' : 'No rows'}</td></tr>
+                  <tr><td className="p-2 text-gray-500" colSpan={10}>{loading? 'Loading…' : 'No rows'}</td></tr>
                 ) : outletRows.map(r => (
                   <tr key={r.id} className="border-b">
                     <td className="p-2">{r.date}</td>
@@ -180,6 +183,7 @@ export default function PerformanceView() {
                     <td className="p-2">Ksh {fmt(r.expectedDeposit)}</td>
                     <td className="p-2">Ksh {fmt(r.deficit)}</td>
                     <td className="p-2">Ksh {fmt(r.wasteCost)}</td>
+                    <td className="p-2">Ksh {fmt(r.totalCommission)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -202,12 +206,16 @@ export default function PerformanceView() {
                   <th className="p-2">Salary/day</th>
                   <th className="p-2">ROI vs Salary</th>
                   <th className="p-2">Deposit Gap</th>
+                  <th className="p-2">Weight (kg)</th>
+                  <th className="p-2">Target (kg)</th>
+                  <th className="p-2">Rate (Ksh/kg)</th>
+                  <th className="p-2">Commission (Ksh)</th>
                   <th className="p-2">Red Flags</th>
                 </tr>
               </thead>
               <tbody>
                 {attRows.length === 0 ? (
-                  <tr><td className="p-2 text-gray-500" colSpan={8}>{loading? 'Loading…' : 'No rows'}</td></tr>
+                  <tr><td className="p-2 text-gray-500" colSpan={12}>{loading? 'Loading…' : 'No rows'}</td></tr>
                 ) : attRows.map(r => (
                   <tr key={r.id} className="border-b">
                     <td className="p-2">{r.date}</td>
@@ -217,6 +225,10 @@ export default function PerformanceView() {
                     <td className="p-2">Ksh {fmt(r.salaryDay)}</td>
                     <td className="p-2">{fmt(r.roiVsSalary, 2)}x</td>
                     <td className="p-2">Ksh {fmt(r.depositGap)}</td>
+                    <td className="p-2">{fmt(r.totalWeight, 1)}</td>
+                    <td className="p-2">{fmt(r.commissionTarget, 1)}</td>
+                    <td className="p-2">Ksh {fmt(r.commissionRate)}</td>
+                    <td className="p-2">Ksh {fmt(r.commissionAmount)}</td>
                     <td className="p-2">{Array.isArray(r.redFlags) && r.redFlags.length ? r.redFlags.join(', ') : '—'}</td>
                   </tr>
                 ))}

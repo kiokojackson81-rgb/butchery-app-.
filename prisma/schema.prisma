@@ -384,6 +384,8 @@ model OutletPerformance {
   variancePct      Float    @default(0)
   wasteCost        Float    @default(0)
   wastePct         Float    @default(0)
+  // Sum of attendant commissions for the day/outlet
+  totalCommission  Float    @default(0)
   createdAt        DateTime @default(now())
 
   @@unique([date, outletName])
@@ -432,6 +434,12 @@ model AttendantKPI {
   depositExpected  Float     @default(0)
   depositActual    Float     @default(0)
   depositGap       Float     @default(0)
+  // Commission metrics (weight-based)
+  totalWeight      Float     @default(0) // total kg sold across assigned products (share-adjusted)
+  commissionTarget Float     @default(0) // kg target used for this day
+  commissionRate   Float     @default(0) // Ksh per extra kg
+  commissionKg     Float     @default(0) // max(0, totalWeight - commissionTarget)
+  commissionAmount Float     @default(0) // commissionKg * commissionRate
   redFlags         String[]
   createdAt        DateTime  @default(now())
   attendant        Attendant @relation(fields: [attendantId], references: [id])
@@ -524,4 +532,15 @@ model DayClosePeriod {
   createdAt    DateTime @default(now())
 
   @@unique([outletName, businessDate])
+}
+
+/// Per-attendant commission configuration
+model CommissionConfig {
+  id          String    @id @default(cuid())
+  attendantId String    @unique
+  targetKg    Float     // minimum total weight (kg) to qualify for commissions
+  ratePerKg   Float     // commission amount (Ksh) per extra kilogram
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  attendant   Attendant @relation(fields: [attendantId], references: [id])
 }
