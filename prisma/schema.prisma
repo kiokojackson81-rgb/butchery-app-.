@@ -206,6 +206,8 @@ model Attendant {
   shifts     Shift[]
   productAssignments ProductAssignment[]
   kpis       AttendantKPI[]
+  // Back-relation for commission config (1:1)
+  commissionConfig CommissionConfig?
 }
 
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
