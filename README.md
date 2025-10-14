@@ -91,4 +91,24 @@ All active outlets (omit outlet):
 Responses:
 `200 { ok: true, date, outlet }` or error with `{ ok: false, error }` (errors: `UNAUTHORIZED`, `BAD_DATE`).
 
+Extended behavior:
+- If environment variable `SUPERVISOR_COMMISSION_RECOMPUTE=1` the recompute will also upsert SupervisorCommission rows for each outlet/date (no WhatsApp notifications are sent).
+- Response then includes a `supervisor` array summarizing per-outlet recompute:
+
+Example dry-run (flag enabled):
+```json
+{
+	"ok": true,
+	"date": "2025-10-14",
+	"dryRun": true,
+	"outlets": [ { "outlet": "Outlet A", "outletPerformance": true, "attendantKPIs": true } ],
+	"supervisor": [ { "outlet": "Outlet A", "supervisors": 2, "upserts": 0 } ],
+	"elapsedMs": 123
+}
+```
+
+Env flags summary:
+- `INTERNAL_API_KEY`: required header `x-internal-key` for protected recompute call.
+- `SUPERVISOR_COMMISSION_RECOMPUTE=1`: include supervisor commission upserts during recompute.
+
 

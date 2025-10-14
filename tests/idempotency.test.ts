@@ -57,7 +57,8 @@ describe('saveClosings (mocked transaction)', () => {
     // Reuse the top-level prismaMock by setting its $transaction method.
     prismaMock.$transaction = vi.fn(async (fn: any) => fn({ attendantClosing: { upsert } }));
     const { saveClosings } = await import('@/server/closings');
-    const rows = [{ productKey: 'X', closingQty: 2, wasteQty: 0 }, { productKey: 'Y', closingQty: 3, wasteQty: 1 }];
+  // Use zero closings so validation (closing <= openingEffective - waste) passes with unknown openingEffective (assumed 0)
+  const rows = [{ productKey: 'X', closingQty: 0, wasteQty: 0 }, { productKey: 'Y', closingQty: 0, wasteQty: 0 }];
     await saveClosings({ date: '2025-10-09', outletName: 'OutletA', rows });
     expect(upsert).toHaveBeenCalledTimes(2);
   });

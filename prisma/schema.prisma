@@ -319,6 +319,7 @@ model SupervisorCommission {
 
   @@index([date, outletName])
   @@index([periodKey, supervisorCode])
+  @@index([outletName, date])
 }
 
 enum PersonRole {
