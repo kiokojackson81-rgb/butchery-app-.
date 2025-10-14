@@ -98,6 +98,9 @@ async function ensureLoginProvision(loginCode: string) {
 
 export async function POST(req: Request) {
   try {
+    if (!process.env.DATABASE_URL && !process.env.DATABASE_URL_UNPOOLED) {
+      return NextResponse.json({ ok: false, error: "DB_NOT_CONFIGURED" }, { status: 503 });
+    }
     const { loginCode } = (await req.json().catch(() => ({}))) as { loginCode?: string };
   const full = normalizeCode(loginCode || "");
   const num = canonNum(loginCode || "");
@@ -208,7 +211,10 @@ export async function POST(req: Request) {
     return res;
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ ok: false, error: "SERVER_ERROR" }, { status: 500 });
+    const devMsg = (process.env.NODE_ENV !== 'production' && (e as any)?.message)
+      ? `SERVER_ERROR: ${(e as any).message}`
+      : 'SERVER_ERROR';
+    return NextResponse.json({ ok: false, error: devMsg }, { status: 500 });
   }
 }
 
