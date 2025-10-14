@@ -172,14 +172,52 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
       return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
-  await sendText(gp, compactReviewText(item), "AI_DISPATCH_TEXT", { gpt_sent: true });
-  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any }, "AI_DISPATCH_INTERACTIVE");
+    // Provide richer details for supply_dispute_item
+    let detail = compactReviewText(item);
+    if (item.type === 'supply_dispute_item') {
+      const p = (item.payload || {}) as any;
+      detail = [
+        `SUPPLY DISPUTE • ${(item.outlet || '-')}`,
+        `${new Date(item.date).toISOString().slice(0,10)} • Item ${p.itemKey}`,
+        `Recorded: ${p.recordedQty}${p.unit || ''}`,
+        `Claimed: ${p.claimedQty}${p.unit || ''}`,
+        `Reason: ${p.reasonText || p.reasonCode}`,
+        `Ref: ${p.rowId || 'row'}`,
+        '',
+        'Approve = adjust opening qty to claimed. Reject = keep recorded.'
+      ].join('\n');
+    }
+    await sendText(gp, detail, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId.startsWith("SUP_APPROVE:")) {
     const id = replyId.split(":")[1]!;
-    await (prisma as any).reviewItem.update({ where: { id }, data: { status: "approved" } });
-  await sendText(gp, "Approved ✅", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
+    if (item?.type === 'supply_dispute_item') {
+      const p = (item.payload || {}) as any;
+      // Adjust opening row to claimedQty if rowId lookup succeeds
+      if (p?.rowId && Number(p.claimedQty) >= 0) {
+        try {
+          const row = await (prisma as any).supplyOpeningRow.findUnique({ where: { id: p.rowId } });
+          if (row) {
+            await (prisma as any).supplyOpeningRow.update({ where: { id: p.rowId }, data: { qty: p.claimedQty } });
+          }
+        } catch {}
+      }
+      const payload = { ...p, resolvedAt: new Date().toISOString(), resolution: 'approved', adjustedQty: p.claimedQty, supervisorCode: sess.code };
+      await (prisma as any).reviewItem.update({ where: { id }, data: { status: 'approved', payload } });
+      // Notify attendant if phone can be inferred via attendantCode mapping
+      try {
+        if (p.attendantCode) {
+          const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: p.attendantCode } });
+          if (pm?.phoneE164) await sendText(toGraphPhone(pm.phoneE164), `Dispute approved: ${p.itemKey} adjusted to ${p.claimedQty}${p.unit || ''}.`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+        }
+      } catch {}
+    } else {
+      await (prisma as any).reviewItem.update({ where: { id }, data: { status: "approved" } });
+    }
+    await sendText(gp, "Approved ✅", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
@@ -236,9 +274,23 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
     const reason = String(text || "").slice(0, 200);
     // Merge reason into payload
     const item = await (prisma as any).reviewItem.findUnique({ where: { id: cur.reviewId } });
-    const payload = { ...(item?.payload as any), reason };
-    await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: "rejected", payload } });
-    await sendText(gp, "Rejected ❌", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    if (item?.type === 'supply_dispute_item') {
+      const p = (item.payload || {}) as any;
+      const payload = { ...p, reasonSupervisor: reason, resolvedAt: new Date().toISOString(), resolution: 'rejected', supervisorCode: sess.code };
+      await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: 'rejected', payload } });
+      // Notify attendant if possible
+      try {
+        if (p.attendantCode) {
+          const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: p.attendantCode } });
+          if (pm?.phoneE164) await sendText(toGraphPhone(pm.phoneE164), `Dispute rejected: ${p.itemKey} kept at ${p.recordedQty}${p.unit || ''}. Reason: ${reason}`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+        }
+      } catch {}
+      await sendText(gp, "Rejected ❌", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } else {
+      const payload = { ...(item?.payload as any), reason };
+      await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: "rejected", payload } });
+      await sendText(gp, "Rejected ❌", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, reviewId: undefined } });
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
