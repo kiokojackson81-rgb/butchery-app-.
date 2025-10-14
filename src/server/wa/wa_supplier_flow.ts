@@ -1,6 +1,7 @@
 // server/wa/wa_supplier_flow.ts
 import { prisma } from "@/lib/prisma";
 import { notifySupplyPosted } from "@/server/supply_notify";
+import { notifySupplyItem } from "@/server/supply_notify_item";
 import { sendTextSafe, sendInteractiveSafe, sendText, sendInteractive } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
@@ -321,7 +322,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
     // Auto-notify after every individual save (per request) regardless of config flags
-    try { await notifySupplyPosted({ outletName: outlet, date: c.date, supplierCode: sess?.code || null }); } catch {}
+  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey! }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
@@ -345,7 +346,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
     // Auto-notify after update/add aggregate
-    try { await notifySupplyPosted({ outletName: outlet, date: c.date, supplierCode: sess?.code || null }); } catch {}
+  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey! }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });

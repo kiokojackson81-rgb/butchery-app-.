@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { notifySupplyPosted } from "@/server/supply_notify";
+import { notifySupplyItem } from "@/server/supply_notify_item";
 
 // POST /api/supply/opening/item
 // Body: { date, outlet, itemKey, qty, buyPrice?, unit?, mode?: "add"|"replace" }
@@ -37,21 +37,8 @@ export async function POST(req: Request) {
       update: { qty: totalQty, buyPrice: buyPriceNum || Number(existing?.buyPrice || 0), unit: unit || (existing?.unit || "kg") },
       create: { date, outletName: outlet, itemKey, qty: totalQty, buyPrice: buyPriceNum, unit },
     });
-    // Fire auto-notify (multi-role) with lightweight dedupe: skip if a notify happened in last 30s for outlet+date
-    try {
-      const dedupeKey = `supply_notify_last:${date}:${outlet}`;
-      const setting = await (prisma as any).setting.findUnique({ where: { key: dedupeKey } }).catch(() => null);
-      const now = Date.now();
-      const last = Number((setting?.value as any)?.ts || 0);
-      if (!last || now - last > 30_000) {
-        await notifySupplyPosted({ outletName: outlet, date });
-        await (prisma as any).setting.upsert({
-          where: { key: dedupeKey },
-          update: { value: { ts: now } },
-          create: { key: dedupeKey, value: { ts: now } },
-        });
-      }
-    } catch {}
+    // Single-item immediate notify (attendant only) for dispute capability
+    try { await notifySupplyItem({ outlet, date, itemKey }); } catch {}
 
     return NextResponse.json({ ok: true, existedQty, totalQty, row });
   } catch (e) {
