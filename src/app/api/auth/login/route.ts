@@ -107,7 +107,12 @@ export async function POST(req: Request) {
     }
 
   // 1) Try full canonical match in LoginCode (normalized)
-  let row: any = await (prisma as any).loginCode.findFirst({ where: { code: full } });
+  let row: any = null;
+  try {
+    row = await (prisma as any).loginCode.findFirst({ where: { code: full } });
+  } catch (err) {
+    console.error("loginCode lookup failed", err);
+  }
 
     if (!row && full) {
       row = await ensureLoginProvision(full);
@@ -115,66 +120,87 @@ export async function POST(req: Request) {
 
     // 2) Fallback to digits-only if unique
     if (!row && num) {
-      // Compare as text using a parameterized query to avoid type errors and SQL injection
-      const list: any[] = await (prisma as any).$queryRaw`
-        SELECT * FROM "LoginCode"
-        WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
-        LIMIT 3
-      `;
-      if (list.length === 1) {
-        row = list[0];
-      } else if (list.length > 1) {
-        return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
-      } else {
-        const assignments: any[] = await (prisma as any).$queryRaw`
-          SELECT code FROM "AttendantAssignment"
+      try {
+        // Compare as text using a parameterized query to avoid type errors and SQL injection
+        const list: any[] = await (prisma as any).$queryRaw`
+          SELECT * FROM "LoginCode"
           WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
           LIMIT 3
         `;
-        if (assignments.length === 1) {
-          row = await ensureLoginProvision(assignments[0]?.code || '');
-        } else if (assignments.length > 1) {
+        if (list.length === 1) {
+          row = list[0];
+        } else if (list.length > 1) {
           return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
+        } else {
+          const assignments: any[] = await (prisma as any).$queryRaw`
+            SELECT code FROM "AttendantAssignment"
+            WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
+            LIMIT 3
+          `;
+          if (assignments.length === 1) {
+            row = await ensureLoginProvision(assignments[0]?.code || '');
+          } else if (assignments.length > 1) {
+            return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
+          }
         }
+      } catch (err) {
+        console.error('digits fallback query failed', err);
+        // continue to admin_codes fallback rather than throwing 500
       }
     }
 
     // 3) As a last resort, check admin_codes for an active attendant with an outlet and provision
     if (!row) {
-      const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
-      const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
-      const attendants = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
-      const matchFull = attendants.find((p: any) => normalizeCode(p?.code || '') === full);
-      let selected = matchFull;
-      if (!selected && num) {
-        const matches = attendants.filter((p: any) => canonNum(p?.code || '') === num);
-        if (matches.length === 1) selected = matches[0];
-        else if (matches.length > 1) return NextResponse.json({ ok: false, error: 'AMBIGUOUS_CODE' }, { status: 409 });
-      }
-      if (selected?.code) {
-        row = await ensureLoginProvision(selected.code);
+      try {
+        const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+        const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
+        const attendants = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
+        const matchFull = attendants.find((p: any) => normalizeCode(p?.code || '') === full);
+        let selected = matchFull;
+        if (!selected && num) {
+          const matches = attendants.filter((p: any) => canonNum(p?.code || '') === num);
+          if (matches.length === 1) selected = matches[0];
+          else if (matches.length > 1) return NextResponse.json({ ok: false, error: 'AMBIGUOUS_CODE' }, { status: 409 });
+        }
+        if (selected?.code) {
+          row = await ensureLoginProvision(selected.code);
+        }
+      } catch (err) {
+        console.error('admin_codes lookup failed', err);
+        return NextResponse.json({ ok: false, error: 'SESSION_STORE_UNAVAILABLE' }, { status: 503 });
       }
     }
 
     if (!row) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
 
     // Lookup attendant → outlet by row.code
-    let att: any = await (prisma as any).attendant.findFirst({
-      where: { loginCode: { equals: row.code, mode: "insensitive" } },
-    });
-    if (!att?.outletId) {
-      // Try to auto-heal binding now (e.g., existing LoginCode but no outlet)
-      await ensureLoginProvision(row.code);
+    let att: any = null;
+    try {
       att = await (prisma as any).attendant.findFirst({
         where: { loginCode: { equals: row.code, mode: "insensitive" } },
       });
       if (!att?.outletId) {
-        return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
+        // Try to auto-heal binding now (e.g., existing LoginCode but no outlet)
+        await ensureLoginProvision(row.code);
+        att = await (prisma as any).attendant.findFirst({
+          where: { loginCode: { equals: row.code, mode: "insensitive" } },
+        });
+        if (!att?.outletId) {
+          return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
+        }
       }
+    } catch (err) {
+      console.error("attendant lookup failed", err);
+      return NextResponse.json({ ok: false, error: "SESSION_STORE_UNAVAILABLE" }, { status: 503 });
     }
 
     // Create DB-backed session and set bk_sess cookie (attendant)
-    await createSession(att.id);
+    try {
+      await createSession(att.id);
+    } catch (err) {
+      console.error("createSession failed", err);
+      return NextResponse.json({ ok: false, error: "SESSION_CREATE_FAILED" }, { status: 503 });
+    }
 
     // Also set a unified role cookie for convenience
     const res = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
