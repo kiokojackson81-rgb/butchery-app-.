@@ -34,3 +34,61 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Additional API Endpoints (Project Specific)
+
+### POST /api/notify/supply
+
+Send multi-role WhatsApp supply notifications (attendant, supplier, supervisor) with 24h free‑text gating.
+
+Body example:
+
+```json
+{
+	"payload": {
+		"outlet": "Outlet A",
+		"ref": "SUP-2024-10-14-1",
+		"dateISO": "2025-10-14T08:15:00.000Z",
+		"supplierName": "John",
+		"attendantName": "Mary",
+		"items": [
+			{ "name": "Beef", "qty": 120.5, "unit": "kg", "unitPrice": 520 },
+			{ "name": "Goat", "qty": 40 }
+		]
+	},
+	"supplierCode": "SUP123",
+	"templates": {
+		"attendant": "supply_attendant",
+		"supplier": "supply_supplier",
+		"supervisor": "supply_supervisor"
+	}
+}
+```
+
+Behavior:
+
+Response shape:
+```json
+{ "ok": true, "result": { "ok": true, "results": { "attendant": { /* send result */ }, "supervisor": { /* ... */ } } } }
+```
+
+Environment variables influencing this endpoint:
+
+### POST /api/analytics/recompute
+
+Recompute analytics (OutletPerformance + AttendantKPI) for a date. Auth required via `x-internal-key` if `INTERNAL_API_KEY` is set.
+
+Body examples:
+Single outlet:
+```json
+{ "date": "2025-10-14", "outlet": "Outlet A" }
+```
+All active outlets (omit outlet):
+```json
+{ "date": "2025-10-14" }
+```
+
+Responses:
+`200 { ok: true, date, outlet }` or error with `{ ok: false, error }` (errors: `UNAUTHORIZED`, `BAD_DATE`).
+
+

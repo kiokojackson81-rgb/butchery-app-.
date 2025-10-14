@@ -1,0 +1,149 @@
+// src/lib/wa_supply_notify.ts
+// Formatter & dispatcher for supply notifications with role-specific text
+// and 24h session window awareness.
+
+import { prisma } from "@/lib/prisma";
+import { sendTextSafe, sendTemplate } from "@/lib/wa";
+
+export type SupplyItem = { name: string; qty: number; unit?: string; unitPrice?: number };
+export type SupplyPayload = {
+  outlet: string;
+  ref: string;
+  dateISO: string;
+  supplierName: string;
+  attendantName: string;
+  items: SupplyItem[];
+  qtyUnitDefault?: string;
+};
+export type Role = "attendant" | "supplier" | "supervisor";
+
+const num0 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 });
+const num2 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 2 });
+
+function shillings(v: number) { return num0.format(Math.round(v)); }
+
+function lineFor(item: SupplyItem, omitPrice: boolean): string {
+  const unit = item.unit || "kg";
+  if (omitPrice || typeof item.unitPrice !== "number") {
+    return `- ${item.name}: ${num2.format(item.qty)}${unit}`;
+  }
+  const value = item.qty * item.unitPrice;
+  return `- ${item.name}: ${num2.format(item.qty)}${unit} @ ${shillings(item.unitPrice)} = ${shillings(value)}`;
+}
+
+function sumTotals(items: SupplyItem[], defaultUnit = "kg") {
+  const unit = items.find(i => i.unit)?.unit ?? defaultUnit;
+  let totalQty = 0; let totalCost = 0;
+  for (const it of items) {
+    totalQty += it.qty;
+    if (typeof it.unitPrice === "number") totalCost += it.qty * it.unitPrice;
+  }
+  return { totalQty, unit, totalCost };
+}
+
+function fmtDate(dateISO: string) {
+  const when = new Date(dateISO);
+  return when.toLocaleString("en-KE", {
+    weekday: "short", year: "numeric", month: "short", day: "2-digit",
+    hour: "2-digit", minute: "2-digit"
+  });
+}
+
+export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
+  const itemLines = p.items.map(i => lineFor(i, role === "attendant")).join("\n");
+  const { totalQty, unit, totalCost } = sumTotals(p.items, p.qtyUnitDefault || "kg");
+  const dateStr = fmtDate(p.dateISO);
+
+  if (role === "attendant") {
+    return [
+      `🧾 Supply Received — ${p.outlet}`,
+      `Date: ${dateStr}`,
+      ``,
+      `Items:`,
+      itemLines,
+      ``,
+      `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
+      ``,
+      `Delivered by: ${p.supplierName}`,
+      `Received by: ${p.attendantName}`,
+      ``,
+      `Action: Reply OK to confirm.`,
+      `Note: These quantities become today’s Opening (plus any later supplies). If anything is wrong, reply ISSUE: <details>.`,
+    ].join("\n");
+  }
+  if (role === "supplier") {
+    return [
+      `✅ Delivery Confirmed — ${p.outlet}`,
+      `Date: ${dateStr}`,
+      ``,
+      `Items supplied:`,
+      itemLines,
+      ``,
+      `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
+      ``,
+      `Received by: ${p.attendantName}`,
+      `Reference: ${p.ref}`,
+      ``,
+      `Thank you. If any correction is needed, reply CORRECT: <what to fix>.`,
+    ].join("\n");
+  }
+  return [
+    `📦 Supply Alert — ${p.outlet}`,
+    `Date: ${dateStr}`,
+    ``,
+    `Items:`,
+    itemLines,
+    ``,
+    `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
+    ``,
+    `Delivered by: ${p.supplierName}`,
+    `Received by: ${p.attendantName}`,
+    `Ref: ${p.ref}`,
+    ``,
+    `Note: This stock posts to OpeningEff = Yesterday Closing + Today Supply.`,
+  ].join("\n");
+}
+
+// Determine if within 24h inbound window for free-text eligibility
+async function hasRecentInbound(phoneE164: string): Promise<boolean> {
+  try {
+    const rows: any[] = await (prisma as any).$queryRaw`SELECT MAX("createdAt") AS last_in FROM "WaMessageLog" WHERE direction='in' AND (payload->'meta'->>'phoneE164' = ${phoneE164} OR payload->>'phone' = ${phoneE164})`;
+    const last = rows?.[0]?.last_in ? new Date(rows[0].last_in).getTime() : 0;
+    if (!last) return false;
+    return Date.now() - last <= 24*60*60*1000;
+  } catch { return false; }
+}
+
+export type SupplyNotifyPhones = { attendant?: string | null; supplier?: string | null; supervisor?: string | null };
+export type SupplyNotifyTemplates = { attendant?: string; supplier?: string; supervisor?: string };
+
+export async function notifySupplyMultiRole(opts: {
+  payload: SupplyPayload;
+  phones: SupplyNotifyPhones;
+  templates?: SupplyNotifyTemplates; // fallback template names when session closed
+}) {
+  const { payload, phones, templates } = opts;
+  const results: Record<string, any> = {};
+  for (const role of ["attendant","supplier","supervisor"] as Role[]) {
+    const phone = (phones as any)[role];
+    if (!phone) continue;
+    const text = formatSupplyMessage(role, payload);
+    const windowOpen = await hasRecentInbound(phone);
+    if (windowOpen) {
+      results[role] = await sendTextSafe(phone, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } else if (templates && (templates as any)[role]) {
+      // fallback to template; map a few dynamic params (we keep it minimal)
+      const tmplName = (templates as any)[role];
+      try {
+        const params = [payload.outlet, payload.ref];
+        results[role] = await sendTemplate({ to: phone, template: tmplName, params, contextType: "TEMPLATE_REOPEN" });
+      } catch (e: any) {
+        results[role] = { ok: false, error: String(e?.message || e) };
+      }
+    } else {
+      // No template configured; attempt text anyway (may fail if window closed but we log it)
+      results[role] = await sendTextSafe(phone, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
+  }
+  return { ok: true, results };
+}

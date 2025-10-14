@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendText } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
+import { notifySupplyMultiRole } from "@/lib/wa_supply_notify";
 import { enqueueOpsEvent } from "@/lib/opsEvents";
 import { getTodaySupplySummary, SupplySummaryLine } from "@/server/supply";
 import { createReviewItem } from "@/server/review";
@@ -56,66 +57,33 @@ async function sendBulk(phones: string[], message: string) {
   }
 }
 
-export async function notifySupplyPosted(opts: {
-  outletName: string;
-  date?: string;
-  supplierCode?: string | null;
-}) {
+export async function notifySupplyPosted(opts: { outletName: string; date?: string; supplierCode?: string | null }) {
   const outletName = opts.outletName.trim();
   if (!outletName) return { sent: false, reason: "no-outlet" };
   const date = opts.date || format(new Date(), "yyyy-MM-dd");
-
   const lines = await getTodaySupplySummary(outletName, date);
   if (!lines.length) return { sent: false, reason: "no-lines" };
 
-  const linesTxt = buildLines(lines);
-  const total = totalBuy(lines);
-
-  const attendants = await prisma.phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } });
-  const supervisors = await prisma.phoneMapping.findMany({ where: { role: "supervisor" } });
-  const admins = await prisma.phoneMapping.findMany({ where: { role: "admin" } });
-  const supplier = opts.supplierCode
-    ? await prisma.phoneMapping.findUnique({ where: { code: opts.supplierCode } })
-    : null;
-
-  const msgAttendant = `Supply received
-You’ve been supplied at ${outletName}:
-${linesTxt}
-If anything is wrong, reply DISPUTE and describe the issue.`;
-
-  const msgSupervisor = `New supply recorded for ${outletName}
-${linesTxt}
-Total buy: ${money(total)}
-Review in dashboard. Disputes will alert you.`;
-
-  const msgAdmin = `Supply posted — ${outletName}
-${linesTxt}
-Total buy: ${money(total)}
-Recorded in system.`;
-
-  const msgSupplier = `Thank you. Supply submitted to ${outletName}
-${linesTxt}
-If disputed by the outlet, Supervisor will contact you.`;
-
-  // Enqueue OpsEvent for the worker to compose and send role-aware GPT messages.
-  // Keep a fallback immediate send for WA_AUTOSEND_ENABLED to not regress rollout.
+  // Derive a synthetic payload for new formatter (aggregate lines into SupplyPayload shape)
+  const payload = {
+    outlet: outletName,
+    ref: `SUP-${date}`,
+    dateISO: new Date().toISOString(),
+    supplierName: opts.supplierCode || "Supplier",
+    attendantName: "Attendant",
+    items: lines.map(l => ({ name: l.name, qty: l.qty, unit: l.unit, unitPrice: l.buyPrice })),
+  };
+  const attendant = await prisma.phoneMapping.findFirst({ where: { role: "attendant", outlet: outletName } });
+  const supervisor = await prisma.phoneMapping.findFirst({ where: { role: "supervisor" } });
+  const supplier = opts.supplierCode ? await prisma.phoneMapping.findUnique({ where: { code: opts.supplierCode } }) : null;
+  const phones = { attendant: attendant?.phoneE164 || null, supervisor: supervisor?.phoneE164 || null, supplier: supplier?.phoneE164 || null };
   try {
+    const res = await notifySupplyMultiRole({ payload, phones });
     await enqueueOpsEvent({ id: makeId(), type: 'SUPPLY_SUBMITTED', entityId: null, outletId: outletName, supplierId: opts.supplierCode || null, actorRole: null, dedupeKey: `SUPPLY_SUBMITTED:${outletName}:${date}` });
+    return { sent: true, multiRole: res };
   } catch (e) {
-    // if enqueue fails, fallback to existing direct sends to avoid losing notifications
-  await sendBulk(uniquePhones(attendants), msgAttendant);
-        await sendBulk(uniquePhones(supervisors), msgSupervisor);
-    await sendBulk(uniquePhones(admins), msgAdmin);
-    if (supplier?.phoneE164) {
-      if (process.env.WA_AUTOSEND_ENABLED === "true") {
-          await sendText(supplier.phoneE164, msgSupplier, "AI_DISPATCH_TEXT", { gpt_sent: true });
-        } else {
-          await sendOpsMessage(supplier.phoneE164, { kind: "free_text", text: msgSupplier });
-        }
-    }
+    return { sent: true, degraded: true };
   }
-
-  return { sent: true };
 }
 
 export async function handleSupplyDispute(opts: {

@@ -161,6 +161,8 @@ model PhoneMapping {
   updatedAt DateTime @updatedAt
 
   @@index([code], map: "phonemapping_code_idx")
+  @@index([role, outlet])
+  @@index([phoneE164])
 }
 
 /// Chatrace API settings (singleton row id=1)
@@ -261,6 +263,9 @@ model WaMessageLog {
   status       String?
   type         String?
   createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([direction, createdAt])
 }
 
 /// WhatsApp chat session state (per phone)
@@ -447,6 +452,8 @@ model AttendantKPI {
   attendant        Attendant @relation(fields: [attendantId], references: [id])
 
   @@unique([date, attendantId, outletName])
+  @@index([outletName, date])
+  @@index([attendantId, date])
 }
 
 /// Daily supply snapshot per product for reorder logic
@@ -471,6 +478,8 @@ model ProductSupplyStat {
   createdAt        DateTime @default(now())
 
   @@unique([date, outletName, productKey])
+  @@index([outletName, date])
+  @@index([productKey, date])
 }
 
 /// System-generated supply recommendations
