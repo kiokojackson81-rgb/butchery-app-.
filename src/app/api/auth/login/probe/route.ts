@@ -53,8 +53,9 @@ export async function GET(req: Request) {
     try {
       const att = await (prisma as any).attendant.findFirst({
         where: { loginCode: { equals: full, mode: "insensitive" } },
+        select: { id: true, outletId: true, loginCode: true, name: true },
       });
-      out.attendant = att ? { found: true, id: att.id, outletId: att.outletId || null } : { found: false };
+      out.attendant = att ? { found: true, id: att.id, outletId: (att as any).outletId || null } : { found: false };
     } catch (e: any) {
       out.attendant = { error: String(e?.message || e) };
     }

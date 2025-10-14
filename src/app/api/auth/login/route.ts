@@ -53,6 +53,7 @@ async function ensureLoginProvision(loginCode: string) {
 
   let attendant = await (prisma as any).attendant.findFirst({
     where: { loginCode: { equals: code, mode: "insensitive" } },
+    select: { id: true, outletId: true, loginCode: true, name: true },
   }).catch(() => null);
 
   if (attendant) {
@@ -60,6 +61,7 @@ async function ensureLoginProvision(loginCode: string) {
       attendant = await (prisma as any).attendant.update({
         where: { id: attendant.id },
         data: { outletId: outletRow.id },
+        select: { id: true, outletId: true, loginCode: true, name: true },
       }).catch(() => attendant);
     }
   } else {
@@ -69,6 +71,7 @@ async function ensureLoginProvision(loginCode: string) {
         loginCode: code,
         outletId: outletRow?.id ?? null,
       },
+      select: { id: true, outletId: true, loginCode: true, name: true },
     }).catch(() => null);
   }
 
@@ -181,12 +184,14 @@ export async function POST(req: Request) {
     try {
       att = await (prisma as any).attendant.findFirst({
         where: { loginCode: { equals: row.code, mode: "insensitive" } },
+        select: { id: true, outletId: true, loginCode: true, name: true },
       });
       if (!att?.outletId) {
         // Try to auto-heal binding now (e.g., existing LoginCode but no outlet)
         await ensureLoginProvision(row.code);
         att = await (prisma as any).attendant.findFirst({
           where: { loginCode: { equals: row.code, mode: "insensitive" } },
+          select: { id: true, outletId: true, loginCode: true, name: true },
         });
         if (!att?.outletId) {
           return NextResponse.json({ ok: false, error: "CODE_NOT_ASSIGNED" }, { status: 422 });
