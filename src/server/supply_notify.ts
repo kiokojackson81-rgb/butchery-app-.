@@ -65,13 +65,46 @@ export async function notifySupplyPosted(opts: { outletName: string; date?: stri
   if (!lines.length) return { sent: false, reason: "no-lines" };
 
   // Derive a synthetic payload for new formatter (aggregate lines into SupplyPayload shape)
+  // Opening-effective totals = yesterday closing + today's supply
+  const y = format(new Date(new Date(date + 'T00:00:00.000Z').getTime() - 24*3600*1000), 'yyyy-MM-dd');
+  const prevClosings = await (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }).catch(() => []);
+  const openingMap = new Map<string, number>();
+  for (const r of prevClosings || []) {
+    const key = String((r as any).itemKey || '');
+    const qty = Number((r as any).closingQty || 0);
+    if (!key) continue;
+    openingMap.set(key, (openingMap.get(key) || 0) + (Number.isFinite(qty) ? qty : 0));
+  }
+  const supplyMap = new Map<string, number>();
+  for (const l of lines || []) supplyMap.set(l.itemKey, (supplyMap.get(l.itemKey) || 0) + Number(l.qty || 0));
+  // Pricebook sell prices for expected values
+  const pbRows = await (prisma as any).pricebookRow.findMany({ where: { outletName } }).catch(() => []);
+  const sellByKey = new Map<string, number>((pbRows || []).map((r: any) => [String(r.productKey), Number(r.sellPrice || 0)]));
+  let openingTotalQty = 0, supplyTotalQty = 0, totalStockQty = 0, expectedTotalValue = 0;
+  for (const [k, q] of openingMap.entries()) openingTotalQty += Number(q || 0);
+  for (const l of lines || []) supplyTotalQty += Number(l.qty || 0);
+  totalStockQty = openingTotalQty + supplyTotalQty;
+  for (const l of lines || []) {
+    const k = l.itemKey;
+    const openQ = Number(openingMap.get(k) || 0);
+    const totalQ = openQ + Number(l.qty || 0);
+    const sell = Number(sellByKey.get(k) || 0);
+    if (sell > 0 && totalQ > 0) expectedTotalValue += totalQ * sell;
+  }
+  const expectedSellPrice = totalStockQty > 0 ? expectedTotalValue / totalStockQty : 0;
+
   const payload = {
     outlet: outletName,
     ref: `SUP-${date}`,
     dateISO: new Date().toISOString(),
     supplierName: opts.supplierCode || "Supplier",
     attendantName: "Attendant",
-    items: lines.map(l => ({ name: l.name, qty: l.qty, unit: l.unit, unitPrice: l.buyPrice })),
+    items: lines.map(l => ({ name: l.name, qty: l.qty, unit: l.unit, unitPrice: l.buyPrice, productKey: l.itemKey })),
+    openingTotalQty,
+    supplyTotalQty,
+    totalStockQty,
+    expectedSellPrice: expectedSellPrice || undefined,
+    expectedTotalValue: expectedTotalValue || undefined,
   };
   const attendant = await prisma.phoneMapping.findFirst({ where: { role: "attendant", outlet: outletName } });
   const supervisor = await prisma.phoneMapping.findFirst({ where: { role: "supervisor" } });

@@ -5,7 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendTextSafe, sendTemplate } from "@/lib/wa";
 
-export type SupplyItem = { name: string; qty: number; unit?: string; unitPrice?: number };
+export type SupplyItem = { name: string; qty: number; unit?: string; unitPrice?: number; productKey?: string };
 export type SupplyPayload = {
   outlet: string;
   ref: string;
@@ -14,6 +14,12 @@ export type SupplyPayload = {
   attendantName: string;
   items: SupplyItem[];
   qtyUnitDefault?: string;
+  // Optional enhanced summary fields (precomputed by caller)
+  openingTotalQty?: number;
+  supplyTotalQty?: number;
+  totalStockQty?: number;
+  expectedSellPrice?: number; // per kg
+  expectedTotalValue?: number;
 };
 export type Role = "attendant" | "supplier" | "supervisor";
 
@@ -43,40 +49,44 @@ function sumTotals(items: SupplyItem[], defaultUnit = "kg") {
 
 function fmtDate(dateISO: string) {
   const when = new Date(dateISO);
-  return when.toLocaleString("en-KE", {
-    weekday: "short", year: "numeric", month: "short", day: "2-digit",
-    hour: "2-digit", minute: "2-digit"
-  });
+  const date = when.toLocaleDateString("en-KE", { weekday: "short", year: "numeric", month: "short", day: "2-digit" });
+  const time = when.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+  return { date, time };
 }
 
 export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
   const itemLines = p.items.map(i => lineFor(i, role === "attendant")).join("\n");
   const { totalQty, unit, totalCost } = sumTotals(p.items, p.qtyUnitDefault || "kg");
-  const dateStr = fmtDate(p.dateISO);
+  const dateObj = fmtDate(p.dateISO);
+  const dateStrFull = `${dateObj.date} ${dateObj.time}`;
 
   if (role === "attendant") {
-    return [
+    const ts = fmtDate(p.dateISO);
+    const openingStr = typeof p.openingTotalQty === 'number' ? `${num2.format(p.openingTotalQty)}${unit}` : undefined;
+    const supplyStr = typeof p.supplyTotalQty === 'number' ? `${num2.format(p.supplyTotalQty)}${unit}` : `${num2.format(totalQty)}${unit}`;
+    const totalStockStr = typeof p.totalStockQty === 'number' ? `${num2.format(p.totalStockQty)}${unit}` : undefined;
+    const priceStr = typeof p.expectedSellPrice === 'number' && p.expectedSellPrice > 0 ? `Ksh ${shillings(p.expectedSellPrice)}` : undefined;
+    const totalValStr = typeof p.expectedTotalValue === 'number' && p.expectedTotalValue > 0 ? `Ksh ${shillings(p.expectedTotalValue)}` : undefined;
+    const lines: string[] = [
       `🧾 Supply Update — ${p.outlet}`,
-      `Date: ${dateStr}`,
+      `📅 Date: ${ts.date} • ⏰ Time: ${ts.time}`,
       ``,
-      `Items:`,
+      `🥩 Items supplied:`,
       itemLines,
-      ``,
-      `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
-      ``,
-      `Received by: ${p.attendantName}`,
-      `Supplied by: ${p.supplierName}`,
-      ``,
-      `⚠️ Action:`,
-      `Reply OK if everything is correct.`,
-      `If there’s a mismatch, reply 1 to start the dispute process – you’ll be guided step by step.`,
-      `(Unconfirmed supplies lock after 24 hours.)`,
-    ].join("\n");
+    ];
+    lines.push(``);
+    if (openingStr) lines.push(`📦 Today’s opening stock: ${openingStr}`);
+    lines.push(`➕ New supply: ${supplyStr}`);
+    if (totalStockStr) lines.push(`📊 Total stock: ${totalStockStr}`);
+    if (priceStr) lines.push(``, `💰 Expected price per kg: ${priceStr}`);
+    if (totalValStr) lines.push(`🧮 Expected total value: ${totalValStr}`);
+    lines.push(``, `👨‍🍳 Received by: ${p.attendantName}`, `🚚 Supplied by: ${p.supplierName}`, ``, `⚠️ Action:`, `Reply OK if everything is correct.`, `If there’s a mismatch, reply 1 to start the dispute process – you’ll be guided step by step.`, `*(Unconfirmed supplies lock after 24 hours.)*`);
+    return lines.join("\n");
   }
   if (role === "supplier") {
     return [
       `✅ Delivery Confirmed — ${p.outlet}`,
-      `Date: ${dateStr}`,
+      `Date: ${dateStrFull}`,
       ``,
       `Items supplied:`,
       itemLines,
@@ -91,7 +101,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
   }
   return [
     `📦 Supply Alert — ${p.outlet}`,
-    `Date: ${dateStr}`,
+    `Date: ${dateStrFull}`,
     ``,
     `Items:`,
     itemLines,
