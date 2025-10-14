@@ -1,6 +1,5 @@
 // server/wa/wa_supplier_flow.ts
 import { prisma } from "@/lib/prisma";
-import { notifySupplyPosted } from "@/server/supply_notify";
 import { notifySupplyItem } from "@/server/supply_notify_item";
 import { sendTextSafe, sendInteractiveSafe, sendText, sendInteractive } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
