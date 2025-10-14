@@ -20,11 +20,28 @@ export type SupervisorState =
   | "SUP_REVIEW_PICK_FILTER"
   | "SUP_REVIEW_LIST"
   | "SUP_REVIEW_ITEM"
+  | "SUP_REVIEW_PARTIAL_QTY"
   | "SUP_DEPOSIT_LIST"
   | "SUP_DEPOSIT_ITEM"
   | "SUP_SUMMARY"
   | "SUP_LOCK_CONFIRM"
   | "SUP_UNLOCK_CONFIRM";
+// Helper to build enhanced approve/reject buttons for supply disputes
+function buildDisputeDecisionButtons(id: string) {
+  return {
+    type: "button",
+    body: { text: "Resolve dispute:" },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: `SUP_APPROVE:${id}`, title: "Approve full" } },
+        { type: "reply", reply: { id: `SUP_PARTIAL:${id}`, title: "Approve partial" } },
+        { type: "reply", reply: { id: `SUP_REJECT_SHORT:${id}`, title: "Reject (ok)" } },
+        { type: "reply", reply: { id: `SUP_REJECT_DOC:${id}`, title: "Reject (docs)" } },
+        { type: "reply", reply: { id: `SUP_REJECT_OTHER:${id}`, title: "Reject other" } },
+      ].slice(0,5),
+    },
+  } as any;
+}
 
 export type SupervisorCursor = {
   outlet?: string;
@@ -172,8 +189,8 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
       return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
-    // Provide richer details for supply_dispute_item
     let detail = compactReviewText(item);
+    let interactive: any = buildApproveReject(id);
     if (item.type === 'supply_dispute_item') {
       const p = (item.payload || {}) as any;
       detail = [
@@ -184,30 +201,41 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
         `Reason: ${p.reasonText || p.reasonCode}`,
         `Ref: ${p.rowId || 'row'}`,
         '',
-        'Approve = adjust opening qty to claimed. Reject = keep recorded.'
+        'Pick an action below:'
       ].join('\n');
+      interactive = buildDisputeDecisionButtons(id);
     }
     await sendText(gp, detail, "AI_DISPATCH_TEXT", { gpt_sent: true });
-    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildApproveReject(id) as any }, "AI_DISPATCH_INTERACTIVE");
+    return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive }, 'AI_DISPATCH_INTERACTIVE');
   }
 
   if (replyId.startsWith("SUP_APPROVE:")) {
     const id = replyId.split(":")[1]!;
     const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
+    if (!item || item.status !== 'pending') {
+      await sendText(gp, 'Already resolved or not found.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
     if (item?.type === 'supply_dispute_item') {
       const p = (item.payload || {}) as any;
       // Adjust opening row to claimedQty if rowId lookup succeeds
       if (p?.rowId && Number(p.claimedQty) >= 0) {
         try {
           const row = await (prisma as any).supplyOpeningRow.findUnique({ where: { id: p.rowId } });
-          if (row) {
-            await (prisma as any).supplyOpeningRow.update({ where: { id: p.rowId }, data: { qty: p.claimedQty } });
-          }
+          if (row) await (prisma as any).supplyOpeningRow.update({ where: { id: p.rowId }, data: { qty: p.claimedQty } });
         } catch {}
       }
-      const payload = { ...p, resolvedAt: new Date().toISOString(), resolution: 'approved', adjustedQty: p.claimedQty, supervisorCode: sess.code };
+      const payload = {
+        ...p,
+        originalRecordedQty: p.originalRecordedQty ?? p.recordedQty,
+        originalClaimedQty: p.originalClaimedQty ?? p.claimedQty,
+        resolvedAt: new Date().toISOString(),
+        resolution: 'approved',
+        adjustedQty: p.claimedQty,
+        supervisorCode: sess.code,
+      };
       await (prisma as any).reviewItem.update({ where: { id }, data: { status: 'approved', payload } });
-      // Notify attendant if phone can be inferred via attendantCode mapping
+      // Notify attendant if possible
       try {
         if (p.attendantCode) {
           const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: p.attendantCode } });
@@ -219,8 +247,68 @@ export async function handleSupervisorAction(sess: any, replyId: string, phoneE1
     }
     await sendText(gp, "Approved ✅", "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...(sess.cursor as any), date: today } });
-  return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
+    return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
   }
+
+  if (replyId.startsWith('SUP_PARTIAL:')) {
+    const id = replyId.split(':')[1]!;
+    const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
+    if (!item || item.type !== 'supply_dispute_item') {
+      await sendText(gp, 'Not a dispute item.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
+    if (item.status !== 'pending') {
+      await sendText(gp, 'Already resolved.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
+    const p = (item.payload || {}) as any;
+    await saveSession(sess.id, { state: 'SUP_REVIEW_PARTIAL_QTY', cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
+    await sendText(gp, `Enter approved qty (recorded ${p.recordedQty}, claimed ${p.claimedQty}). Numbers only or X to cancel.`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+    return;
+  }
+
+  if (replyId.startsWith('SUP_REJECT_SHORT:') || replyId.startsWith('SUP_REJECT_DOC:') || replyId.startsWith('SUP_REJECT_OTHER:')) {
+    const id = replyId.split(':')[1]!;
+    const item = await (prisma as any).reviewItem.findUnique({ where: { id } });
+    if (!item) {
+      await sendText(gp, 'Item not found.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
+    if (item.type === 'supply_dispute_item') {
+      const p = (item.payload || {}) as any;
+      const canned = replyId.startsWith('SUP_REJECT_SHORT:') ? 'Recorded correct' : replyId.startsWith('SUP_REJECT_DOC:') ? 'Insufficient evidence' : 'Other';
+      if (canned === 'Other') {
+        await saveSession(sess.id, { state: 'SUP_REVIEW_ITEM', cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
+        await sendText(gp, 'Send reject reason (max 200 chars).', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+        return;
+      }
+      const payload = {
+        ...p,
+        originalRecordedQty: p.originalRecordedQty ?? p.recordedQty,
+        originalClaimedQty: p.originalClaimedQty ?? p.claimedQty,
+        reasonSupervisor: canned,
+        resolvedAt: new Date().toISOString(),
+        resolution: 'rejected',
+        supervisorCode: sess.code,
+      };
+      await (prisma as any).reviewItem.update({ where: { id }, data: { status: 'rejected', payload } });
+      try {
+        if (p.attendantCode) {
+          const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: p.attendantCode } });
+          if (pm?.phoneE164) await sendText(toGraphPhone(pm.phoneE164), `Dispute rejected: ${p.itemKey} kept at ${p.recordedQty}${p.unit || ''}.`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+        }
+      } catch {}
+      await sendText(gp, 'Rejected ❌', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      await saveSession(sess.id, { state: 'SUP_MENU', cursor: { ...(sess.cursor as any), date: today } });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu((sess.cursor as any)?.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    } else {
+      await saveSession(sess.id, { state: 'SUP_REVIEW_ITEM', cursor: { ...(sess.cursor as any), reviewId: id, date: today } });
+      await sendText(gp, 'Send a short reason (max 200 chars).', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return;
+    }
+  }
+
+  // (Old duplicate approval / reject logic removed above)
 
   if (replyId.startsWith("SUP_REJECT:")) {
     await saveSession(sess.id, { state: "SUP_REVIEW_ITEM", cursor: { ...(sess.cursor as any), date: today } });
@@ -274,9 +362,22 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
     const reason = String(text || "").slice(0, 200);
     // Merge reason into payload
     const item = await (prisma as any).reviewItem.findUnique({ where: { id: cur.reviewId } });
+    if (!item || item.status !== 'pending') {
+      await saveSession(sess.id, { state: 'SUP_MENU', cursor: { ...cur, reviewId: undefined } });
+      await sendText(gp, 'Already resolved or not found.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu(cur.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
     if (item?.type === 'supply_dispute_item') {
       const p = (item.payload || {}) as any;
-      const payload = { ...p, reasonSupervisor: reason, resolvedAt: new Date().toISOString(), resolution: 'rejected', supervisorCode: sess.code };
+      const payload = {
+        ...p,
+        originalRecordedQty: p.originalRecordedQty ?? p.recordedQty,
+        originalClaimedQty: p.originalClaimedQty ?? p.claimedQty,
+        reasonSupervisor: reason,
+        resolvedAt: new Date().toISOString(),
+        resolution: 'rejected',
+        supervisorCode: sess.code,
+      };
       await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: 'rejected', payload } });
       // Notify attendant if possible
       try {
@@ -293,6 +394,55 @@ export async function handleSupervisorText(sess: any, text: string, phoneE164: s
     }
     await saveSession(sess.id, { state: "SUP_MENU", cursor: { ...cur, date: today, reviewId: undefined } });
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupervisorMenu(cur.outlet) as any }, "AI_DISPATCH_INTERACTIVE");
+  }
+
+  if ((sess.state as SupervisorState) === 'SUP_REVIEW_PARTIAL_QTY' && cur.reviewId) {
+    const raw = String(text || '').trim();
+    if (/^x$/i.test(raw)) {
+      await saveSession(sess.id, { state: 'SUP_MENU', cursor: { ...cur, reviewId: undefined } });
+      await sendText(gp, 'Cancelled.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu(cur.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
+    const qty = Number(raw.replace(/,/g, '.'));
+    if (!isFinite(qty) || qty < 0) {
+      await sendText(gp, 'Enter a valid number or X to cancel.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return;
+    }
+    const itemP = await (prisma as any).reviewItem.findUnique({ where: { id: cur.reviewId } });
+    if (!itemP || itemP.type !== 'supply_dispute_item' || itemP.status !== 'pending') {
+      await saveSession(sess.id, { state: 'SUP_MENU', cursor: { ...cur, reviewId: undefined } });
+      return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu(cur.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
+    }
+    const p = (itemP.payload || {}) as any;
+    // Clamp qty between min(recorded, claimed) and max(recorded, claimed) to avoid wild entries
+    const minQ = Math.min(Number(p.recordedQty) || 0, Number(p.claimedQty) || 0);
+    const maxQ = Math.max(Number(p.recordedQty) || 0, Number(p.claimedQty) || 0);
+    const adj = Math.max(minQ, Math.min(maxQ, qty));
+    if (p?.rowId && isFinite(adj)) {
+      try {
+        const row = await (prisma as any).supplyOpeningRow.findUnique({ where: { id: p.rowId } });
+        if (row) await (prisma as any).supplyOpeningRow.update({ where: { id: p.rowId }, data: { qty: adj } });
+      } catch {}
+    }
+    const payload = {
+      ...p,
+      originalRecordedQty: p.originalRecordedQty ?? p.recordedQty,
+      originalClaimedQty: p.originalClaimedQty ?? p.claimedQty,
+      resolvedAt: new Date().toISOString(),
+      resolution: 'approved_partial',
+      adjustedQty: adj,
+      supervisorCode: sess.code,
+    };
+    await (prisma as any).reviewItem.update({ where: { id: cur.reviewId }, data: { status: 'approved', payload } });
+    try {
+      if (p.attendantCode) {
+        const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: p.attendantCode } });
+        if (pm?.phoneE164) await sendText(toGraphPhone(pm.phoneE164), `Dispute partial approve: ${p.itemKey} set to ${adj}${p.unit || ''}.`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      }
+    } catch {}
+    await sendText(gp, `Partial approved at ${adj}${p.unit || ''} ✅`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+    await saveSession(sess.id, { state: 'SUP_MENU', cursor: { ...cur, reviewId: undefined } });
+    return sendInteractive({ messaging_product: 'whatsapp', to: gp, type: 'interactive', interactive: buildSupervisorMenu(cur.outlet) as any }, 'AI_DISPATCH_INTERACTIVE');
   }
 
   if ((sess.state as SupervisorState) === "SUP_DEPOSIT_ITEM" && cur.depositId) {
