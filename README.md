@@ -111,4 +111,23 @@ Env flags summary:
 - `INTERNAL_API_KEY`: required header `x-internal-key` for protected recompute call.
 - `SUPERVISOR_COMMISSION_RECOMPUTE=1`: include supervisor commission upserts during recompute.
 
+### Batch Recompute Script
+
+For historical backfill across a date range use the helper script:
+
+```
+npm run recompute:range -- --start 2025-10-01 --end 2025-10-14
+npm run recompute:range -- --start 2025-10-01 --end 2025-10-14 --outlet "Outlet A"
+SUPERVISOR_COMMISSION_RECOMPUTE=1 npm run recompute:range -- -s 2025-09-24 -e 2025-10-10 --dry-run
+```
+
+Options:
+- `--start YYYY-MM-DD` (required)
+- `--end YYYY-MM-DD` (required)
+- `--outlet NAME` limit to single outlet
+- `--dry-run` skip persistence
+- `--sleep-ms N` delay between day recomputes (throttle load)
+
+Outputs one JSON line per day with elapsed ms and supervisor row count when enabled.
+
 

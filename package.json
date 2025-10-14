@@ -24,6 +24,7 @@
     "db:seed:assignments": "npx tsx scripts/seedAssignments.ts",
   "db:seed:analytics": "tsx scripts/seed-analytics.ts",
   "compute:nightly": "tsx scripts/nightly-compute.ts",
+    "recompute:range": "tsx scripts/recompute-range.ts",
     "seed:attendant:sample": "tsx scripts/seed-attendant-code.ts",
     "codes:normalize": "tsx scripts/normalize-codes.ts",
     "db:reset:admin": "node scripts/db-reset-official.mjs --confirm WIPE",
