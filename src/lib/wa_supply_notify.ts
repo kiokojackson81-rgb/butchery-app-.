@@ -56,7 +56,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
 
   if (role === "attendant") {
     return [
-      `🧾 Supply Received — ${p.outlet}`,
+      `🧾 Supply Update — ${p.outlet}`,
       `Date: ${dateStr}`,
       ``,
       `Items:`,
@@ -64,11 +64,13 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
       ``,
       `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
       ``,
-      `Delivered by: ${p.supplierName}`,
       `Received by: ${p.attendantName}`,
+      `Supplied by: ${p.supplierName}`,
       ``,
-      `Action: Reply OK to confirm.`,
-      `Note: These quantities become today’s Opening (plus any later supplies). If anything is wrong, reply ISSUE: <details>.`,
+      `⚠️ Action:`,
+      `Reply OK if everything is correct.`,
+      `If there’s a mismatch, reply 1 to start the dispute process – you’ll be guided step by step.`,
+      `(Unconfirmed supplies lock after 24 hours.)`,
     ].join("\n");
   }
   if (role === "supplier") {

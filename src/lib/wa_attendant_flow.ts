@@ -482,6 +482,52 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   // Global commands
+  // Quick start dispute wizard: reply "1" to list today's items and pick by number
+  if (/^1$/.test(t) && s.outlet) {
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
+    if (!rows.length) {
+      await sendText(phone, `No opening items recorded yet for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } else {
+      const lines = rows.map((r: any, i: number) => `${i + 1}) ${r.itemKey} (${Number(r.qty || 0)}${r.unit || ''})`).slice(0, 40);
+      const more = rows.length > lines.length ? `\n(+${rows.length - lines.length} more)` : '';
+      await sendText(phone, `Which item do you want to dispute? Reply with the number:\n${lines.join("\n")}${more}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      (cur as any).disputePickMode = true;
+      await saveSession(phone, { state: s.state, ...cur });
+    }
+    return;
+  }
+  // If in "pick mode", accept a number and jump into existing DISPUTE flow
+  if ((cur as any).disputePickMode && /^\d{1,3}$/.test(t) && s.outlet) {
+    const index = Number(t);
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
+    if (!rows.length) {
+      await sendText(phone, `No opening items yet for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      delete (cur as any).disputePickMode;
+      await saveSession(phone, { state: "MENU", ...cur });
+      return;
+    }
+    if (!(index >= 1 && index <= rows.length)) {
+      await sendText(phone, `Invalid item number. Send LIST to view indices.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    const row = rows[index - 1];
+    (cur as any).disputeDraft = {
+      rowId: row.id,
+      itemKey: row.itemKey,
+      name: row.itemKey,
+      recordedQty: Number(row.qty || 0),
+      unit: row.unit || 'kg',
+      index,
+    };
+    delete (cur as any).disputePickMode;
+    await saveSession(phone, { state: "DISPUTE_QTY", ...cur });
+    await sendText(phone, `Please enter the expected quantity for ${row.itemKey}. Delivered was ${row.qty}${row.unit || ''}. Enter a number (e.g., 12.0) or X to cancel.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return;
+  }
+  if ((cur as any).disputePickMode && !/^\d{1,3}$/.test(t)) {
+    await sendText(phone, `Reply with the number shown next to the item (e.g., 2).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return;
+  }
   // Supply opening LIST command (show today's opening items with indices)
   if (/^LIST$/i.test(t) && s.outlet) {
     const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
