@@ -6,6 +6,7 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { canonFull } from "@/lib/codeNormalize";
+import { getRoleSession } from "@/lib/roleSession";
 
 type ProductOut = {
   key: string;
@@ -17,7 +18,14 @@ type ProductOut = {
 export async function GET() {
   try {
     const sess = await getSession();
-    const code = canonFull((sess as any)?.attendant?.loginCode || "");
+    let code = canonFull((sess as any)?.attendant?.loginCode || "");
+    if (!code) {
+      // Fallback to role cookie for resilience
+      const role = await getRoleSession();
+      if (role && role.role === "attendant") {
+        code = canonFull(role.code || "");
+      }
+    }
     if (!code) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     // Resolve outlet + product keys: prefer normalized AttendantScope; fallback to legacy AttendantAssignment

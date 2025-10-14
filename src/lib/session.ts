@@ -61,6 +61,7 @@ export async function getSession() {
         select: {
           id: true,
           name: true,
+          loginCode: true,
           outletRef: {
             select: { id: true, name: true, code: true },
           },
