@@ -19,6 +19,7 @@ import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
 import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
+import { createReviewItem } from "@/server/review";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
 import {
   buildButtonPayload,
@@ -481,6 +482,176 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   // Global commands
+  // Supply opening LIST command (show today's opening items with indices)
+  if (/^LIST$/i.test(t) && s.outlet) {
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
+    if (!rows.length) {
+      await sendText(phone, `No opening items recorded yet for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } else {
+      const lines = rows.map((r: any, i: number) => `${i + 1}. ${r.itemKey} ${Number(r.qty || 0)}${r.unit || ''}`).slice(0, 40);
+      const more = rows.length > lines.length ? `\n(+${rows.length - lines.length} more)` : '';
+      await sendText(phone, `Opening items ${s.outlet} (${cur.date}):\n${lines.join("\n")}${more}\nReply D<number> to dispute (e.g. D3).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
+    return;
+  }
+  // Start per-item dispute: D<number> or DISPUTE <number>
+  const dItemMatch = t.match(/^D(\d{1,3})$/i) || t.match(/^DISPUTE\s+(\d{1,3})$/i);
+  if (dItemMatch && s.code && s.outlet) {
+    const index = Number(dItemMatch[1]);
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
+    if (!rows.length) {
+      await sendText(phone, `No opening items yet for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    if (!(index >= 1 && index <= rows.length)) {
+      await sendText(phone, `Invalid item number. Send LIST to view indices.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    const row = rows[index - 1];
+    // Check existing pending dispute for this row
+    try {
+      const existing = await (prisma as any).reviewItem.findFirst({ where: { type: { in: ["supply_dispute", "supply_dispute_item"] as any }, status: "pending" }, orderBy: { createdAt: "desc" } });
+      // (Light heuristic) We don't embed rowId in reviewItem schema directly; payload search would require JSON filter (skip for simplicity)
+      if (existing && String((existing.payload as any)?.rowId || '') === String(row.id)) {
+        await sendText(phone, `A dispute for ${row.itemKey} is already pending. Supervisor will review.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        return;
+      }
+    } catch {}
+    (cur as any).disputeDraft = {
+      rowId: row.id,
+      itemKey: row.itemKey,
+      name: row.itemKey,
+      recordedQty: Number(row.qty || 0),
+      unit: row.unit || 'kg',
+      index,
+    };
+    await saveSession(phone, { state: "DISPUTE_QTY", ...cur });
+    await sendText(phone, `Dispute item ${index}: ${row.itemKey} recorded ${row.qty}${row.unit || ''}. Enter actual quantity (numbers only) or X to cancel.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return;
+  }
+
+  // Dispute flow states
+  if (s.state === 'DISPUTE_QTY') {
+    if (/^(X|CANCEL|NO)$/i.test(t)) {
+      delete (cur as any).disputeDraft;
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "Dispute cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'dispute_cancel', sessionLike: s });
+      return;
+    }
+    if (!/^\d+(?:\.\d+)?$/.test(t)) {
+      await sendText(phone, "Numbers only, e.g. 10 or 10.5 (or X to cancel).", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    const q = Number(t);
+    const draft = (cur as any).disputeDraft;
+    if (!draft) {
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "No active dispute. Send LIST then D<number> to start.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    // Basic sanity: claim cannot exceed 5x recorded to catch mistakes
+    if (draft.recordedQty && q > draft.recordedQty * 5) {
+      await sendText(phone, `That seems too large. Enter a value <= ${draft.recordedQty * 5} or X to cancel.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    draft.claimedQty = q;
+    await saveSession(phone, { state: 'DISPUTE_REASON', ...cur });
+    await sendText(phone, `Reason? Reply 1 Short 2 Wrong 3 Quality 4 Other. (X to cancel)`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return;
+  }
+  if (s.state === 'DISPUTE_REASON') {
+    if (/^(X|CANCEL|NO)$/i.test(t)) {
+      delete (cur as any).disputeDraft;
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "Dispute cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'dispute_cancel_reason', sessionLike: s });
+      return;
+    }
+    const draft = (cur as any).disputeDraft;
+    if (!draft) {
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "No active dispute. Send LIST then D<number> to start.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    if (!/^[1-4]$/.test(t)) {
+      await sendText(phone, "Reply 1,2,3 or 4 (X to cancel).", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    const code = Number(t);
+    draft.reasonCode = code;
+    draft.reasonText = ({1:'Short weight',2:'Wrong product',3:'Quality issue',4:'Other'} as any)[code];
+    if (code === 4) {
+      await saveSession(phone, { state: 'DISPUTE_REASON_TEXT', ...cur });
+      await sendText(phone, 'Enter short reason text (under 80 chars).', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      return;
+    }
+    await saveSession(phone, { state: 'DISPUTE_CONFIRM', ...cur });
+    await sendText(phone, disputeConfirmText(draft), 'AI_DISPATCH_TEXT', { gpt_sent: true });
+    return;
+  }
+  if (s.state === 'DISPUTE_REASON_TEXT') {
+    if (/^(X|CANCEL|NO)$/i.test(t)) {
+      delete (cur as any).disputeDraft;
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "Dispute cancelled.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'dispute_cancel_other', sessionLike: s });
+      return;
+    }
+    const draft = (cur as any).disputeDraft;
+    if (!draft) {
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendText(phone, "No active dispute. Send LIST then D<number> to start.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    draft.reasonText = t.slice(0, 80);
+    await saveSession(phone, { state: 'DISPUTE_CONFIRM', ...cur });
+    await sendText(phone, disputeConfirmText(draft), 'AI_DISPATCH_TEXT', { gpt_sent: true });
+    return;
+  }
+  if (s.state === 'DISPUTE_CONFIRM') {
+    const draft = (cur as any).disputeDraft;
+    if (/^(NO|N|X|CANCEL)$/i.test(t)) {
+      delete (cur as any).disputeDraft;
+      await saveSession(phone, { state: 'MENU', ...cur });
+      await sendText(phone, 'Dispute cancelled.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'dispute_cancel_confirm', sessionLike: s });
+      return;
+    }
+    if (/^(YES|Y)$/i.test(t)) {
+      if (!draft || !s.outlet || !s.code) {
+        await saveSession(phone, { state: 'MENU', ...cur });
+        await sendText(phone, 'Missing dispute context.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+        return;
+      }
+      // Persist review item
+      try {
+        await createReviewItem({ type: 'supply_dispute_item', outlet: s.outlet, date: new Date(), payload: {
+          rowId: draft.rowId,
+          itemKey: draft.itemKey,
+            recordedQty: draft.recordedQty,
+            claimedQty: draft.claimedQty,
+            unit: draft.unit,
+            reasonCode: draft.reasonCode,
+            reasonText: draft.reasonText,
+            date: cur.date,
+            outlet: s.outlet,
+            attendantCode: s.code,
+        } });
+        await notifySupAdm(`[DISPUTE] ${s.outlet} ${cur.date} ${draft.itemKey}: recorded ${draft.recordedQty}${draft.unit} vs claimed ${draft.claimedQty}${draft.unit} (${draft.reasonText}).`);
+        await sendText(phone, `Dispute submitted. Ref saved for ${draft.itemKey}. Supervisor notified.`, 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      } catch (e) {
+        await sendText(phone, 'Failed to submit dispute. Try again later.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+      }
+      delete (cur as any).disputeDraft;
+      await saveSession(phone, { state: 'MENU', ...cur });
+      await safeSendGreetingOrMenu({ phone, role: s.role || 'attendant', outlet: s.outlet, force: true, source: 'dispute_submitted', sessionLike: s });
+      return;
+    }
+    await sendText(phone, 'Reply YES to submit or NO to cancel.', 'AI_DISPATCH_TEXT', { gpt_sent: true });
+    return;
+  }
+
   if (/^(HELP)$/i.test(t)) {
     if (!s.code) {
       await sendText(phone, "You're not logged in. Use the login link we sent above to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -768,6 +939,15 @@ export async function handleInboundText(phone: string, text: string) {
   // Default: compact help
   if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
   else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+}
+
+function disputeConfirmText(draft: any): string {
+  return [
+    'Confirm dispute:',
+    `${draft.itemKey} recorded ${draft.recordedQty}${draft.unit} vs you say ${draft.claimedQty}${draft.unit}`,
+    `Reason: ${draft.reasonText}`,
+    'Reply YES to submit or NO to cancel.'
+  ].join('\n');
 }
 
 export async function handleInteractiveReply(phone: string, payload: any): Promise<boolean> {
