@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { ZReviewAction } from "./supervisor.validation";
 import { notifyOriginator, notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor.notifications";
+import { notifySupplyPosted } from "@/server/supply_notify";
 import { computeDayTotals } from "@/server/finance";
 
 export async function reviewItem(body: unknown, supervisorCode: string) {
@@ -66,7 +67,7 @@ async function applySideEffects(item: any, action: "approve" | "reject", note?: 
       break;
     }
 
-    case "supply_edit": {
+  case "supply_edit": {
       const rows = (item.payload as any)?.rows as Array<{ itemKey: string; qty?: number; buyPrice?: number }>;
       if (rows?.length) {
         await (prisma as any).$transaction(async (tx: any) => {
@@ -92,6 +93,8 @@ async function applySideEffects(item: any, action: "approve" | "reject", note?: 
       }
       await notifyOriginator(item, "✅ Supply edit approved and applied");
       await notifyAttendants(outlet, `Supply edit applied for ${outlet} (${date}).`);
+      // Auto-notify supply summary after supervisor-approved edit
+      try { await notifySupplyPosted({ outletName: outlet, date }); } catch {}
       break;
     }
 
