@@ -47,9 +47,26 @@ export async function getSession() {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
   if (!token) return null;
+  // Select minimal fields to remain compatible with older DBs that may
+  // not yet have all new Attendant columns. Avoid include:* which selects all.
   const sess = await (prisma as any).session.findUnique({
     where: { token },
-    include: { attendant: { include: { outletRef: true } } },
+    select: {
+      id: true,
+      attendantId: true,
+      outletCode: true,
+      expiresAt: true,
+      createdAt: true,
+      attendant: {
+        select: {
+          id: true,
+          name: true,
+          outletRef: {
+            select: { id: true, name: true, code: true },
+          },
+        },
+      },
+    },
   });
   if (!sess || sess.expiresAt < new Date()) return null;
   // Sliding renewal when less than half TTL remains

@@ -111,6 +111,11 @@ export default function AttendantDashboardPage() {
         const me = await fetch("/api/auth/me", { cache: "no-store" });
         if (me.ok) {
           const j = await me.json();
+          // Fast-path: if server already provided outlet name, use it immediately
+          const outletNameFromMe = (j?.outlet?.name || "").toString();
+          if (outletNameFromMe) {
+            setOutlet(outletNameFromMe as Outlet);
+          }
           const outletCode = (j?.outletCode || "").toString();
           if (outletCode) {
             try {
@@ -567,7 +572,7 @@ export default function AttendantDashboardPage() {
     if (outlet === null) {
       const t = setTimeout(() => {
         if (outlet === null) window.location.href = "/attendant";
-      }, 600);
+      }, 3000); // allow enough time for server calls to resolve
       return () => clearTimeout(t);
     }
   }, [outlet]);

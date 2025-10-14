@@ -10,6 +10,8 @@ export async function GET() {
   // Prefer attendant DB session when present
   const sess = await getSession();
   if (sess) {
+    const outletObj = (sess as any).attendant?.outletRef ?? null;
+    const outletCode = (sess as any).outletCode || (outletObj?.code ?? null);
     return NextResponse.json({
       ok: true,
       role: "attendant",
@@ -17,8 +19,8 @@ export async function GET() {
         id: (sess as any).attendant?.id,
         name: (sess as any).attendant?.name,
       },
-      outlet: (sess as any).attendant?.outletRef ?? null,
-      outletCode: (sess as any).outletCode ?? null,
+      outlet: outletObj,
+      outletCode,
     });
   }
 

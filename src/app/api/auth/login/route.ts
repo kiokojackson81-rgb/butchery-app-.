@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { normalizeCode, canonNum, canonFull } from "@/lib/codeNormalize";
-import { createSession } from "@/lib/session";
+import { createSession, serializeSessionCookie } from "@/lib/session";
 import { serializeRoleCookie } from "@/lib/roleSession";
 
 async function ensureLoginProvision(loginCode: string) {
@@ -202,17 +202,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "SESSION_STORE_UNAVAILABLE" }, { status: 503 });
     }
 
+    // Resolve outlet code (not id) for session convenience
+    let outletCode: string | undefined = undefined;
+    try {
+      if ((att as any)?.outletId) {
+        const outlet = await (prisma as any).outlet.findUnique({
+          where: { id: (att as any).outletId },
+          select: { code: true, name: true },
+        });
+        outletCode = (outlet?.code || null) ?? undefined;
+      }
+    } catch {}
+
     // Create DB-backed session and set bk_sess cookie (attendant)
     try {
-      await createSession(att.id);
+      const created = await createSession(att.id, outletCode);
+      // Also explicitly attach Set-Cookie header to be robust across runtimes
+      // (in addition to cookies().set inside createSession)
+      // We'll add the header to the same response we return below.
+      // Note: we can't set it yet because we haven't created the response.
+      // We'll store it in a local var and append to response headers after creating it.
+      var sessionHeader = serializeSessionCookie(created.token);
     } catch (err) {
       console.error("createSession failed", err);
       return NextResponse.json({ ok: false, error: "SESSION_CREATE_FAILED" }, { status: 503 });
     }
 
     // Also set a unified role cookie for convenience
-    const res = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: att.outletId });
-    res.headers.append("Set-Cookie", serializeRoleCookie({ role: "attendant", code: row.code, outlet: (att as any)?.outletId || null }));
+    const res = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: outletCode || null });
+    if (typeof sessionHeader === "string") {
+      res.headers.append("Set-Cookie", sessionHeader);
+    }
+    res.headers.append("Set-Cookie", serializeRoleCookie({ role: "attendant", code: row.code, outlet: outletCode || null }));
     return res;
   } catch (e) {
     console.error(e);
