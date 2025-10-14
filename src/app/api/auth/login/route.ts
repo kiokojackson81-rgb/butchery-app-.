@@ -115,17 +115,22 @@ export async function POST(req: Request) {
 
     // 2) Fallback to digits-only if unique
     if (!row && num) {
-      const list: any[] = await (prisma as any).$queryRawUnsafe(
-        `SELECT * FROM "LoginCode" WHERE regexp_replace(code, '\\D', '', 'g') = ${num} LIMIT 3`
-      );
+      // Compare as text using a parameterized query to avoid type errors and SQL injection
+      const list: any[] = await (prisma as any).$queryRaw`
+        SELECT * FROM "LoginCode"
+        WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
+        LIMIT 3
+      `;
       if (list.length === 1) {
         row = list[0];
       } else if (list.length > 1) {
         return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
       } else {
-        const assignments: any[] = await (prisma as any).$queryRawUnsafe(
-          `SELECT code FROM "AttendantAssignment" WHERE regexp_replace(code, '\\D', '', 'g') = ${num} LIMIT 3`
-        );
+        const assignments: any[] = await (prisma as any).$queryRaw`
+          SELECT code FROM "AttendantAssignment"
+          WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
+          LIMIT 3
+        `;
         if (assignments.length === 1) {
           row = await ensureLoginProvision(assignments[0]?.code || '');
         } else if (assignments.length > 1) {
