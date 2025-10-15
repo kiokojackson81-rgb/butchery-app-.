@@ -1427,10 +1427,13 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     // back to yesterday's closing baseline. Always communicate the result then
     // prompt for closing qty.
     cur.currentItem = { key, name };
-    // Query today's supply opening row for this outlet/product
+    // Query today's supply opening rows and match item by key (case-safe),
+    // then communicate the best available baseline. Avoid contradictory messages.
     if (s.outlet) {
       try {
-        const opening = await (prisma as any).supplyOpeningRow.findFirst({ where: { outletName: s.outlet, date: cur.date, itemKey: key } }).catch(() => null);
+        const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date } }).catch(() => []);
+        const opening = (rows || []).find((r: any) => String(r.itemKey) === key) ||
+                        (rows || []).find((r: any) => String(r.itemKey).toLowerCase() === String(key).toLowerCase());
         if (opening) {
           await sendText(phone, `Opening stock for ${name} (${s.outlet} — ${cur.date}): ${opening.qty} ${opening.unit || "kg"}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         } else {
@@ -1439,10 +1442,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           const prev = await (prisma as any).attendantClosing.findFirst({ where: { outletName: s.outlet, date: y, itemKey: key } }).catch(() => null);
           if (prev) {
             await sendText(phone, `Opening baseline (yesterday closing) for ${name} (${s.outlet} — ${cur.date}): ${prev.closingQty}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-          } else {
-            // Match web UI wording when no opening stock exists
-            await sendText(phone, "No opening stock found yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
           }
+          // If neither opening nor baseline was found, remain silent and go straight to qty prompt.
         }
       } catch (err) {
         // Non-fatal: still prompt for qty
