@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
 import { formatPerItemSupplyMessage } from "@/lib/wa_supply_item_format";
+import { getSession } from "@/lib/session";
 
 // Single-item notification to the attendant each time a single opening row is saved.
 // Updated to the richer "Supply Received" template with OK/1 guidance.
@@ -65,6 +66,13 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
   const dateStr = now.toLocaleDateString("en-KE", { year: "numeric", month: "short", day: "2-digit" });
   const timeStr = now.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
 
+  // Resolve attendant name from session cookie if present (best-effort)
+  let attendantName: string | undefined = undefined;
+  try {
+    const sess: any = await getSession().catch(() => null);
+    attendantName = sess?.attendant?.name || undefined;
+  } catch {}
+
   // Compose message via shared formatter
   const text = formatPerItemSupplyMessage({
     outletName: outlet,
@@ -74,6 +82,7 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
     supplyQty,
     openingQty,
     sellPricePerUnit: sellPrice || undefined,
+    attendantName,
   });
   // Keep internal indexing stable (D<index>) even if we don't display it explicitly.
   // msg.push(`(Ref: D${position}/${total})`);
