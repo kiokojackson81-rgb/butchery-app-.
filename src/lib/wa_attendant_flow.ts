@@ -94,6 +94,22 @@ function isNumericText(t: string) {
   return /^\d+(?:\.\d+)?$/.test(t.trim());
 }
 
+// Accept inputs like "12kgs", "12 kgs", "kilograms 1.3", "1 2 kgs" → 12, 1.3 etc.
+function parseNumericLoose(t: string): number | null {
+  if (!t) return null;
+  let s = String(t).trim().toLowerCase();
+  // Keep digits, separators and spaces; drop other letters/symbols
+  s = s.replace(/[^0-9.,\s]/g, "");
+  // Collapse spaces between digits: "1 2" → "12"
+  s = s.replace(/(?<=\d)\s+(?=\d)/g, "");
+  // Find first number with optional decimal using comma or dot
+  const m = s.match(/(\d+(?:[.,]\d+)?)/);
+  if (!m) return null;
+  const numStr = m[1].replace(",", ".");
+  const val = Number(numStr);
+  return Number.isFinite(val) ? val : null;
+}
+
 function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number; waste: number; name: string }>) {
   cursor.rows ||= [] as any;
   let r = cursor.rows.find((x) => x.key === key);
@@ -858,8 +874,9 @@ export async function handleInboundText(phone: string, text: string) {
 
   // CLOSING_QTY numeric gate
   if (s.state === "CLOSING_QTY") {
-    if (isNumericText(t)) {
-      const val = Number(t);
+    const parsed = isNumericText(t) ? Number(t) : parseNumericLoose(t);
+    if (parsed !== null) {
+      const val = parsed;
       const item = cur.currentItem;
         if (!item) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -920,7 +937,7 @@ export async function handleInboundText(phone: string, text: string) {
       await sendInteractive(buttonsWasteOrSkip(phone, item.name), "AI_DISPATCH_INTERACTIVE");
     } else {
       const itemName = cur.currentItem?.name || "this product";
-      const promptText = `Numbers only for ${itemName}, e.g. 9.5`;
+      const promptText = `Enter a number for ${itemName} (you can include units), e.g. 12, 12.5 or 12kgs`;
       const payload = buildButtonPayload(phone.replace(/^\+/, ""), promptText, buildNavigationRow());
       await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
     }
@@ -929,8 +946,9 @@ export async function handleInboundText(phone: string, text: string) {
 
   // CLOSING_WASTE_QTY numeric gate
   if (s.state === "CLOSING_WASTE_QTY") {
-    if (isNumericText(t)) {
-      const val = Number(t);
+    const parsed = isNumericText(t) ? Number(t) : parseNumericLoose(t);
+    if (parsed !== null) {
+      const val = parsed;
       const item = cur.currentItem;
       if (!item) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -993,7 +1011,7 @@ export async function handleInboundText(phone: string, text: string) {
       delete cur.currentItem;
       await nextPickOrSummary(phone, s, cur);
     } else {
-      await sendText(phone, "Numbers only, e.g. 1.0", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await sendText(phone, "Enter a number (units allowed), e.g. 0, 0.5 or 1kg", "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     return;
   }
@@ -1080,6 +1098,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
   // Defensive: ensure rows is always an array
   if (!Array.isArray(cur.rows)) cur.rows = [] as any;
+  if (!cur.date) cur.date = today();
   const lr = payload?.list_reply?.id as string | undefined;
   const br = payload?.button_reply?.id as string | undefined;
   const id = lr || br || "";
