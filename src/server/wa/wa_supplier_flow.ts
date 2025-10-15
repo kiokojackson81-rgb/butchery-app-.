@@ -1,5 +1,6 @@
 // server/wa/wa_supplier_flow.ts
 import { prisma } from "@/lib/prisma";
+import { canonFull } from "@/lib/codeNormalize";
 import { notifySupplyItem } from "@/server/supply_notify_item";
 import { sendTextSafe, sendInteractiveSafe, sendText, sendInteractive } from "@/lib/wa";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
@@ -320,8 +321,25 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
+    // Resolve supplier identity (name) from session code or phone mapping and notify attendant
+    let supplierName: string | undefined = undefined;
+    let supplierCode: string | undefined = sess.code || undefined;
+    try {
+      if (supplierCode) {
+        const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(supplierCode), mode: "insensitive" }, active: true } });
+        supplierName = pc?.name || undefined;
+      }
+      if (!supplierName) {
+        const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supplier" } });
+        if (pm?.code) {
+          supplierCode = pm.code;
+          const pc2 = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true } });
+          supplierName = pc2?.name || undefined;
+        }
+      }
+    } catch {}
     // Auto-notify after every individual save (per request) regardless of config flags
-  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: sess.code }); } catch {}
+    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
@@ -344,8 +362,25 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty: totalQty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
+    // Resolve supplier identity (name) and notify attendant on update/add
+    let supplierName: string | undefined = undefined;
+    let supplierCode: string | undefined = sess.code || undefined;
+    try {
+      if (supplierCode) {
+        const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(supplierCode), mode: "insensitive" }, active: true } });
+        supplierName = pc?.name || undefined;
+      }
+      if (!supplierName) {
+        const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supplier" } });
+        if (pm?.code) {
+          supplierCode = pm.code;
+          const pc2 = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true } });
+          supplierName = pc2?.name || undefined;
+        }
+      }
+    } catch {}
     // Auto-notify after update/add aggregate
-  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: sess.code }); } catch {}
+    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
