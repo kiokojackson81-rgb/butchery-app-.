@@ -482,7 +482,7 @@ export async function handleInboundText(phone: string, text: string) {
   }
 
   // Global commands
-  // Quick start dispute wizard: reply "1" to list today's items and pick by number
+  // Quick start dispute wizard: reply "1" to list today's items and pick by number or name
   if (/^1$/.test(t) && s.outlet) {
     const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
     if (!rows.length) {
@@ -490,7 +490,7 @@ export async function handleInboundText(phone: string, text: string) {
     } else {
       const lines = rows.map((r: any, i: number) => `${i + 1}) ${r.itemKey} (${Number(r.qty || 0)}${r.unit || ''})`).slice(0, 40);
       const more = rows.length > lines.length ? `\n(+${rows.length - lines.length} more)` : '';
-      await sendText(phone, `Which item do you want to dispute? Reply with the number:\n${lines.join("\n")}${more}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await sendText(phone, `Which item do you want to dispute? Reply with the number OR type the product name (e.g., GOAT).\n${lines.join("\n")}${more}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       (cur as any).disputePickMode = true;
       await saveSession(phone, { state: s.state, ...cur });
     }
@@ -524,8 +524,54 @@ export async function handleInboundText(phone: string, text: string) {
     await sendText(phone, `Please enter the expected quantity for ${row.itemKey}. Delivered was ${row.qty}${row.unit || ''}. Enter a number (e.g., 12.0) or X to cancel.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     return;
   }
-  if ((cur as any).disputePickMode && !/^\d{1,3}$/.test(t)) {
-    await sendText(phone, `Reply with the number shown next to the item (e.g., 2).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+  if ((cur as any).disputePickMode && !/^\d{1,3}$/.test(t) && s.outlet) {
+    const queryText = t.trim().toLowerCase();
+    const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date }, orderBy: { id: "asc" } });
+    if (!rows.length) {
+      await sendText(phone, `No opening items yet for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      delete (cur as any).disputePickMode;
+      await saveSession(phone, { state: "MENU", ...cur });
+      return;
+    }
+    const itemKeys: string[] = rows.map((r: any) => String(r.itemKey));
+    let nameByKey = new Map<string, string>();
+    try {
+      const prods = await (prisma as any).product.findMany({ where: { key: { in: itemKeys } }, select: { key: true, name: true } });
+      for (const p of prods || []) nameByKey.set(String(p.key), String(p.name || ''));
+    } catch {}
+    // Build candidates with both key and product name for case-insensitive match
+    type Cand = { index: number; key: string; disp: string };
+    const cands: Cand[] = rows.map((r: any, i: number) => ({ index: i + 1, key: String(r.itemKey), disp: nameByKey.get(String(r.itemKey)) || String(r.itemKey) }));
+    const norm = (s: string) => s.trim().toLowerCase();
+    const byExact = cands.filter(c => norm(c.disp) === queryText || norm(c.key) === queryText);
+    const byPrefix = byExact.length ? byExact : cands.filter(c => norm(c.disp).startsWith(queryText) || norm(c.key).startsWith(queryText));
+    const byIncludes = byPrefix.length ? byPrefix : cands.filter(c => norm(c.disp).includes(queryText) || norm(c.key).includes(queryText));
+    const matches = byIncludes;
+    if (matches.length === 1) {
+      const m = matches[0];
+      const row = rows[m.index - 1];
+      (cur as any).disputeDraft = {
+        rowId: row.id,
+        itemKey: row.itemKey,
+        name: nameByKey.get(String(row.itemKey)) || row.itemKey,
+        recordedQty: Number(row.qty || 0),
+        unit: row.unit || 'kg',
+        index: m.index,
+      };
+      delete (cur as any).disputePickMode;
+      await saveSession(phone, { state: "DISPUTE_QTY", ...cur });
+      await sendText(phone, `Please enter the expected quantity for ${nameByKey.get(String(row.itemKey)) || row.itemKey}. Delivered was ${row.qty}${row.unit || ''}. Enter a number (e.g., 12.0) or X to cancel.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    if (matches.length > 1) {
+      const lines = matches.slice(0, 10).map(m => `${m.index}) ${cands[m.index-1].disp}`);
+      const suffix = matches.length > 10 ? `\n(+${matches.length - 10} more)` : '';
+      await sendText(phone, `I found multiple matches. Reply with the number:\n${lines.join('\n')}${suffix}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return;
+    }
+    // No matches
+    const lines = rows.map((r: any, i: number) => `${i + 1}) ${nameByKey.get(String(r.itemKey)) || r.itemKey}`).slice(0, 20);
+    await sendText(phone, `I couldn't find "${t}". Reply with the number, or type the product name as shown.\n${lines.join('\n')}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     return;
   }
   // Supply opening LIST command (show today's opening items with indices)
