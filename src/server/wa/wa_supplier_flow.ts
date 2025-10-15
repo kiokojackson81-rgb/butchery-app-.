@@ -321,7 +321,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
     // Auto-notify after every individual save (per request) regardless of config flags
-  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey! }); } catch {}
+  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: sess.code }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
@@ -345,7 +345,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
     // Auto-notify after update/add aggregate
-  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey! }); } catch {}
+  try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: sess.code }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });

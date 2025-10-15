@@ -3,6 +3,7 @@ import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
 import { formatPerItemSupplyMessage } from "@/lib/wa_supply_item_format";
 import { getSession } from "@/lib/session";
+import { canonFull } from "@/lib/codeNormalize";
 
 // Single-item notification to the attendant each time a single opening row is saved.
 // Updated to the richer "Supply Received" template with OK/1 guidance.
@@ -79,7 +80,9 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
     if (opts.supplierName && String(opts.supplierName).trim()) {
       supplierName = String(opts.supplierName).trim();
     } else if (opts.supplierCode && String(opts.supplierCode).trim()) {
-      const pc = await (prisma as any).personCode.findUnique({ where: { code: String(opts.supplierCode).trim() } }).catch(() => null);
+      const raw = String(opts.supplierCode).trim();
+      const code = canonFull(raw);
+      const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true } }).catch(() => null);
       supplierName = (pc?.name || undefined);
     }
   } catch {}
