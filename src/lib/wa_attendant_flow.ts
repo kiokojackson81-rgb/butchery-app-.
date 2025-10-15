@@ -1205,12 +1205,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           where: { id: s.id },
           data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
         });
-          try {
-            const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
-            const pb = await (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: item.key, active: true } });
-      );
-    } catch {
-      await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } catch {}
+      try { await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
     }
     return true;
   }
