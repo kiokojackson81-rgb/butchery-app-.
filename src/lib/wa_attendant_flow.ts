@@ -1036,16 +1036,11 @@ export async function handleInboundText(phone: string, text: string) {
           });
           // Compute and send per-item sales summary before proceeding
           try {
-            const dt = new Date(cur.date + "T00:00:00.000Z");
-            dt.setUTCDate(dt.getUTCDate() - 1);
-            const y = dt.toISOString().slice(0, 10);
-            const [prev, supply, saved, pb] = await Promise.all([
-              (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: item.key } }),
-              (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: item.key } }),
+            const [saved, pb] = await Promise.all([
               (prisma as any).attendantClosing.findUnique({ where: { date_outletName_itemKey: { date: cur.date, outletName: s.outlet, itemKey: item.key } } }),
               (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: item.key, active: true } }),
             ]);
-            const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
+            const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
             // Always reflect what was persisted (handles auto-cap or server-side normalization)
             const closingQty = Number((saved?.closingQty ?? item.closing) || 0);
             const wasteQty = Number((saved?.wasteQty ?? item.waste) || 0);
