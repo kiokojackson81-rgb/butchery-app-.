@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { toGraphPhone } from "@/lib/wa_phone";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { buildDailyItems, formatDailyReportSupplier, formatDailyReportOps } from "@/lib/wa_supply_daily_report";
+import { canonFull } from "@/lib/codeNormalize";
 
 function todayKeyEAT() {
   // Nairobi local date (YYYY-MM-DD)
@@ -28,9 +29,21 @@ export async function GET() {
 
       // Resolve attendant and supplier names best-effort
       const attendantMap = await (prisma as any).phoneMapping.findFirst({ where: { role: "attendant", outlet: outletName } }).catch(() => null);
-      const attendantName = attendantMap?.code || undefined;
       const supplierMap = await (prisma as any).phoneMapping.findFirst({ where: { role: "supplier", outlet: outletName } }).catch(() => null);
-      const supplierName = supplierMap?.code || undefined; // We show name or fallback inside formatter
+      let attendantName: string | undefined = attendantMap?.code || undefined;
+      let supplierName: string | undefined = supplierMap?.code || undefined;
+      try {
+        if (attendantMap?.code) {
+          const pcA = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(attendantMap.code), mode: "insensitive" }, active: true } });
+          attendantName = pcA?.name || attendantName;
+        }
+      } catch {}
+      try {
+        if (supplierMap?.code) {
+          const pcS = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(supplierMap.code), mode: "insensitive" }, active: true } });
+          supplierName = pcS?.name || supplierName;
+        }
+      } catch {}
 
       // Send to suppliers (omit selling/expected/margin)
       const suppliers = await (prisma as any).phoneMapping.findMany({ where: { role: "supplier", outlet: outletName } });
