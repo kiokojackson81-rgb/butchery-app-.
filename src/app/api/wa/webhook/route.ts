@@ -571,7 +571,15 @@ export async function POST(req: Request) {
             // to behave exactly like pressing the numeric tab in the UI. This
             // mirrors the interactive mapping done later for interactive payloads.
             const digit = String(text || "").trim();
-            if (/^[1-7]$/.test(digit)) {
+            // Skip digit mapping when the session expects numeric input (closing/waste/expense/dispute)
+            const sessState = String((_sess as any)?.state || "").toUpperCase();
+            const expectsNumeric = [
+              "CLOSING_QTY",
+              "CLOSING_WASTE_QTY",
+              "EXPENSE_AMOUNT",
+              "DISPUTE_QTY",
+            ].includes(sessState);
+            if (/^[1-7]$/.test(digit) && !expectsNumeric) {
               try {
                 // Map the digit to the role-specific id and route regardless of GPT_ONLY
                 const id = mapDigitToId(sessRole, digit);
