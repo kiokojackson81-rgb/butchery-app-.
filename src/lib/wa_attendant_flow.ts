@@ -1039,13 +1039,17 @@ export async function handleInboundText(phone: string, text: string) {
             const dt = new Date(cur.date + "T00:00:00.000Z");
             dt.setUTCDate(dt.getUTCDate() - 1);
             const y = dt.toISOString().slice(0, 10);
-            const [prev, supply, pb] = await Promise.all([
+            const [prev, supply, saved, pb] = await Promise.all([
               (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: item.key } }),
               (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: item.key } }),
+              (prisma as any).attendantClosing.findUnique({ where: { date_outletName_itemKey: { date: cur.date, outletName: s.outlet, itemKey: item.key } } }),
               (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: item.key, active: true } }),
             ]);
             const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
-            const soldUnits = Math.max(0, openEff - Number(item.closing || 0) - Number(item.waste || 0));
+            // Always reflect what was persisted (handles auto-cap or server-side normalization)
+            const closingQty = Number((saved?.closingQty ?? item.closing) || 0);
+            const wasteQty = Number((saved?.wasteQty ?? item.waste) || 0);
+            const soldUnits = Math.max(0, openEff - closingQty - wasteQty);
             const price = Number((pb as any)?.sellPrice || 0);
             const hasPrice = Number.isFinite(price) && price > 0;
             const value = soldUnits * (hasPrice ? price : 0);
@@ -1053,7 +1057,7 @@ export async function handleInboundText(phone: string, text: string) {
             const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
             await sendText(
               phone,
-              `${item.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(item.closing || 0)} − Waste ${fmtQty(item.waste || 0)} = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`,
+              `${item.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(closingQty)} − Waste ${fmtQty(wasteQty)} = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`,
               "AI_DISPATCH_TEXT",
               { gpt_sent: true }
             );
