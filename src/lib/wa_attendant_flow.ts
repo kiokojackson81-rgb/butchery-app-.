@@ -168,7 +168,7 @@ async function lockDay(date: string, outlet: string, actorCode?: string) {
 // Fetch items already closed for this date/outlet
 async function getClosedKeys(date: string, outlet: string): Promise<Set<string>> {
   const rows = await (prisma as any).attendantClosing.findMany({ where: { date, outletName: outlet }, select: { itemKey: true } });
-  return new Set<string>((rows || []).map((r: any) => r.itemKey));
+  return new Set<string>((rows || []).map((r: any) => String(r.itemKey || '').toLowerCase()));
 }
 
 function looksLikeCode(t: string) {
@@ -255,15 +255,25 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
 async function getAvailableClosingProducts(sess: any, cursor: Cursor) {
   const prodsAll = await getAssignedProducts(sess.code || "");
   if (!sess.outlet) return prodsAll;
-  const closed = await getClosedKeys(cursor.date, sess.outlet);
+  const closedLc = await getClosedKeys(cursor.date, sess.outlet);
   // If opening stock exists for the day, only allow those products (dashboard parity)
-  let openingKeys = new Set<string>();
+  let openingKeysLc = new Set<string>();
   try {
     const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: sess.outlet, date: cursor.date }, select: { itemKey: true } });
-    openingKeys = new Set<string>((rows || []).map((r: any) => r.itemKey).filter(Boolean));
+    openingKeysLc = new Set<string>((rows || []).map((r: any) => String(r.itemKey || '').toLowerCase()).filter(Boolean));
   } catch {}
-  const restrictByOpening = openingKeys.size > 0;
-  return prodsAll.filter((p) => !closed.has(p.key) && (!restrictByOpening || openingKeys.has(p.key)));
+  const restrictByOpening = openingKeysLc.size > 0;
+  // Deduplicate assigned products by lowercase key
+  const dedup = new Map<string, any>();
+  for (const p of prodsAll || []) {
+    const kLc = String(p.key || '').toLowerCase();
+    if (!kLc) continue;
+    if (!dedup.has(kLc)) dedup.set(kLc, p);
+  }
+  const result = Array.from(dedup.entries())
+    .filter(([kLc]) => !closedLc.has(kLc) && (!restrictByOpening || openingKeysLc.has(kLc)))
+    .map(([, p]) => p);
+  return result;
 }
 
 async function promptLogin(phone: string) {
