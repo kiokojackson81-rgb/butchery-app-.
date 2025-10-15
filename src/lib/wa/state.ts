@@ -58,10 +58,12 @@ export async function getWaState(waId: string): Promise<WaState> {
 }
 
 export async function updateWaState(waId: string, patch: Partial<WaState>): Promise<WaState> {
+  // Ensure role is non-null on creation to satisfy Prisma schema
+  const defaultCreateRole = (patch.role as any) || 'attendant';
   const session = await (prisma as any).waSession.upsert({
     where: { phoneE164: waId },
     update: {},
-    create: { phoneE164: waId, state: "MENU", role: null, cursor: {} },
+    create: { phoneE164: waId, state: "MENU", role: defaultCreateRole, cursor: {} },
   });
 
   const cursor = (session.cursor as any) || {};
