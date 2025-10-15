@@ -49,8 +49,8 @@ function sumTotals(items: SupplyItem[], defaultUnit = "kg") {
 
 function fmtDate(dateISO: string) {
   const when = new Date(dateISO);
-  const date = when.toLocaleDateString("en-KE", { weekday: "short", year: "numeric", month: "short", day: "2-digit" });
-  const time = when.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+  const date = new Intl.DateTimeFormat("en-KE", { timeZone: "Africa/Nairobi", weekday: "short", year: "numeric", month: "short", day: "2-digit" }).format(when);
+  const time = new Intl.DateTimeFormat("en-KE", { timeZone: "Africa/Nairobi", hour: "2-digit", minute: "2-digit", hour12: false }).format(when);
   return { date, time };
 }
 

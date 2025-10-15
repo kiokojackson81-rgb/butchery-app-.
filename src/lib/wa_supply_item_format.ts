@@ -20,15 +20,20 @@ export type PerItemMessageInput = {
 
 export function formatPerItemSupplyMessage(i: PerItemMessageInput): string {
   const totalQty = (Number(i.openingQty || 0) + Number(i.supplyQty || 0));
-  // Format date/time like: 15 Oct 2025 and 05:43 (24h)
+  // Format date/time in Nairobi timezone (EAT, UTC+3), 24-hour clock
   const d = i.date;
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = d.toLocaleString("en-GB", { month: "short" });
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const dateStr = `${day} ${month} ${year}`;
-  const timeStr = `${hours}:${minutes}`;
+  const dateStr = new Intl.DateTimeFormat("en-KE", {
+    timeZone: "Africa/Nairobi",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+  const timeStr = new Intl.DateTimeFormat("en-KE", {
+    timeZone: "Africa/Nairobi",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
   const lines: string[] = [];
   lines.push(`🧾 Supply Received — ${i.outletName}`);
   lines.push("");
