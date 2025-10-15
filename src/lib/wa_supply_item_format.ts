@@ -20,8 +20,15 @@ export type PerItemMessageInput = {
 
 export function formatPerItemSupplyMessage(i: PerItemMessageInput): string {
   const totalQty = (Number(i.openingQty || 0) + Number(i.supplyQty || 0));
-  const dateStr = i.date.toLocaleDateString("en-KE", { year: "numeric", month: "short", day: "2-digit" });
-  const timeStr = i.date.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+  // Format date/time like: 15 Oct 2025 and 05:43 (24h)
+  const d = i.date;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-GB", { month: "short" });
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const dateStr = `${day} ${month} ${year}`;
+  const timeStr = `${hours}:${minutes}`;
   const lines: string[] = [];
   lines.push(`🧾 Supply Received — ${i.outletName}`);
   lines.push("");
@@ -36,14 +43,11 @@ export function formatPerItemSupplyMessage(i: PerItemMessageInput): string {
     lines.push("");
     lines.push(`💰 Price per ${i.unit}: Ksh ${shill(i.sellPricePerUnit)}`);
     lines.push(`🧮 Expected total value: Ksh ${shill(expected)}`);
-    lines.push(`*(= (openingQty + supplyQty) × price per ${i.unit})*`);
   }
   lines.push("");
   lines.push(`👨‍🍳 Received by: ${i.attendantName || "Attendant"}`);
   lines.push(`🚚 Delivered by: ${i.supplierName || "Supplier"}`);
   lines.push("");
-  lines.push(`✅ Reply "OK" to confirm and add this quantity to today’s opening stock.`);
-  lines.push(`⚠️ If the quantity or price is incorrect, reply "1" to start a dispute. You will be guided to enter your expected quantity and describe the issue.`);
-  lines.push(`*(Unconfirmed supplies lock after 24 hours.)*`);
+  lines.push(`⚠️ If the quantity is incorrect  login to your dashboard to raise dispute click here https://barakafresh.com/attendant or talk to supervisor`);
   return lines.join("\n");
 }

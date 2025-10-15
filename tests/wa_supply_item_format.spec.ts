@@ -18,8 +18,9 @@ describe('formatPerItemSupplyMessage', () => {
     expect(txt).toContain('📊 Total stock (Opening + Supply): 27');
     expect(txt).not.toContain('💰 Price per');
     expect(txt).not.toContain('🧮 Expected total value');
-    expect(txt).toContain('Reply "OK"');
-    expect(txt).toContain('reply "1"');
+    expect(txt).toContain('barakafresh.com/attendant');
+    expect(txt).not.toContain('Reply "OK"');
+    expect(txt).not.toContain('reply "1"');
   });
 
   it('renders price and expected value when price is provided', () => {
@@ -35,6 +36,7 @@ describe('formatPerItemSupplyMessage', () => {
     expect(txt).toContain('💰 Price per kg: Ksh 600');
     // total = 27 * 600 = 16200
     expect(txt).toContain('🧮 Expected total value: Ksh 16,200');
-    expect(txt).toContain('*(= (openingQty + supplyQty) × price per kg)*');
+    expect(txt).toContain('barakafresh.com/attendant');
+    expect(txt).not.toContain('*(= (openingQty + supplyQty) × price per kg)*');
   });
 });

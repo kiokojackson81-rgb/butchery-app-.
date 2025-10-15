@@ -80,7 +80,13 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
     if (totalStockStr) lines.push(`📊 Total stock: ${totalStockStr}`);
     if (priceStr) lines.push(``, `💰 Expected price per kg: ${priceStr}`);
     if (totalValStr) lines.push(`🧮 Expected total value: ${totalValStr}`);
-    lines.push(``, `👨‍🍳 Received by: ${p.attendantName}`, `🚚 Supplied by: ${p.supplierName}`, ``, `⚠️ Action:`, `Reply OK if everything is correct.`, `If there’s a mismatch, reply 1 to start the dispute process – you’ll be guided step by step.`, `*(Unconfirmed supplies lock after 24 hours.)*`);
+    lines.push(
+      ``,
+      `👨‍🍳 Received by: ${p.attendantName}`,
+      `🚚 Supplied by: ${p.supplierName}`,
+      ``,
+      `⚠️ If the quantity is incorrect  login to your dashboard to raise dispute click here https://barakafresh.com/attendant or talk to supervisor`
+    );
     return lines.join("\n");
   }
   if (role === "supplier") {
