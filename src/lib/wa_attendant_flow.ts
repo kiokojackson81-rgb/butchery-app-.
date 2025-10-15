@@ -985,6 +985,23 @@ export async function handleInboundText(phone: string, text: string) {
         return;
       }
       item.waste = val;
+      // If openEff is zero but user entered positive closing, auto-cap closing to 0 to keep flow moving
+      try {
+        if (s.outlet) {
+          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+          const y = dt.toISOString().slice(0, 10);
+          const [prev0, supply0] = await Promise.all([
+            (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: item.key } }),
+            (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: item.key } }),
+          ]);
+          const openEff0 = Number((prev0?.closingQty || 0)) + Number((supply0?.qty || 0));
+          const maxClosing0 = Math.max(0, openEff0 - Number(item.waste || 0));
+          if (Number(item.closing || 0) > maxClosing0 && openEff0 === 0) {
+            item.closing = 0;
+            try { await sendText(phone, `No opening recorded for ${item.name} today. Closing auto-set to 0.`, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+          }
+        }
+      } catch {}
       // Immediately persist single row and lock this product for the day
       if (s.outlet) {
         try {
