@@ -1239,8 +1239,33 @@ export async function POST(req: Request) {
 
           // All text routes now go through GPT-only path above when GPT_ONLY is enabled.
           // For non-GPT deployments, we attempt GPT once; if empty/disabled, fall back to tabs.
+          // SPECIAL CASE: When the session expects a numeric entry (closing/waste/expense/dispute or active product),
+          // forward the text directly to the attendant flow before any GPT handling to preserve wizard progress.
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
+            try {
+              // If we're in a numeric-entry context, dispatch to the attendant text handler first.
+              const sessStateRaw = String((_sess as any)?.state || "");
+              const sessState = sessStateRaw.toUpperCase();
+              const cursor: any = ((_sess as any)?.cursor) || {};
+              const hasCurrentItem = !!(cursor && cursor.currentItem && typeof cursor.currentItem.key === "string");
+              const expectsNumeric = [
+                "CLOSING_QTY",
+                "CLOSING_WASTE_QTY",
+                "EXPENSE_AMOUNT",
+                "DISPUTE_QTY",
+              ].includes(sessState) || sessState === "CLOSING" || hasCurrentItem;
+              if (expectsNumeric) {
+                try {
+                  await handleAuthenticatedText(_sess, text);
+                  markSent();
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "numeric.pre.dispatch", state: sessState, hasCurrentItem }, status: "OK", type: "NUMERIC_PRE_DISPATCH" }); } catch {}
+                } catch (e) {
+                  try { await logOutbound({ direction: "in", templateName: null, payload: { phone: phoneE164, event: "numeric.pre.dispatch.fail", error: String(e) }, status: "ERROR", type: "NUMERIC_PRE_DISPATCH_FAIL" }); } catch {}
+                }
+                continue;
+              }
+            } catch {}
             try {
               // Call GPT and send reply (reuse the GPT-only path above by constructing same inputs)
               const r = await runGptForIncoming(phoneE164, text);
