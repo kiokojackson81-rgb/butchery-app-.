@@ -133,6 +133,13 @@ function parseNumericLoose(t: string): number | null {
   return Number.isFinite(val) ? val : null;
 }
 
+// Format quantities to at most one decimal for user-friendly messages
+function fmtQty(n: number): string {
+  const v = Math.round((Number(n) || 0) * 10) / 10;
+  const s = v.toFixed(1);
+  return s.endsWith(".0") ? s.slice(0, -2) : s;
+}
+
 function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number; waste: number; name: string }>) {
   cursor.rows ||= [] as any;
   let r = cursor.rows.find((x) => x.key === key);
@@ -1046,7 +1053,7 @@ export async function handleInboundText(phone: string, text: string) {
             const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
             await sendText(
               phone,
-              `${item.name}: Opening ${openEff} − Closing ${item.closing || 0} − Waste ${item.waste || 0} = Sold ${soldUnits}${pricePart}${valuePart}`,
+              `${item.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(item.closing || 0)} − Waste ${fmtQty(item.waste || 0)} = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`,
               "AI_DISPATCH_TEXT",
               { gpt_sent: true }
             );
@@ -1058,7 +1065,7 @@ export async function handleInboundText(phone: string, text: string) {
             const maxClosing = Math.max(0, openEff - Number(item.waste || 0));
             await sendText(
               phone,
-              `Invalid closing for ${item.name}. You entered ${item.closing ?? 0} with waste ${item.waste ?? 0}, but max allowed is ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Re-enter a valid number.`,
+              `Invalid closing for ${item.name}. You entered ${fmtQty(item.closing ?? 0)} with waste ${fmtQty(item.waste ?? 0)}, but max allowed is ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Re-enter a valid number.`,
               "AI_DISPATCH_TEXT",
               { gpt_sent: true }
             );
@@ -1431,7 +1438,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     const lines = assigned.map((p) => {
       const qty = Number(openEff.get(p.key) || 0);
       const unit = (unitByKey.get(p.key) || "kg").trim();
-      return `- ${p.name}: ${qty} ${unit}`;
+      return `- ${p.name}: ${fmtQty(qty)} ${unit}`;
     });
     await sendText(
       phone,
@@ -1508,13 +1515,13 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         const opening = (rows || []).find((r: any) => String(r.itemKey) === key) ||
                         (rows || []).find((r: any) => String(r.itemKey).toLowerCase() === String(key).toLowerCase());
         if (opening) {
-          await sendText(phone, `Opening stock for ${name} (${s.outlet} — ${cur.date}): ${opening.qty} ${opening.unit || "kg"}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+          await sendText(phone, `Opening stock for ${name} (${s.outlet} — ${cur.date}): ${fmtQty(Number(opening.qty || 0))} ${opening.unit || "kg"}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
         } else {
           // Fall back to yesterday's attendant closing as opening baseline
           const y = prevDateISO(cur.date);
           const prev = await (prisma as any).attendantClosing.findFirst({ where: { outletName: s.outlet, date: y, itemKey: key } }).catch(() => null);
           if (prev) {
-            await sendText(phone, `Opening baseline (yesterday closing) for ${name} (${s.outlet} — ${cur.date}): ${prev.closingQty}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+            await sendText(phone, `Opening baseline (yesterday closing) for ${name} (${s.outlet} — ${cur.date}): ${fmtQty(Number(prev.closingQty || 0))}` , "AI_DISPATCH_TEXT", { gpt_sent: true });
           }
           // If neither opening nor baseline was found, remain silent and go straight to qty prompt.
         }
@@ -1581,7 +1588,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         const value = soldUnits * (hasPrice ? price : 0);
         const pricePart = hasPrice ? ` @ KSh ${price.toLocaleString()}/kg` : "";
         const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
-        await sendText(phone, `${cur.currentItem.name}: Opening ${openEff} − Closing ${cur.currentItem.closing || 0} − Waste 0 = Sold ${soldUnits}${pricePart}${valuePart}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+  await sendText(phone, `${cur.currentItem.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(cur.currentItem.closing || 0)} − Waste 0 = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       }
     } catch {}
     delete cur.currentItem;
@@ -1652,7 +1659,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
           await sendText(
             phone,
-            `Invalid closing for ${bad.name}. Entered ${bad.closing} with waste ${bad.waste || 0}. Max allowed: ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Adjust and try again.`,
+            `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
             "AI_DISPATCH_TEXT",
             { gpt_sent: true }
           );
@@ -1737,7 +1744,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
             const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
             await sendText(
               phone,
-              `Invalid closing for ${bad.name}. Entered ${bad.closing} with waste ${bad.waste || 0}. Max allowed: ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Adjust and try again.`,
+              `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
               "AI_DISPATCH_TEXT",
               { gpt_sent: true }
             );
@@ -1824,8 +1831,8 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
     const reviewLines = (cur.rows || []).map((r) => {
       const closingQty = Number(r.closing ?? 0);
       const wasteQty = Number(r.waste ?? 0);
-      const wasteText = wasteQty ? ` (waste ${wasteQty})` : "";
-      return `- ${r.name}: ${closingQty}${wasteText}`;
+      const wasteText = wasteQty ? ` (waste ${fmtQty(wasteQty)})` : "";
+      return `- ${r.name}: ${fmtQty(closingQty)}${wasteText}`;
     });
     const summaryText = buildReviewSummaryText(s.outlet || "Outlet", reviewLines);
     const summaryButtons = buildClosingReviewButtons();
