@@ -7,6 +7,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/wa/jobs/daily-supply-report",
+      "schedule": "0 16 * * *"
+    },
+    {
       "path": "/api/wa/jobs/attendant-closing-reminder",
       "schedule": "0 15 * * *"
     },
