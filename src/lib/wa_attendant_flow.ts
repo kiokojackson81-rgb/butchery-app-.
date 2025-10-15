@@ -41,6 +41,29 @@ type Cursor = {
   inactiveKeys?: string[]; // once submitted, consider item done for this session
 };
 
+// Case-insensitive OpeningEff computation (yesterday closing + today supply)
+async function computeOpeningEffective(outletName: string, dateISO: string, itemKey: string): Promise<number> {
+  try {
+    const keyLc = String(itemKey || '').toLowerCase();
+    const dt = new Date(dateISO + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+    const y = dt.toISOString().slice(0, 10);
+    const [prevRows, supplyRows] = await Promise.all([
+      (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }).catch(() => []),
+      (prisma as any).supplyOpeningRow.findMany({ where: { date: dateISO, outletName } }).catch(() => []),
+    ]);
+    let openEff = 0;
+    for (const r of prevRows || []) {
+      const k = String((r as any).itemKey || '').toLowerCase();
+      if (k === keyLc) openEff += Number((r as any).closingQty || 0);
+    }
+    for (const r of supplyRows || []) {
+      const k = String((r as any).itemKey || '').toLowerCase();
+      if (k === keyLc) openEff += Number((r as any).qty || 0);
+    }
+    return Number.isFinite(openEff) ? openEff : 0;
+  } catch { return 0; }
+}
+
 type SessionPatch = Partial<Cursor & { state: string; role?: string; code?: string; outlet?: string }>;
 
 async function loadSession(phone: string) {
@@ -988,13 +1011,7 @@ export async function handleInboundText(phone: string, text: string) {
       // If openEff is zero but user entered positive closing, auto-cap closing to 0 to keep flow moving
       try {
         if (s.outlet) {
-          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-          const y = dt.toISOString().slice(0, 10);
-          const [prev0, supply0] = await Promise.all([
-            (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: item.key } }),
-            (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: item.key } }),
-          ]);
-          const openEff0 = Number((prev0?.closingQty || 0)) + Number((supply0?.qty || 0));
+          const openEff0 = await computeOpeningEffective(s.outlet, cur.date, item.key);
           const maxClosing0 = Math.max(0, openEff0 - Number(item.waste || 0));
           if (Number(item.closing || 0) > maxClosing0 && openEff0 === 0) {
             item.closing = 0;
@@ -1037,16 +1054,7 @@ export async function handleInboundText(phone: string, text: string) {
         } catch (e: any) {
           // If invalid (entered closing > opening-effective - waste), inform with allowed max
           try {
-            const dt = new Date(cur.date + "T00:00:00.000Z");
-            dt.setUTCDate(dt.getUTCDate() - 1);
-            const y = dt.toISOString().slice(0, 10);
-            const [prev, supply] = await Promise.all([
-              (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
-              (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
-            ]);
-            let openEff = 0;
-            for (const r of prev || []) if (String((r as any).itemKey) === item.key) openEff += Number((r as any).closingQty || 0);
-            for (const r of supply || []) if (String((r as any).itemKey) === item.key) openEff += Number((r as any).qty || 0);
+            const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
             const maxClosing = Math.max(0, openEff - Number(item.waste || 0));
             await sendText(
               phone,
@@ -1197,16 +1205,9 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           where: { id: s.id },
           data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
         });
-      } catch {}
-    }
-    // Send a single consolidated logout message with the login link
-    try {
-      const urlObj = await createLoginLink(toDbPhone(phone));
-      await sendText(
-        phone,
-        `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`,
-        "AI_DISPATCH_TEXT",
-        { gpt_sent: true }
+          try {
+            const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
+            const pb = await (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: item.key, active: true } });
       );
     } catch {
       await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -1576,14 +1577,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     // Send per-item sales summary on skip as well
     try {
       if (s.outlet) {
-        const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-        const y = dt.toISOString().slice(0, 10);
-        const [prev, supply, pb] = await Promise.all([
-          (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: cur.currentItem.key } }),
-          (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: cur.currentItem.key } }),
-          (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: cur.currentItem.key, active: true } }),
-        ]);
-        const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
+        const openEff = await computeOpeningEffective(s.outlet, cur.date, cur.currentItem.key);
+        const pb = await (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: cur.currentItem.key, active: true } });
         const soldUnits = Math.max(0, openEff - Number(cur.currentItem.closing || 0) - 0);
         const price = Number((pb as any)?.sellPrice || 0);
         const hasPrice = Number.isFinite(price) && price > 0;
