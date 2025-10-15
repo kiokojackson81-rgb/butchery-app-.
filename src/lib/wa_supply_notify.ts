@@ -99,7 +99,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
       `Items supplied:`,
       itemLinesQtyOnly,
       ``,
-      `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
+      `🧾 Total purchase amount: Ksh ${shillings(totalCost)}`,
       ``,
       `Received by: ${p.attendantName}`,
       `Reference: ${p.ref}`,
