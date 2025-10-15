@@ -46,7 +46,7 @@ export function formatPerItemSupplyMessage(i: PerItemMessageInput): string {
   }
   lines.push("");
   lines.push(`👨‍🍳 Received by: ${i.attendantName || "Attendant"}`);
-  lines.push(`🚚 Delivered by: ${i.supplierName || "Supplier"}`);
+  lines.push(`🚚 Delivered by: ${i.supplierName || "Kyalo"}`);
   lines.push("");
   lines.push(`⚠️ If the quantity is incorrect  login to your dashboard to raise dispute click here https://barakafresh.com/attendant or talk to supervisor`);
   return lines.join("\n");

@@ -83,7 +83,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
     lines.push(
       ``,
       `👨‍🍳 Received by: ${p.attendantName}`,
-      `🚚 Supplied by: ${p.supplierName}`,
+      `🚚 Supplied by: ${p.supplierName || "Kyalo"}`,
       ``,
       `⚠️ If the quantity is incorrect  login to your dashboard to raise dispute click here https://barakafresh.com/attendant or talk to supervisor`
     );
