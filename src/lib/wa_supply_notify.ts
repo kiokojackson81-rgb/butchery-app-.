@@ -55,7 +55,9 @@ function fmtDate(dateISO: string) {
 }
 
 export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
-  const itemLines = p.items.map(i => lineFor(i, role === "attendant")).join("\n");
+  // Build item lines per role: attendants and suppliers see qty-only; supervisors see price lines
+  const itemLinesQtyOnly = p.items.map(i => lineFor(i, true)).join("\n");
+  const itemLinesWithPrice = p.items.map(i => lineFor(i, false)).join("\n");
   const { totalQty, unit, totalCost } = sumTotals(p.items, p.qtyUnitDefault || "kg");
   const dateObj = fmtDate(p.dateISO);
   const dateStrFull = `${dateObj.date} ${dateObj.time}`;
@@ -71,8 +73,8 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
       `🧾 Supply Update — ${p.outlet}`,
       `📅 Date: ${ts.date} • ⏰ Time: ${ts.time}`,
       ``,
-      `🥩 Items supplied:`,
-      itemLines,
+  `🥩 Items supplied:`,
+  itemLinesQtyOnly,
     ];
     lines.push(``);
     if (openingStr) lines.push(`📦 Today’s opening stock: ${openingStr}`);
@@ -95,7 +97,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
       `Date: ${dateStrFull}`,
       ``,
       `Items supplied:`,
-      itemLines,
+      itemLinesQtyOnly,
       ``,
       `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
       ``,
@@ -110,7 +112,7 @@ export function formatSupplyMessage(role: Role, p: SupplyPayload): string {
     `Date: ${dateStrFull}`,
     ``,
     `Items:`,
-    itemLines,
+    itemLinesWithPrice,
     ``,
     `Totals: ${num2.format(totalQty)}${unit} | Ksh ${shillings(totalCost)}`,
     ``,
