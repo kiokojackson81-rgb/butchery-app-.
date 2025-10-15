@@ -66,7 +66,7 @@ async function sendLoginLink(phoneGraph: string) {
   await sendTextSafe(phoneGraph, "You're not logged in. Tap the login link we sent recently to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
 }
 
-async function saveSessionPatch(sessId: string, patch: Partial<{ state: string; cursor: SupplierCursor }>) {
+async function saveSessionPatch(sessId: string, patch: Partial<{ state: string; cursor: SupplierCursor; outlet?: string }>) {
   await (prisma as any).waSession.update({ where: { id: sessId }, data: { ...patch } });
 }
 
@@ -122,7 +122,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       // If only one outlet globally or in assignment, auto-select it and proceed to product pick
       if (assigned?.length === 1) {
         const outletName = assigned[0].outlet || outlets[0]?.name;
-        await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { date: today, outlet: outletName } });
+        await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { date: today, outlet: outletName }, outlet: outletName });
         // Suggest recent products for this outlet first
         const recent = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName, date: today }, orderBy: { id: "desc" }, take: 5, select: { itemKey: true } });
         const recentKeys = (recent || []).map((r: any) => r.itemKey);
@@ -234,7 +234,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     // Default: delivery -> next is pick product
-    await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, outlet } });
+  await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, outlet }, outlet });
     // Suggest recent products first for this outlet
     const recent = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: outlet, date: today }, orderBy: { id: "desc" }, take: 5, select: { itemKey: true } });
     const recentKeys = (recent || []).map((r: any) => r.itemKey);
@@ -321,6 +321,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
     });
+    try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
     // Resolve supplier identity (name) from session code or phone mapping and notify attendant
     let supplierName: string | undefined = undefined;
     let supplierCode: string | undefined = sess.code || undefined;
@@ -362,6 +363,7 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       update: { qty: totalQty, buyPrice, unit },
       create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
     });
+    try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
     // Resolve supplier identity (name) and notify attendant on update/add
     let supplierName: string | undefined = undefined;
     let supplierCode: string | undefined = sess.code || undefined;
