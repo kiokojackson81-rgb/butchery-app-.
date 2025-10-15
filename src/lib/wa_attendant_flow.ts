@@ -951,11 +951,41 @@ export async function handleInboundText(phone: string, text: string) {
       item.waste = val;
       // Immediately persist single row and lock this product for the day
       if (s.outlet) {
-        await saveClosings({
-          date: cur.date,
-          outletName: s.outlet,
-          rows: [{ productKey: item.key, closingQty: item.closing || 0, wasteQty: item.waste || 0 }],
-        });
+        try {
+          await saveClosings({
+            date: cur.date,
+            outletName: s.outlet,
+            rows: [{ productKey: item.key, closingQty: item.closing || 0, wasteQty: item.waste || 0 }],
+          });
+        } catch (e: any) {
+          // If invalid (entered closing > opening-effective - waste), inform with allowed max
+          try {
+            const dt = new Date(cur.date + "T00:00:00.000Z");
+            dt.setUTCDate(dt.getUTCDate() - 1);
+            const y = dt.toISOString().slice(0, 10);
+            const [prev, supply] = await Promise.all([
+              (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
+              (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
+            ]);
+            let openEff = 0;
+            for (const r of prev || []) if (String((r as any).itemKey) === item.key) openEff += Number((r as any).closingQty || 0);
+            for (const r of supply || []) if (String((r as any).itemKey) === item.key) openEff += Number((r as any).qty || 0);
+            const maxClosing = Math.max(0, openEff - Number(item.waste || 0));
+            await sendText(
+              phone,
+              `Invalid closing for ${item.name}. You entered ${item.closing ?? 0} with waste ${item.waste ?? 0}, but max allowed is ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Re-enter a valid number.`,
+              "AI_DISPATCH_TEXT",
+              { gpt_sent: true }
+            );
+          } catch {}
+          // Keep state so attendant can retry entering waste/closing
+          await saveSession(phone, { state: "CLOSING_QTY", ...cur });
+          const promptText = buildQuantityPromptText(item.name);
+          const navButtons = buildNavigationRow();
+          const payload = buildButtonPayload(phone.replace(/^\+/, ""), promptText, navButtons);
+          await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+          return;
+        }
       }
       upsertRow(cur, item.key, { name: item.name, closing: item.closing || 0, waste: item.waste || 0 });
       delete cur.currentItem;
@@ -1293,33 +1323,44 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
       return true;
     }
-    // Show supply exactly as the dashboard Supply tab would:
+    // Show opening-effective (carry-forward): yesterday closing + today's deliveries
     // - Include all assigned products
-    // - Use today's opening quantity if present
-    // - Default missing items to 0 with each product's unit
+    // - Sum yesterday's attendant closings per product
+    // - Add today's delivery rows (SupplyOpeningRow)
     const assigned = await getAssignedProducts(s.code || "");
     const keys = assigned.map((p) => p.key);
-    const [openRows, prodRows] = await Promise.all([
+    const y = prevDateISO(cur.date);
+    const [prevClosings, todaySupply, prodRows] = await Promise.all([
+      (prisma as any).attendantClosing.findMany({ where: { outletName: s.outlet, date: y } }).catch(() => []),
       (prisma as any).supplyOpeningRow.findMany({ where: { outletName: s.outlet, date: cur.date } }).catch(() => []),
       keys.length
         ? (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, unit: true } }).catch(() => [])
         : [],
     ]);
-    const openByKey = new Map<string, { qty: number; unit?: string }>();
-    for (const r of openRows as any[]) {
-      if (!r?.itemKey) continue;
-      openByKey.set(String(r.itemKey), { qty: Number(r.qty || 0), unit: String(r.unit || "") || undefined });
-    }
     const unitByKey = new Map<string, string>();
     for (const p of prodRows as any[]) unitByKey.set(String(p.key), String(p.unit || "kg"));
+    const openEff = new Map<string, number>();
+    for (const r of (prevClosings as any[]) || []) {
+      const k = String(r.itemKey || ""); if (!k) continue;
+      const q = Number(r.closingQty || 0);
+      openEff.set(k, (openEff.get(k) || 0) + (Number.isFinite(q) ? q : 0));
+    }
+    for (const r of (todaySupply as any[]) || []) {
+      const k = String(r.itemKey || ""); if (!k) continue;
+      const q = Number(r.qty || 0);
+      openEff.set(k, (openEff.get(k) || 0) + (Number.isFinite(q) ? q : 0));
+    }
 
     const lines = assigned.map((p) => {
-      const row = openByKey.get(p.key);
-      const qty = row ? row.qty : 0;
-      const unit = (row?.unit || unitByKey.get(p.key) || "kg").trim();
+      const qty = Number(openEff.get(p.key) || 0);
+      const unit = (unitByKey.get(p.key) || "kg").trim();
       return `- ${p.name}: ${qty} ${unit}`;
     });
-    await sendText(phone, `Opening stock for ${s.outlet} (${cur.date}):\n${lines.join("\n")}` , "AI_DISPATCH_TEXT");
+    await sendText(
+      phone,
+      `Opening (carry-forward) for ${s.outlet} (${cur.date}):\n${lines.join("\n")}\n\nNote: Opening = yesterday closing + today deliveries.`,
+      "AI_DISPATCH_TEXT"
+    );
 
     // After syncing supply, suggest next action
     const remaining = await getAvailableClosingProducts(s, cur);
@@ -1485,11 +1526,55 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
-    await saveClosings({
-      date: cur.date,
-      outletName: s.outlet,
-      rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
-    });
+    try {
+      await saveClosings({
+        date: cur.date,
+        outletName: s.outlet,
+        rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
+      });
+    } catch (e: any) {
+      // Find the first offending row by recomputing allowed max and notifying
+      try {
+        const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+        const y = dt.toISOString().slice(0, 10);
+        const [prev, supply] = await Promise.all([
+          (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
+          (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
+        ]);
+        const byKey = new Map<string, { openEff: number }>();
+        for (const r of prev || []) {
+          const k = String((r as any).itemKey || ""); if (!k) continue;
+          byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).closingQty || 0) });
+        }
+        for (const r of supply || []) {
+          const k = String((r as any).itemKey || ""); if (!k) continue;
+          byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).qty || 0) });
+        }
+        const bad = cur.rows.find((r) => {
+          const openEff = Number(byKey.get(r.key)?.openEff || 0);
+          const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
+          return Number(r.closing || 0) > maxClosing + 1e-6;
+        });
+        if (bad) {
+          const openEff = Number(byKey.get(bad.key)?.openEff || 0);
+          const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
+          await sendText(
+            phone,
+            `Invalid closing for ${bad.name}. Entered ${bad.closing} with waste ${bad.waste || 0}. Max allowed: ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Adjust and try again.`,
+            "AI_DISPATCH_TEXT",
+            { gpt_sent: true }
+          );
+        } else {
+          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+        }
+      } catch {
+        await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+      await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+      const available = await getAvailableClosingProducts(s, cur);
+      await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
+      return true;
+    }
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     await notifySupAdm(`Closing submitted for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
     const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
@@ -1526,11 +1611,55 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     // Save any staged rows then lock the day
     if (cur.rows.length) {
-      await saveClosings({
-        date: cur.date,
-        outletName: s.outlet,
-        rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
-      });
+      try {
+        await saveClosings({
+          date: cur.date,
+          outletName: s.outlet,
+          rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
+        });
+      } catch (e: any) {
+        // Mirror SUMMARY_SUBMIT error handling
+        try {
+          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+          const y = dt.toISOString().slice(0, 10);
+          const [prev, supply] = await Promise.all([
+            (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
+            (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
+          ]);
+          const byKey = new Map<string, { openEff: number }>();
+          for (const r of prev || []) {
+            const k = String((r as any).itemKey || ""); if (!k) continue;
+            byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).closingQty || 0) });
+          }
+          for (const r of supply || []) {
+            const k = String((r as any).itemKey || ""); if (!k) continue;
+            byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).qty || 0) });
+          }
+          const bad = cur.rows.find((r) => {
+            const openEff = Number(byKey.get(r.key)?.openEff || 0);
+            const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
+            return Number(r.closing || 0) > maxClosing + 1e-6;
+          });
+          if (bad) {
+            const openEff = Number(byKey.get(bad.key)?.openEff || 0);
+            const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
+            await sendText(
+              phone,
+              `Invalid closing for ${bad.name}. Entered ${bad.closing} with waste ${bad.waste || 0}. Max allowed: ${maxClosing}. Opening = yesterday closing + today supply = ${openEff}. Adjust and try again.`,
+              "AI_DISPATCH_TEXT",
+              { gpt_sent: true }
+            );
+          } else {
+            await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+          }
+        } catch {
+          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+        }
+        await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+        const available = await getAvailableClosingProducts(s, cur);
+        await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
+        return true;
+      }
     }
     await lockDay(cur.date, s.outlet, s.code || undefined);
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
