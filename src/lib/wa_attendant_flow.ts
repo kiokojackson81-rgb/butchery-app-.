@@ -993,6 +993,30 @@ export async function handleInboundText(phone: string, text: string) {
             outletName: s.outlet,
             rows: [{ productKey: item.key, closingQty: item.closing || 0, wasteQty: item.waste || 0 }],
           });
+          // Compute and send per-item sales summary before proceeding
+          try {
+            const dt = new Date(cur.date + "T00:00:00.000Z");
+            dt.setUTCDate(dt.getUTCDate() - 1);
+            const y = dt.toISOString().slice(0, 10);
+            const [prev, supply, pb] = await Promise.all([
+              (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: item.key } }),
+              (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: item.key } }),
+              (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: item.key, active: true } }),
+            ]);
+            const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
+            const soldUnits = Math.max(0, openEff - Number(item.closing || 0) - Number(item.waste || 0));
+            const price = Number((pb as any)?.sellPrice || 0);
+            const hasPrice = Number.isFinite(price) && price > 0;
+            const value = soldUnits * (hasPrice ? price : 0);
+            const pricePart = hasPrice ? ` @ KSh ${price.toLocaleString()}/kg` : "";
+            const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
+            await sendText(
+              phone,
+              `${item.name}: Opening ${openEff} − Closing ${item.closing || 0} − Waste ${item.waste || 0} = Sold ${soldUnits}${pricePart}${valuePart}`,
+              "AI_DISPATCH_TEXT",
+              { gpt_sent: true }
+            );
+          } catch {}
         } catch (e: any) {
           // If invalid (entered closing > opening-effective - waste), inform with allowed max
           try {
@@ -1532,6 +1556,26 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     cur.currentItem.waste = 0;
     upsertRow(cur, cur.currentItem.key, { name: cur.currentItem.name, closing: cur.currentItem.closing || 0, waste: 0 });
+    // Send per-item sales summary on skip as well
+    try {
+      if (s.outlet) {
+        const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+        const y = dt.toISOString().slice(0, 10);
+        const [prev, supply, pb] = await Promise.all([
+          (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName: s.outlet, itemKey: cur.currentItem.key } }),
+          (prisma as any).supplyOpeningRow.findFirst({ where: { date: cur.date, outletName: s.outlet, itemKey: cur.currentItem.key } }),
+          (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: cur.currentItem.key, active: true } }),
+        ]);
+        const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
+        const soldUnits = Math.max(0, openEff - Number(cur.currentItem.closing || 0) - 0);
+        const price = Number((pb as any)?.sellPrice || 0);
+        const hasPrice = Number.isFinite(price) && price > 0;
+        const value = soldUnits * (hasPrice ? price : 0);
+        const pricePart = hasPrice ? ` @ KSh ${price.toLocaleString()}/kg` : "";
+        const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
+        await sendText(phone, `${cur.currentItem.name}: Opening ${openEff} − Closing ${cur.currentItem.closing || 0} − Waste 0 = Sold ${soldUnits}${pricePart}${valuePart}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+    } catch {}
     delete cur.currentItem;
     await nextPickOrSummary(phone, s, cur);
     return true;
