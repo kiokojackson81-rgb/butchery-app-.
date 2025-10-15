@@ -84,6 +84,23 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
       const code = canonFull(raw);
       const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: code, mode: "insensitive" }, active: true } }).catch(() => null);
       supplierName = (pc?.name || undefined);
+    } else {
+      // Fallback: try the most recent supplier WA session for this outlet in the last 30 minutes
+      try {
+        const since = new Date(Date.now() - 30 * 60 * 1000);
+        const suppSess = await (prisma as any).waSession.findFirst({
+          where: { role: "supplier", outlet: outlet, updatedAt: { gte: since } },
+          orderBy: { updatedAt: "desc" },
+          select: { phoneE164: true },
+        });
+        if (suppSess?.phoneE164) {
+          const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164: suppSess.phoneE164, role: "supplier" } }).catch(() => null);
+          if (pm?.code) {
+            const pc2 = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true } }).catch(() => null);
+            supplierName = pc2?.name || undefined;
+          }
+        }
+      } catch {}
     }
   } catch {}
 
