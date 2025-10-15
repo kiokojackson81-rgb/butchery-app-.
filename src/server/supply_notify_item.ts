@@ -12,7 +12,7 @@ const num0 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 });
 function fmtQty(v: number) { return num2.format(Number.isFinite(v) ? v : 0); }
 function shillings(v: number) { return num0.format(Math.round(Number.isFinite(v) ? v : 0)); }
 
-export async function notifySupplyItem(opts: { outlet: string; date: string; itemKey: string }) {
+export async function notifySupplyItem(opts: { outlet: string; date: string; itemKey: string; supplierCode?: string | null; supplierName?: string | null }) {
   const outlet = opts.outlet.trim();
   if (!outlet) return { ok: false, reason: "no-outlet" };
   const date = opts.date.slice(0, 10);
@@ -73,6 +73,17 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
     attendantName = sess?.attendant?.name || undefined;
   } catch {}
 
+  // Resolve supplier name from provided options (supplierName > supplierCode -> PersonCode.name)
+  let supplierName: string | undefined = undefined;
+  try {
+    if (opts.supplierName && String(opts.supplierName).trim()) {
+      supplierName = String(opts.supplierName).trim();
+    } else if (opts.supplierCode && String(opts.supplierCode).trim()) {
+      const pc = await (prisma as any).personCode.findUnique({ where: { code: String(opts.supplierCode).trim() } }).catch(() => null);
+      supplierName = (pc?.name || undefined);
+    }
+  } catch {}
+
   // Compose message via shared formatter
   const text = formatPerItemSupplyMessage({
     outletName: outlet,
@@ -83,6 +94,7 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
     openingQty,
     sellPricePerUnit: sellPrice || undefined,
     attendantName,
+    supplierName,
   });
   // Keep internal indexing stable (D<index>) even if we don't display it explicitly.
   // msg.push(`(Ref: D${position}/${total})`);

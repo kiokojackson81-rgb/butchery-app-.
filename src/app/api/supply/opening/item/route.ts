@@ -37,8 +37,8 @@ export async function POST(req: Request) {
       update: { qty: totalQty, buyPrice: buyPriceNum || Number(existing?.buyPrice || 0), unit: unit || (existing?.unit || "kg") },
       create: { date, outletName: outlet, itemKey, qty: totalQty, buyPrice: buyPriceNum, unit },
     });
-    // Single-item immediate notify (attendant only) for dispute capability
-    try { await notifySupplyItem({ outlet, date, itemKey }); } catch {}
+  // Single-item immediate notify (attendant only) for dispute capability
+  try { await notifySupplyItem({ outlet, date, itemKey, supplierCode: body?.supplierCode || null, supplierName: body?.supplierName || null }); } catch {}
 
     return NextResponse.json({ ok: true, existedQty, totalQty, row });
   } catch (e) {
