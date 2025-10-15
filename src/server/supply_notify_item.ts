@@ -1,21 +1,24 @@
 import { prisma } from "@/lib/prisma";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { toGraphPhone } from "@/lib/wa_phone";
-import { SupplyItem } from "@/lib/wa_supply_notify";
+import { formatPerItemSupplyMessage } from "@/lib/wa_supply_item_format";
 
-// Single-item notification with dispute CTA.
-// Sent to attendant only (for now) each time a single opening row is saved.
-// We compute the index position among today's items for that outlet for stable referencing (D<index> in disputes).
+// Single-item notification to the attendant each time a single opening row is saved.
+// Updated to the richer "Supply Received" template with OK/1 guidance.
 
-function numFmt(v: number) { return new Intl.NumberFormat("en-KE", { maximumFractionDigits: 2 }).format(v); }
+const num2 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 2 });
+const num0 = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 });
+function fmtQty(v: number) { return num2.format(Number.isFinite(v) ? v : 0); }
+function shillings(v: number) { return num0.format(Math.round(Number.isFinite(v) ? v : 0)); }
 
 export async function notifySupplyItem(opts: { outlet: string; date: string; itemKey: string }) {
   const outlet = opts.outlet.trim();
   if (!outlet) return { ok: false, reason: "no-outlet" };
-  const date = opts.date.slice(0,10);
+  const date = opts.date.slice(0, 10);
   const itemKey = opts.itemKey.trim();
   if (!itemKey) return { ok: false, reason: "no-item" };
 
+  // Today's rows (for index and today's cumulative qty)
   const rows = await (prisma as any).supplyOpeningRow.findMany({
     where: { outletName: outlet, date },
     orderBy: { id: "asc" },
@@ -27,27 +30,56 @@ export async function notifySupplyItem(opts: { outlet: string; date: string; ite
   const position = idx + 1;
   const total = rows.length;
 
+  // Recipient phone (attendant for outlet)
   const attendant = await (prisma as any).phoneMapping.findFirst({ where: { role: "attendant", outlet }, select: { phoneE164: true } });
   if (!attendant?.phoneE164) return { ok: false, reason: "no-attendant-phone" };
 
-  const unit = row.unit || "kg";
-  const price = Number(row.buyPrice || 0);
-  const qty = Number(row.qty || 0);
-  const value = price ? price * qty : 0;
-  const money = new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 }).format(Math.round(value));
-  const priceStr = price ? ` @ ${price}` : "";
-  const valStr = value ? ` = ${money}` : "";
+  // Product details (name + unit)
+  const product = await (prisma as any).product.findUnique({ where: { key: itemKey } }).catch(() => null);
+  const productName = String(product?.name || row.itemKey);
+  const unit = String(row.unit || product?.unit || "kg");
 
-  const msgLines = [
-    `Item ${position}/${total}`,
-    `${row.itemKey} ${numFmt(qty)}${unit}${priceStr}${valStr}`.trim(),
-    ``,
-    `If correct ignore. To dispute reply D${position}`,
-    `LIST = show all items today`,
-  ];
+  // Supplied today (cumulative for the day)
+  const supplyQty = Number(row.qty || 0);
+
+  // Opening stock = yesterday closing (for this product)
+  const y = new Date(date + "T00:00:00.000Z");
+  const yStr = new Date(y.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const prev = await (prisma as any).attendantClosing.findUnique({
+    where: { date_outletName_itemKey: { date: yStr, outletName: outlet, itemKey } },
+  }).catch(() => null);
+  const openingQty = Number(prev?.closingQty || 0);
+
+  // Total stock after today supply
+  const totalQty = openingQty + supplyQty;
+
+  // Selling price per unit from pricebook (optional)
+  const pb = await (prisma as any).pricebookRow.findUnique({
+    where: { outletName_productKey: { outletName: outlet, productKey: itemKey } },
+  }).catch(() => null);
+  const sellPrice = Number(pb?.sellPrice || 0);
+  const expectedTotalValue = sellPrice > 0 ? totalQty * sellPrice : 0;
+
+  // Date/Time formatting (KE locale)
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-KE", { year: "numeric", month: "short", day: "2-digit" });
+  const timeStr = now.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+
+  // Compose message via shared formatter
+  const text = formatPerItemSupplyMessage({
+    outletName: outlet,
+    date: now,
+    productName,
+    unit,
+    supplyQty,
+    openingQty,
+    sellPricePerUnit: sellPrice || undefined,
+  });
+  // Keep internal indexing stable (D<index>) even if we don't display it explicitly.
+  // msg.push(`(Ref: D${position}/${total})`);
 
   try {
-    await sendOpsMessage(toGraphPhone(attendant.phoneE164), { kind: "free_text", text: msgLines.join("\n") });
+  await sendOpsMessage(toGraphPhone(attendant.phoneE164), { kind: "free_text", text });
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
