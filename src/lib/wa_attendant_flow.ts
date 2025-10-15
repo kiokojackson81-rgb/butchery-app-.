@@ -61,7 +61,9 @@ async function saveSession(phone: string, patch: SessionPatch) {
   if ("rows" in patch) cursorPatch.rows = (patch as any).rows;
   if ("currentItem" in patch) cursorPatch.currentItem = (patch as any).currentItem;
   if ("expenseName" in patch) cursorPatch.expenseName = (patch as any).expenseName;
-  const cursor = { ...prevCursor, ...cursorPatch };
+  const cursor = { ...prevCursor, ...cursorPatch } as any;
+  // Ensure rows array is always present to avoid runtime .find errors
+  if (!Array.isArray(cursor.rows)) cursor.rows = [];
   return (prisma as any).waSession.update({
     where: { id: s.id },
     data: {
@@ -1076,6 +1078,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   const s = await loadSession(phone);
   if (s?.id) await touchSession(s.id);
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
+  // Defensive: ensure rows is always an array
+  if (!Array.isArray(cur.rows)) cur.rows = [] as any;
   const lr = payload?.list_reply?.id as string | undefined;
   const br = payload?.button_reply?.id as string | undefined;
   const id = lr || br || "";
