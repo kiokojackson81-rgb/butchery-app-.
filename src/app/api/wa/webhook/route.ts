@@ -499,7 +499,18 @@ export async function POST(req: Request) {
           if (!GPT_ONLY && type === "text") {
             try {
               const typed = String(m.text?.body ?? "").trim();
-              if (/^[1-7]$/.test(typed)) {
+              // Skip digit mapping when expecting numeric entry (closing/waste/expense/dispute or umbrella 'closing' or active currentItem)
+              const sessStateRaw = String((_sess as any)?.state || "");
+              const sessState = sessStateRaw.toUpperCase();
+              const cursor: any = ((_sess as any)?.cursor) || {};
+              const hasCurrentItem = !!(cursor && cursor.currentItem && typeof cursor.currentItem.key === "string");
+              const expectsNumeric = [
+                "CLOSING_QTY",
+                "CLOSING_WASTE_QTY",
+                "EXPENSE_AMOUNT",
+                "DISPUTE_QTY",
+              ].includes(sessState) || sessState === "CLOSING" || hasCurrentItem;
+              if (/^[1-7]$/.test(typed) && !expectsNumeric) {
                 const id = mapDigitToId(sessRole, typed);
                 const flowId = canonicalToFlowId(sessRole, id);
                 let handlerResult: any = null;
