@@ -581,7 +581,11 @@ export async function POST(req: Request) {
               "CLOSING_WASTE_QTY",
               "EXPENSE_AMOUNT",
               "DISPUTE_QTY",
-            ].includes(sessState) || (hasCurrentItem && ["CLOSING", "MENU", ""].includes(sessState) === true);
+            ].includes(sessState)
+              // Any closing flow umbrella state should not map digits to menu
+              || sessState === "CLOSING"
+              // If we have an active product, treat as numeric entry regardless of coarse state
+              || (hasCurrentItem && ["CLOSING", "MENU", ""].includes(sessState));
             if (/^[1-7]$/.test(digit) && !expectsNumeric) {
               try {
                 // Map the digit to the role-specific id and route regardless of GPT_ONLY
