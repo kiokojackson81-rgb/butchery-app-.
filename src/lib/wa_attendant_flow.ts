@@ -476,6 +476,22 @@ export async function handleInboundText(phone: string, text: string) {
   if (s?.id) await touchSession(s.id);
   const t = text.trim();
   const cur: Cursor = (s.cursor as any) || { date: today(), rows: [] };
+  // Defensive: normalize rows and date
+  if (!Array.isArray(cur.rows)) cur.rows = [] as any;
+  if (!cur.date) cur.date = today();
+
+  // If we're in umbrella CLOSING state but have an active currentItem, coerce to CLOSING_QTY
+  // so that numeric input is processed instead of falling back to default help.
+  try {
+    const st = String(s.state || '').toUpperCase();
+    const hasItem = !!(cur && (cur as any).currentItem && typeof (cur as any).currentItem.key === 'string');
+    if (st === 'CLOSING' && hasItem) {
+      // Persist the more specific state for subsequent messages
+      await saveSession(phone, { state: 'CLOSING_QTY', ...cur });
+      s.state = 'CLOSING_QTY' as any;
+      try { await logOutbound({ direction: 'in', templateName: null, payload: { phone: phone, event: 'closing.state.coerce', from: st, to: 'CLOSING_QTY' }, status: 'INFO', type: 'CLOSING_STATE_COERCE' }); } catch {}
+    }
+  } catch {}
 
   // Try one-tap link login first
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
