@@ -29,6 +29,7 @@ import {
   buildNavigationRow,
   buildClosingReviewButtons,
   buildClosingNextActionsButtons,
+  buildClosingNotifyButtons,
   buildReviewSummaryText,
 } from "@/lib/wa/messageBuilder";
 // (sendText) already imported; (prisma) already imported at top
@@ -1588,18 +1589,28 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     cur.currentItem.waste = 0;
     upsertRow(cur, cur.currentItem.key, { name: cur.currentItem.name, closing: cur.currentItem.closing || 0, waste: 0 });
-    // Send per-item sales summary on skip as well
+    // Persist immediately even on skip, then send per-item sales summary
     try {
       if (s.outlet) {
-        const openEff = await computeOpeningEffective(s.outlet, cur.date, cur.currentItem.key);
-        const pb = await (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: cur.currentItem.key, active: true } });
-        const soldUnits = Math.max(0, openEff - Number(cur.currentItem.closing || 0) - 0);
+        await saveClosings({
+          date: cur.date,
+          outletName: s.outlet,
+          rows: [{ productKey: cur.currentItem.key, closingQty: cur.currentItem.closing || 0, wasteQty: 0 }],
+        });
+        const [openEff, saved, pb] = await Promise.all([
+          computeOpeningEffective(s.outlet, cur.date, cur.currentItem.key),
+          (prisma as any).attendantClosing.findUnique({ where: { date_outletName_itemKey: { date: cur.date, outletName: s.outlet, itemKey: cur.currentItem.key } } }),
+          (prisma as any).pricebookRow.findFirst({ where: { outletName: s.outlet, productKey: cur.currentItem.key, active: true } }),
+        ]);
+        const closingQty = Number((saved?.closingQty ?? cur.currentItem.closing) || 0);
+        const wasteQty = Number((saved?.wasteQty ?? 0) || 0);
+        const soldUnits = Math.max(0, openEff - closingQty - wasteQty);
         const price = Number((pb as any)?.sellPrice || 0);
         const hasPrice = Number.isFinite(price) && price > 0;
         const value = soldUnits * (hasPrice ? price : 0);
         const pricePart = hasPrice ? ` @ KSh ${price.toLocaleString()}/kg` : "";
         const valuePart = hasPrice ? ` → Sales KSh ${Math.round(value).toLocaleString()}` : "";
-  await sendText(phone, `${cur.currentItem.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(cur.currentItem.closing || 0)} − Waste 0 = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        await sendText(phone, `${cur.currentItem.name}: Opening ${fmtQty(openEff)} − Closing ${fmtQty(closingQty)} − Waste ${fmtQty(wasteQty)} = Sold ${fmtQty(soldUnits)}${pricePart}${valuePart}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       }
     } catch {}
     delete cur.currentItem;
@@ -1861,6 +1872,16 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
     if (closingDraftPatch) patch.closingDraft = closingDraftPatch;
     await updateWaState(phoneE164, patch);
     await sendInteractive(summaryPayload as any, "AI_DISPATCH_INTERACTIVE");
+    // Nudge: after finishing the last product, suggest adding expenses or other actions
+    try {
+      const notifyButtons = buildClosingNotifyButtons();
+      const notifyPayload = buildButtonPayload(
+        phone.replace(/^\+/, ""),
+        "All products captured. Would you like to add expenses or proceed?",
+        notifyButtons
+      );
+      await sendInteractive(notifyPayload as any, "AI_DISPATCH_INTERACTIVE");
+    } catch {}
   } else {
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
     await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
