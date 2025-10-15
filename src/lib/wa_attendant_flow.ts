@@ -1059,17 +1059,29 @@ export async function handleInboundText(phone: string, text: string) {
             );
           } catch {}
         } catch (e: any) {
-          // If invalid (entered closing > opening-effective - waste), inform with allowed max
-          try {
-            const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
-            const maxClosing = Math.max(0, openEff - Number(item.waste || 0));
-            await sendText(
-              phone,
-              `Invalid closing for ${item.name}. You entered ${fmtQty(item.closing ?? 0)} with waste ${fmtQty(item.waste ?? 0)}, but max allowed is ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Re-enter a valid number.`,
-              "AI_DISPATCH_TEXT",
-              { gpt_sent: true }
-            );
-          } catch {}
+          // If invalid (entered closing > opening-effective - waste), show specific guidance; else generic failure
+          const code = (e && (e.code ?? (e as any).statusCode)) as any;
+          if (code === 400) {
+            try {
+              const openEff = await computeOpeningEffective(s.outlet, cur.date, item.key);
+              const maxClosing = Math.max(0, openEff - Number(item.waste || 0));
+              await sendText(
+                phone,
+                `Invalid closing for ${item.name}. You entered ${fmtQty(item.closing ?? 0)} with waste ${fmtQty(item.waste ?? 0)}, but max allowed is ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Re-enter a valid number.`,
+                "AI_DISPATCH_TEXT",
+                { gpt_sent: true }
+              );
+            } catch {}
+          } else {
+            try {
+              await sendText(
+                phone,
+                `We couldn't save the closing for ${item.name} right now. Please try again in a moment.`,
+                "AI_DISPATCH_TEXT",
+                { gpt_sent: true }
+              );
+            } catch {}
+          }
           // Keep state so attendant can retry entering waste/closing
           await saveSession(phone, { state: "CLOSING_QTY", ...cur });
           const promptText = buildQuantityPromptText(item.name);
