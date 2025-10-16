@@ -37,6 +37,7 @@ function fmt(n: number | undefined | null) {
 }
 function today() { return new Date().toISOString().split("T")[0]; }
 function prevDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0,10); }
+function nextDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0,10); }
 function summaryKeyFor(date: string, outlet: string) { return `attendant_summary_${date}_${outlet}`; }
 function id() { return Math.random().toString(36).slice(2); }
 // Note: We deliberately avoid reading non-bridged keys from localStorage.
@@ -85,6 +86,8 @@ export default function AttendantDashboardPage() {
   const [submitted, setSubmitted] = useState(false);
   const [activeFrom, setActiveFrom] = useState<string | null>(null);
   const [summaryMode, setSummaryMode] = useState<"current" | "previous">("current");
+  // Date used for stock rows (opening/closing overlay). Defaults to today's date, moves to next day after rotation.
+  const [stockDate, setStockDate] = useState<string>(today());
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -259,10 +262,10 @@ export default function AttendantDashboardPage() {
   useEffect(() => {
     if (!outlet) return;
 
-    // Opening rows from DB
+    // Opening rows from DB for the active calendar date (today).
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`);
         setOpeningRowsRaw(r.rows || []);
       } catch { setOpeningRowsRaw([]); }
     })();
@@ -325,7 +328,7 @@ export default function AttendantDashboardPage() {
     })();
     refreshTill(outlet).catch(()=>{});
     setSubmitted(false);
-  }, [dateStr, outlet, catalog]);
+  }, [dateStr, outlet, catalog, stockDate]);
 
   // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
   useEffect(() => {
@@ -366,13 +369,13 @@ export default function AttendantDashboardPage() {
     });
   }, [openingRowsRaw, catalog, outlet]);
 
-  // Overlay already saved closing/waste from DB and lock those rows
+  // Overlay already saved closing/waste from DB and lock those rows (for the same date as stock rows)
   useEffect(() => {
     if (!outlet || rows.length === 0) return;
     (async () => {
       try {
         const j = await getJSON<{ ok: boolean; closingMap: Record<string, number>; wasteMap: Record<string, number> }>(
-          `/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`
+          `/api/attendant/closing?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`
         );
         const c = j?.closingMap || {};
         const w = j?.wasteMap || {};
@@ -391,7 +394,7 @@ export default function AttendantDashboardPage() {
         setLocked((p) => ({ ...p, ...toLock }));
       } catch {}
     })();
-  }, [rows.length, outlet, dateStr]);
+  }, [rows.length, outlet, stockDate]);
 
 
   /** ===== Client-side expected totals (unchanged) ===== */
@@ -531,9 +534,13 @@ export default function AttendantDashboardPage() {
     // Clear input buffers for deposits and expenses for the new period
     setDeposits([]);
     setExpenses([]);
-    // refresh opening-effective and supply history after new period start
+    // Switch stock UI to the new period (tomorrow) and refresh opening-effective
+    const tomorrow = nextDate(dateStr);
+    setStockDate(tomorrow);
+    setRows([]);
+    setLocked({});
     try {
-      const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+      const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(tomorrow)}&outlet=${encodeURIComponent(outlet)}`);
       setOpeningRowsRaw(r1.rows || []);
     } catch { setOpeningRowsRaw([]); }
     try {
@@ -774,7 +781,7 @@ export default function AttendantDashboardPage() {
       {tab === "stock" && (
         <>
           <section className="rounded-2xl border p-4 shadow-sm mb-4">
-            <h2 className="font-semibold mb-2">Closing & Waste — {dateStr}</h2>
+            <h2 className="font-semibold mb-2">Closing & Waste — {stockDate}</h2>
             <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
@@ -883,7 +890,7 @@ export default function AttendantDashboardPage() {
       {tab === "supply" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold">Supply (Opening Stock) — {dateStr}</h2>
+            <h2 className="font-semibold">Supply (Opening Stock) — {stockDate}</h2>
             <span className="text-xs text-gray-600">Read-only • Disputes go to Supervisor</span>
           </div>
           <div className="table-wrap">
