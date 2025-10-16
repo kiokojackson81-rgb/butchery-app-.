@@ -29,7 +29,18 @@ async function ensureLoginProvision(loginCode: string) {
         const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
         const obj = (scopeRow as any)?.value || null;
         if (obj && typeof obj === "object") {
-          const fromMirror = obj[code] || obj[normalizeCode(loginCode || "")] || obj[canonFull(loginCode || "")] || null;
+          // Try direct lookups first
+          let fromMirror: any = (obj as any)[code]
+            || (obj as any)[normalizeCode(loginCode || "")]
+            || (obj as any)[canonFull(loginCode || "")]
+            || null;
+          // If not found, iterate keys and compare normalized forms
+          if (!fromMirror) {
+            for (const k of Object.keys(obj)) {
+              const kn = normalizeCode(k);
+              if (kn === code) { fromMirror = (obj as any)[k]; break; }
+            }
+          }
           const outlet = String((fromMirror?.outlet as any) || "").trim();
           if (outlet) fallbackOutlet = outlet;
         }
