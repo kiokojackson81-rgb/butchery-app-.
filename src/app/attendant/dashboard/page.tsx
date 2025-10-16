@@ -106,11 +106,21 @@ export default function AttendantDashboardPage() {
 
   // Trading period + header KPIs
   const [periodStartAt, setPeriodStartAt] = useState<string | null>(null);
-  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number }>({
-    weightSales: 0, expenses: 0, todayTotalSales: 0, tillSalesNet: 0, tillSalesGross: 0, verifiedDeposits: 0, amountToDeposit: 0,
-  });
+  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number }>(
+    {
+      weightSales: 0,
+      expenses: 0,
+      todayTotalSales: 0,
+      tillSalesNet: 0,
+      tillSalesGross: 0,
+      verifiedDeposits: 0,
+      amountToDeposit: 0,
+    }
+  );
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
   const [tillTotal, setTillTotal] = useState(0);
+  const [attendantName, setAttendantName] = useState<string | null>(null);
+  const [attendantCode, setAttendantCode] = useState<string | null>(null);
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
@@ -124,6 +134,10 @@ export default function AttendantDashboardPage() {
           if (outletNameFromMe) {
             setOutlet(outletNameFromMe as Outlet);
           }
+          const nm = (j?.attendant?.name || "").toString();
+          if (nm) setAttendantName(nm);
+          const cd = (j?.attendant?.code || "").toString();
+          if (cd) setAttendantCode(cd);
           const outletCode = (j?.outletCode || "").toString();
           if (outletCode) {
             try {
@@ -714,6 +728,12 @@ export default function AttendantDashboardPage() {
           <h1 className="text-2xl font-semibold">Attendant Dashboard</h1>
           <p className="text-sm text-gray-600">
             Outlet: <span className="font-medium">{outlet}</span>
+            {attendantName && (
+              <>
+                <span className="mx-2 text-gray-400">•</span>
+                Attendant: <span className="font-medium">{attendantName}{attendantCode ? ` (${attendantCode})` : ""}</span>
+              </>
+            )}
             {periodStartAt ? (
               <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-green-50 border-green-200 text-green-700">
                 Active period since {new Date(periodStartAt).toLocaleTimeString()}

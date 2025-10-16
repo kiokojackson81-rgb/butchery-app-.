@@ -18,6 +18,7 @@ export async function GET() {
       attendant: {
         id: (sess as any).attendant?.id,
         name: (sess as any).attendant?.name,
+        code: (sess as any).attendant?.loginCode || null,
       },
       outlet: outletObj,
       outletCode,
