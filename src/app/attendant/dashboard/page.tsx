@@ -609,7 +609,7 @@ export default function AttendantDashboardPage() {
     try {
       const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
       const url = summaryDate ? `${base}&date=${encodeURIComponent(summaryDate)}` : base;
-      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number } }>(
+      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number } }>(
         url
       );
       if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
@@ -1149,6 +1149,7 @@ export default function AttendantDashboardPage() {
             <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} />
             <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} />
             <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} />
+            <CardKPI label="Carryover (Prev)" value={`Ksh ${fmt((kpi as any).carryoverPrev || 0)}`} />
           </div>
 
           {/* ✅ Highlight red ONLY when > 0 */}

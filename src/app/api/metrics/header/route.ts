@@ -95,6 +95,7 @@ export async function GET(req: Request) {
       tillSalesGross,
       verifiedDeposits,
       netTill,
+      carryoverPrev: outstandingPrev,
       amountToDeposit,
     },
   });
