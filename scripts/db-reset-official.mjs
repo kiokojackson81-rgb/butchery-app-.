@@ -58,6 +58,13 @@ async function main() {
     results.session = await prisma.session.deleteMany({});
     results.loginCode = await prisma.loginCode.deleteMany({});
     results.attendant = await prisma.attendant.deleteMany({});
+    // Supervisors and Suppliers (admin people & codes cleanup)
+    if (prisma.supervisor?.deleteMany) {
+      results.supervisor = await prisma.supervisor.deleteMany({});
+    }
+    if (prisma.supplier?.deleteMany) {
+      results.supplier = await prisma.supplier.deleteMany({});
+    }
 
     // Scopes
     results.scopeProduct = await prisma.scopeProduct.deleteMany({});
