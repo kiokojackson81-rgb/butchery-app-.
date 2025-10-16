@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeCode, canonNum, canonFull, canonLoose } from "@/lib/codeNormalize";
 import { createSession, serializeSessionCookie } from "@/lib/session";
 import { serializeRoleCookie } from "@/lib/roleSession";
+import { randomUUID } from "crypto";
 
 async function ensureLoginProvision(loginCode: string) {
   const code = canonLoose(loginCode || "");
@@ -93,6 +94,7 @@ async function ensureLoginProvision(loginCode: string) {
       try {
         const desiredName = person?.name || outletName || code;
         const desiredOutletId = outletRow?.id ?? null;
+        const newId = randomUUID();
         // Try to update if exists
         const existing: any = await (prisma as any).$queryRaw`
           SELECT id, "loginCode", "outletId", name FROM "Attendant" WHERE "loginCode" = ${code} LIMIT 1
@@ -107,9 +109,11 @@ async function ensureLoginProvision(loginCode: string) {
         } else {
           // Insert minimal columns only (avoid referencing new columns that may not exist yet)
           await (prisma as any).$executeRaw`
-            INSERT INTO "Attendant" ("name", "loginCode", "outletId")
-            VALUES (${desiredName}, ${code}, ${desiredOutletId})
-            ON CONFLICT ("loginCode") DO UPDATE SET "outletId" = COALESCE("Attendant"."outletId", EXCLUDED."outletId")
+            INSERT INTO "Attendant" ("id", "name", "loginCode", "outletId", "createdAt", "updatedAt")
+            VALUES (${newId}, ${desiredName}, ${code}, ${desiredOutletId}, NOW(), NOW())
+            ON CONFLICT ("loginCode") DO UPDATE SET 
+              "outletId" = COALESCE("Attendant"."outletId", EXCLUDED."outletId"),
+              "updatedAt" = NOW()
           `;
         }
         // Re-fetch
