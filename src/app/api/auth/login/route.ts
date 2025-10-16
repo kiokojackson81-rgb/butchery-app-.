@@ -140,16 +140,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
     }
 
-  // 1) Try full canonical match in LoginCode (normalized)
+  // 1) Try full canonical match in LoginCode (normalized), then loose if different
   let row: any = null;
   try {
     row = await (prisma as any).loginCode.findFirst({ where: { code: full } });
+    if (!row && loose && loose !== full) {
+      row = await (prisma as any).loginCode.findFirst({ where: { code: loose } });
+    }
   } catch (err) {
     console.error("loginCode lookup failed", err);
   }
 
-    if (!row && full) {
-      row = await ensureLoginProvision(full);
+    if (!row && (loose || full)) {
+      // Prefer loose (punctuation-stripped) for provisioning to tolerate typos like trailing '/'
+      row = await ensureLoginProvision(loose || full);
     }
 
     // 2) Fallback to digits-only if unique
