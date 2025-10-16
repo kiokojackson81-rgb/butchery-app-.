@@ -457,8 +457,17 @@ export default function AdminPage() {
       cache: "no-store",
       body: JSON.stringify(map),
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json() as Promise<{ ok: boolean; count: number }>
+    const text = await res.text();
+    let json: any = null;
+    try { json = JSON.parse(text); } catch {}
+    if (!res.ok || !json?.ok) {
+      if (json?.error === 'product_conflict' && Array.isArray(json?.conflicts)) {
+        const lines = json.conflicts.map((c: any) => `- ${c.productKey} @ ${c.outlet} already assigned to ${c.holderCode}`);
+        throw new Error(`Conflicts detected:\n${lines.join("\n")}`);
+      }
+      throw new Error(json?.error || text || 'Failed to save assignments');
+    }
+    return json as { ok: boolean; count: number };
   };
 
   const saveScopesNow   = async () => {
@@ -471,8 +480,9 @@ export default function AdminPage() {
       const r = await pushAssignmentsToDB(scope);
       try { await refreshScopeFromServer(); } catch {}
       alert(`Assignments saved to server ✅ (rows: ${r.count})`);
-    } catch {
-      alert("Saved locally, but failed to sync assignments to server.");
+    } catch (e: any) {
+      const msg = e?.message || String(e) || 'Saved locally, but failed to sync assignments to server.';
+      alert(msg);
     }
   };
 
@@ -618,12 +628,27 @@ export default function AdminPage() {
     });
   };
 
+  // Prevent duplicate product assignment in the same outlet
+  const isProductTakenInOutlet = React.useCallback((outletName: string, prodKey: string, selfCode?: string) => {
+    const selfKey = selfCode ? normCode(selfCode) : undefined;
+    for (const [code, entry] of Object.entries(scope)) {
+      if (selfKey && code === selfKey) continue;
+      if (entry?.outlet === outletName && Array.isArray(entry?.productKeys) && entry.productKeys.includes(prodKey)) {
+        return true;
+      }
+    }
+    return false;
+  }, [scope]);
+
   const toggleScopeProduct = (code: string, prodKey: string) => {
     const key = normCode(code || "");
     if (!key) return;
     setScope(prev => {
       const next = { ...prev };
       const entry = next[key] ?? { outlet: "", productKeys: [] as string[] };
+      if (entry.outlet && isProductTakenInOutlet(entry.outlet, prodKey, code)) {
+        return prev; // disallow selecting already taken product in same outlet
+      }
       const has = entry.productKeys.includes(prodKey);
       const productKeys = has
         ? entry.productKeys.filter(k => k !== prodKey)
@@ -1120,14 +1145,15 @@ export default function AdminPage() {
                   <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-3">
                     {activeProducts.map(p => {
                       const checked = sel.has(p.key);
+                      const taken = !!entry.outlet && isProductTakenInOutlet(entry.outlet, p.key, displayCode);
                       return (
                         <label
                           key={`tick-${p.id}`}
-                          className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 cursor-pointer ${checked ? "bg-black text-white" : ""}`}
+                          className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 cursor-pointer ${checked ? "bg-black text-white" : ""} ${taken && !checked ? "opacity-40 cursor-not-allowed" : ""}`}
                           title={p.name}
                           onClick={(e) => {
                             e.preventDefault();
-                            toggleScopeProduct(displayCode, p.key);
+                            if (!taken || checked) toggleScopeProduct(displayCode, p.key);
                           }}
                         >
                           <input
@@ -1135,6 +1161,7 @@ export default function AdminPage() {
                             className="pointer-events-none"
                             readOnly
                             checked={checked}
+                            disabled={taken && !checked}
                           />
                           <span>{p.name}</span>
                         </label>
@@ -1155,9 +1182,12 @@ export default function AdminPage() {
                       }}
                     >
                       <option value="" disabled>Select product…</option>
-                      {quickAddOptions.map(p => (
-                        <option key={`qa-${p.id}`} value={p.key}>{p.name}</option>
-                      ))}
+                      {quickAddOptions.map(p => {
+                        const taken = !!entry.outlet && isProductTakenInOutlet(entry.outlet, p.key, displayCode);
+                        return (
+                          <option key={`qa-${p.id}`} value={p.key} disabled={taken}>{p.name}{taken ? " — taken" : ""}</option>
+                        );
+                      })}
                     </select>
                   </div>
                 </div>
