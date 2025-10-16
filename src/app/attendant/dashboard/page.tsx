@@ -282,13 +282,22 @@ export default function AttendantDashboardPage() {
       }
     })();
 
-    // expenses from DB
+    // expenses from DB — merge with any unsaved local rows to avoid UI disappearing
     (async () => {
       try {
         const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
-        const list = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any, saved: true }));
-        setExpenses(list);
-      } catch { setExpenses([]); }
+        const fromServer = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any, saved: true }));
+        setExpenses((prev) => {
+          const unsaved = (prev || []).filter((x) => !x.saved);
+          const key = (o: { name: string; amount: any }) => `${(o.name || '').trim().toLowerCase()}|${Number(o.amount) || 0}`;
+          const seen = new Set(fromServer.map(key));
+          const mergedUnsaved = unsaved.filter((u) => !seen.has(key(u as any)));
+          return [...fromServer, ...mergedUnsaved];
+        });
+      } catch {
+        // Preserve existing unsaved when server fails
+        setExpenses((prev) => (prev || []).filter((x) => !x.saved));
+      }
     })();
 
     // tillcount from DB (optional)
