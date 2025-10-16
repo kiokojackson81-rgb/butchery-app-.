@@ -57,7 +57,34 @@ export async function GET(req: Request) {
 
   const todayTotalSales = weightSales - expensesSum;
   const netTill = tillSalesGross - verifiedDeposits;
-  const amountToDeposit = todayTotalSales - netTill;
+
+  // Previous day's outstanding carryover: (yRevenue - yExpenses - yVerifiedDeposits)
+  const dt = new Date(date + "T00:00:00.000Z");
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  const y = dt.toISOString().slice(0, 10);
+  const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
+    prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet } }),
+    prisma.attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
+    prisma.attendantExpense.findMany({ where: { date: y, outletName: outlet } }),
+    prisma.attendantDeposit.findMany({ where: { date: y, outletName: outlet } }),
+  ]);
+  const yClosingMap = new Map(yClosingRows.map((r) => [r.itemKey, r] as const));
+  let yRevenue = 0;
+  for (const row of yOpenRows) {
+    const cl = yClosingMap.get(row.itemKey);
+    const closing = cl?.closingQty || 0;
+    const waste = cl?.wasteQty || 0;
+    const soldQty = Math.max(0, (row.qty || 0) - closing - waste);
+    const pbr = pb.get(row.itemKey);
+    const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : prod.get(row.itemKey)?.active ? prod.get(row.itemKey)?.sellPrice || 0 : 0;
+    yRevenue += soldQty * price;
+  }
+  const yExpensesSum = yExpenses.reduce((a, e) => a + (e.amount || 0), 0);
+  const yVerifiedDeposits = yDeposits.filter((d) => d.status !== "INVALID").reduce((a, d) => a + (d.amount || 0), 0);
+  const outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+
+  // Inclusive amount to deposit: carryover + today's to-deposit (todayTotalSales - verifiedDeposits)
+  const amountToDeposit = outstandingPrev + (todayTotalSales - verifiedDeposits);
 
   return NextResponse.json({
     ok: true,

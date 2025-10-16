@@ -29,7 +29,9 @@ async function computeBreakdown(date: string, outletName: string): Promise<{
     revenue: number;
     expenses: number;
     deposits: number; // verified sum
-    outstanding: number; // revenue - expenses - deposits
+    outstanding: number; // revenue - expenses - deposits (today only)
+    carryoverPrev: number; // previous day's outstanding
+    totalToDeposit: number; // carryoverPrev + outstanding
     totalKgSold: number;
     openingTotal: number;
     wasteTotal: number;
@@ -52,9 +54,9 @@ async function computeBreakdown(date: string, outletName: string): Promise<{
 
   // Opening-effective map (yesterday closing + today supply), case-insensitive aggregation, but keep canonical product keys
   const dt = new Date(date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-  const y = dt.toISOString().slice(0, 10);
+  const prevDate = dt.toISOString().slice(0, 10);
   const [prevClosings, todaySupply, todayClosings] = await Promise.all([
-    (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }),
+    (prisma as any).attendantClosing.findMany({ where: { date: prevDate, outletName } }),
     (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName } }),
     (prisma as any).attendantClosing.findMany({ where: { date, outletName } }),
   ]);
@@ -97,6 +99,30 @@ async function computeBreakdown(date: string, outletName: string): Promise<{
   const expensesSum = (expenses || []).reduce((a: number, e: any) => a + Number(e.amount || 0), 0);
   const depositsVerified = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + Number(d.amount || 0), 0);
   const outstanding = revenue - expensesSum - depositsVerified;
+
+  // Compute carryover from previous day: (yRevenue - yExpenses - yVerifiedDeposits)
+  const yDt = new Date(date + "T00:00:00.000Z"); yDt.setUTCDate(yDt.getUTCDate() - 1);
+  const yDate = yDt.toISOString().slice(0,10);
+  const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
+    (prisma as any).supplyOpeningRow.findMany({ where: { date: yDate, outletName } }),
+    (prisma as any).attendantClosing.findMany({ where: { date: yDate, outletName } }),
+    (prisma as any).attendantExpense.findMany({ where: { date: yDate, outletName } }),
+    (prisma as any).attendantDeposit.findMany({ where: { date: yDate, outletName } }),
+  ]);
+  const yClosingMap = new Map<string, any>((yClosingRows || []).map((r: any) => [String(r.itemKey), r] as const));
+  let yRevenue = 0;
+  for (const row of (yOpenRows || [])) {
+    const cl = yClosingMap.get(String((row as any).itemKey));
+    const closing = Number((cl as any)?.closingQty || 0);
+    const waste = Number((cl as any)?.wasteQty || 0);
+    const sold = Math.max(0, Number((row as any).qty || 0) - closing - waste);
+    const price = Number(priceByKey.get(String((row as any).itemKey)) || 0);
+    yRevenue += sold * (price > 0 ? price : 0);
+  }
+  const yExpensesSum = (yExpenses || []).reduce((a: number, e: any) => a + Number(e.amount || 0), 0);
+  const yDepositsVerified = (yDeposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + Number(d.amount || 0), 0);
+  const carryoverPrev = Math.max(0, yRevenue - yExpensesSum - yDepositsVerified);
+  const totalToDeposit = Math.max(0, carryoverPrev + outstanding);
   const avgSalePerKg = totalKgSold > 0 ? revenue / totalKgSold : 0;
   const wasteRatio = openingTotal > 0 ? wasteTotal / openingTotal : 0;
   const outstandingRatio = revenue > 0 ? outstanding / revenue : 0;
@@ -104,7 +130,7 @@ async function computeBreakdown(date: string, outletName: string): Promise<{
   return {
     rows,
     assumedZeroClosingKeys,
-    totals: { revenue, expenses: expensesSum, deposits: depositsVerified, outstanding, totalKgSold, openingTotal, wasteTotal, avgSalePerKg, wasteRatio, outstandingRatio },
+    totals: { revenue, expenses: expensesSum, deposits: depositsVerified, outstanding, carryoverPrev, totalToDeposit, totalKgSold, openingTotal, wasteTotal, avgSalePerKg, wasteRatio, outstandingRatio },
   };
 }
 
@@ -130,8 +156,10 @@ function buildSupervisorMessage(opts: { recipientName: string; outlet: string; d
     `• Total weight sales (revenue): Ksh ${fmtKsh(data.totals.revenue)}`,
     `• Expenses recorded: Ksh ${fmtKsh(data.totals.expenses)}`,
     `• Approx. profit (revenue – expenses): Ksh ${fmtKsh(data.totals.revenue - data.totals.expenses)}`,
-    `• Deposits made: Ksh ${fmtKsh(data.totals.deposits)}`,
-    `• Cash still to deposit: Ksh ${fmtKsh(data.totals.outstanding)}`,
+  `• Deposits made: Ksh ${fmtKsh(data.totals.deposits)}`,
+  `• Carryover (previous): Ksh ${fmtKsh(data.totals.carryoverPrev)}`,
+  `• Today cash to deposit: Ksh ${fmtKsh(Math.max(0, data.totals.outstanding))}`,
+  `• Total amount to deposit: Ksh ${fmtKsh(data.totals.totalToDeposit)}`,
     wasteParts.length ? `• Waste recorded: ${wasteParts.join(", ")}` : `• Waste recorded: 0`,
     assumed.length ? `• Closing stock assumptions: ${assumed.join(", ")} defaulted to 0 kg (no closing entry).` : ``,
     ``,
@@ -157,8 +185,10 @@ function buildAdminMessage(opts: { recipientName: string; outlet: string; date: 
     `• Weight sales (revenue): Ksh ${fmtKsh(data.totals.revenue)}`,
     `• Expenses recorded: Ksh ${fmtKsh(data.totals.expenses)}`,
     `• Approx. profit (revenue – expenses): Ksh ${fmtKsh(data.totals.revenue - data.totals.expenses)}`,
-    `• Deposits made: Ksh ${fmtKsh(data.totals.deposits)}`,
-    `• Cash still to deposit: Ksh ${fmtKsh(data.totals.outstanding)}`,
+  `• Deposits made: Ksh ${fmtKsh(data.totals.deposits)}`,
+  `• Carryover (previous): Ksh ${fmtKsh(data.totals.carryoverPrev)}`,
+  `• Today cash to deposit: Ksh ${fmtKsh(Math.max(0, data.totals.outstanding))}`,
+  `• Total amount to deposit: Ksh ${fmtKsh(data.totals.totalToDeposit)}`,
     `• Closing stock details: ${closingParts.join(", ")}`,
     wasteParts.length ? `• Waste recorded: ${wasteParts.join(", ")}` : `• Waste recorded: 0`,
     ``,
@@ -197,8 +227,10 @@ function buildAttendantMessage(opts: { recipientName: string; date: string; data
     `• Weight sales: Ksh ${fmtKsh(data.totals.revenue)}`,
     `• Expenses: Ksh ${fmtKsh(data.totals.expenses)}`,
     `• Total sales (Weight – Expenses): Ksh ${fmtKsh(data.totals.revenue - data.totals.expenses)}`,
-    `• Deposits recorded: Ksh ${fmtKsh(data.totals.deposits)}`,
-    `• Cash still to deposit: Ksh ${fmtKsh(data.totals.outstanding)}`,
+  `• Deposits recorded: Ksh ${fmtKsh(data.totals.deposits)}`,
+  `• Carryover (previous): Ksh ${fmtKsh(data.totals.carryoverPrev)}`,
+  `• Today cash to deposit: Ksh ${fmtKsh(Math.max(0, data.totals.outstanding))}`,
+  `• Total amount to deposit: Ksh ${fmtKsh(data.totals.totalToDeposit)}`,
     ``,
     `Please ensure the remaining cash deposit is made. Once deposits are verified, this amount will reduce accordingly.`,
     `Thank you for your work today.`,
