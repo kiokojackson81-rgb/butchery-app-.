@@ -397,6 +397,8 @@ export async function POST(req: Request) {
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
           try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
+            // Do not touch session before auth; avoid extending stale sessions
+            try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
           let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
@@ -487,6 +489,9 @@ export async function POST(req: Request) {
                 }
               } catch {}
               try { await touchWaSession(phoneE164); } catch {}
+                // Only touch session after we validate auth to extend activity
+                try { await touchWaSession(phoneE164); } catch {}
+                // Do not extend session on unauthenticated branch
               continue;
             }
           }
@@ -494,6 +499,8 @@ export async function POST(req: Request) {
           const _sess = authOk(auth) ? auth.sess : undefined;
           const sessRole = String((_sess?.role) || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
+            // Authenticated: now extend last activity
+            try { await touchWaSession(phoneE164); } catch {}
           try { updateDrySession(phoneE164, { state: (auth as any)?.sess?.state || 'MENU', role: (auth as any)?.sess?.role || 'attendant', outlet: (auth as any)?.sess?.outlet || undefined }); } catch {}
 
           // Quick numeric shortcut: when GPT_ONLY is disabled, allow users to

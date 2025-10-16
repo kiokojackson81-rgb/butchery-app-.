@@ -12,7 +12,7 @@ export type WaSession = {
   cursor?: any;
 };
 
-const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
 
 function nowMs() { return Date.now(); }
 function toE164(phone: string) { return phone.startsWith("+") ? phone : "+" + phone.replace(/[^0-9+]/g, ""); }

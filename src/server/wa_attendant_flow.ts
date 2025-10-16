@@ -2,7 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { handleInboundText as libHandleInboundText, handleInteractiveReply as libHandleInteractiveReply } from "@/lib/wa_attendant_flow";
 
-const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
+const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
 
 export async function ensureAuthenticated(phoneE164: string): Promise<
   | { ok: true; sess: any }
@@ -11,8 +11,10 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
   let sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
 
   // Auto-recover: if session missing or lacks credentials, try binding from phoneMapping
+  // Strict mode: disable auto-recover to force explicit login
+  const STRICT = String(process.env.WA_STRICT_AUTH || "true").toLowerCase() === "true";
   const needsRecover = !sess || !sess.code || sess.state === "LOGIN" || sess.state === "SPLASH";
-  if (needsRecover) {
+  if (needsRecover && !STRICT) {
     try {
       // phoneE164 is not unique in PhoneMapping; use findFirst
       const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164 } }).catch(() => null);
@@ -49,10 +51,14 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
       return { ok: true, sess };
     }
   } catch {}
-  // Strong signal from finalize: if cursor.status === "ACTIVE" and we have creds, treat as authenticated
+  // Strong signal from finalize: only treat ACTIVE as authenticated if not expired by TTL
   const isCursorActive = Boolean((sess?.cursor as any)?.status === "ACTIVE");
   if (hasCreds && isCursorActive) {
-    return { ok: true, sess };
+    const updatedAt = new Date(sess.updatedAt).getTime();
+    const maxIdle = TTL_MIN * 60 * 1000;
+    if (Date.now() - updatedAt <= maxIdle) {
+      return { ok: true, sess };
+    }
   }
   if (!hasCreds || isLoginish) return { ok: false, reason: "logged-out" };
   // If we're about to return unauthenticated but the record shows credentials
