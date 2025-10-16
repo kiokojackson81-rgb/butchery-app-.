@@ -584,9 +584,71 @@ export default function AdminPage() {
   useEffect(() => { if (hydrated) saveLS(K_SCOPE, scope);         }, [hydrated, scope]);     // <<< gated
 
   /** ----- CRUD helpers ----- */
+  // Extracted persist helpers so delete actions can save immediately
+  const persistOutlets = useCallback(async (nextOutlets: Outlet[]) => {
+    const payload = nextOutlets.map((o) => ({
+      id: typeof o.id === "string" && /^c[a-z0-9]{24}$/i.test(o.id) ? o.id : undefined,
+      name: (o.name || "").trim(),
+      code: typeof o.code === "string" ? o.code.trim() : "",
+      active: o.active !== false,
+    }));
+    const response = await fetch("/api/admin/outlets/upsert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ outlets: payload }),
+    });
+    const textBody = await response.text();
+    let json: any = null; try { json = JSON.parse(textBody); } catch {}
+    if (!response.ok || !json?.ok) {
+      const message = json?.error || textBody || "Failed to save outlets";
+      throw new Error(message);
+    }
+    if (Array.isArray(json?.outlets)) {
+      const next = normalizeOutletList(json.outlets);
+      setOutlets(next);
+      saveLS(K_OUTLETS, next);
+    } else {
+      await refreshOutletsFromServer().catch(() => {});
+    }
+  }, [normalizeOutletList, refreshOutletsFromServer]);
+
+  const persistCodes = useCallback(async (nextCodes: PersonCode[]) => {
+    const payload = nextCodes
+      .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
+      .map((c) => ({
+        role: c.role,
+        code: c.code.trim(),
+        name: c.name,
+        active: c.active,
+        ...(c.role === "attendant" ? {
+          salaryAmount: typeof c.salaryAmount === 'number' ? c.salaryAmount : undefined,
+          salaryFrequency: c.salaryFrequency,
+        } : {}),
+      }));
+    saveLS(K_CODES, nextCodes);
+    const res = await fetch('/api/admin/attendants/upsert', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ people: payload })
+    });
+    const txt = await res.text();
+    let j: any = null; try { j = JSON.parse(txt); } catch {}
+    if (!res.ok || !j?.ok) throw new Error(j?.error || txt || 'Failed to save codes');
+    setCodes(nextCodes);
+  }, []);
+
   // Outlets
   const addOutlet = () => setOutlets(v => [...v, { id: rid(), name: "", code: "", active: true }]);
-  const removeOutlet = (id: string) => setOutlets(v => v.filter(x => x.id !== id));
+  const removeOutlet = async (id: string) => {
+    const row = outlets.find(o => o.id === id);
+    const name = row?.name || 'this outlet';
+    if (!confirm(`Delete ${name}? It will be removed from the database (or deactivated if referenced).`)) return;
+    const next = outlets.filter(x => x.id !== id);
+    setOutlets(next);
+    try { await persistOutlets(next); } catch (e) {
+      console.error('delete outlet failed', e);
+      alert(`Failed to delete outlet: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  };
   const updateOutlet = (id: string, patch: Partial<Outlet>) =>
     setOutlets(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
 
@@ -605,7 +667,17 @@ export default function AdminPage() {
   /** People & Codes CRUD */
   const addCode = () =>
     setCodes(v => [{ id: rid(), name: "", code: "", role: "attendant", active: true }, ...v]);
-  const removeCode = (id: string) => setCodes(v => v.filter(c => c.id !== id));
+  const removeCode = async (id: string) => {
+    const row = codes.find(c => c.id === id);
+    const label = row?.code ? `${row.code} (${row?.name || ''})` : 'this code';
+    if (!confirm(`Delete ${label}? This removes the code from database and related mappings.`)) return;
+    const next = codes.filter(c => c.id !== id);
+    setCodes(next);
+    try { await persistCodes(next); } catch (e) {
+      console.error('delete code failed', e);
+      alert(`Failed to delete code: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  };
   const updateCode = (id: string, patch: Partial<PersonCode>) =>
     setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch } : c)));
 
