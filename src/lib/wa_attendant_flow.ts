@@ -1912,7 +1912,6 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
         return true;
       }
-    }
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
     try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
