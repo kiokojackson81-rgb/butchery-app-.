@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { lockPeriod } from "@/server/trading_period";
+import { getCloseCount, incrementCloseCount } from "@/server/trading_period";
 
 export async function POST(req: Request) {
   const { outlet, openingSnapshot, pricebookSnapshot } = (await req.json()) as {
@@ -17,6 +17,14 @@ export async function POST(req: Request) {
   const dt = new Date(date + "T00:00:00.000Z");
   dt.setUTCDate(dt.getUTCDate() + 1);
   const tomorrow = dt.toISOString().slice(0, 10);
+
+  // Enforce max 2 closes per calendar day per outlet
+  const currentCount = await getCloseCount(outlet, date).catch(() => 0);
+  if (currentCount >= 2) {
+    return NextResponse.json({ ok: false, error: `Max closes reached for ${outlet} on ${date}.` }, { status: 409 });
+  }
+
+  const nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
 
   await prisma.$transaction(async (tx) => {
     // Seed tomorrow's opening rows using: next = max(0, yesterdayClosing + todaySupply - todayClosing - todayWaste)
@@ -55,25 +63,27 @@ export async function POST(req: Request) {
         };
       }
 
-      // Clear existing tomorrow seeds to avoid duplicates
-      await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
-
-      const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
-      const keys = new Set<string>([
-        ...Object.keys(prevOpenByItem),
-        ...Object.keys(supplyByItem),
-        ...Object.keys(closingByItem),
-      ]);
-      for (const key of keys) {
-        const base = Number(prevOpenByItem[key] || 0);
-        const add = Number(supplyByItem[key] || 0);
-        const close = Number((closingByItem[key]?.closingQty) || 0);
-        const waste = Number((closingByItem[key]?.wasteQty) || 0);
-        const nextQty = Math.max(0, base + add - close - waste);
-        if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
-      }
-      if (data.length > 0) {
-        await (tx as any).supplyOpeningRow.createMany({ data });
+      // Only seed "tomorrow" opening after the second close of the day
+      if (nextCount >= 2) {
+        // Clear and seed
+        await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
+        const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+        const keys = new Set<string>([
+          ...Object.keys(prevOpenByItem),
+          ...Object.keys(supplyByItem),
+          ...Object.keys(closingByItem),
+        ]);
+        for (const key of keys) {
+          const base = Number(prevOpenByItem[key] || 0);
+          const add = Number(supplyByItem[key] || 0);
+          const close = Number((closingByItem[key]?.closingQty) || 0);
+          const waste = Number((closingByItem[key]?.wasteQty) || 0);
+          const nextQty = Math.max(0, base + add - close - waste);
+          if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
+        }
+        if (data.length > 0) {
+          await (tx as any).supplyOpeningRow.createMany({ data });
+        }
       }
     } catch {}
 
@@ -94,9 +104,6 @@ export async function POST(req: Request) {
     });
   });
 
-  // Lock the just-submitted day for this outlet so no further edits occur on that period.
-  // We treat the lock as per calendar day (YYYY-MM-DD) and keep ActivePeriod as a live pointer.
-  try { await lockPeriod(outlet, date, "submit-and-rotate"); } catch {}
-
-  return NextResponse.json({ ok: true });
+  // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count.
+  return NextResponse.json({ ok: true, closeCount: nextCount });
 }

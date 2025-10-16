@@ -12,6 +12,7 @@ export function todayLocalISO(d: Date = new Date()) {
 }
 
 const lockKey = (date: string, outlet: string) => `lock:attendant:${date}:${outlet}`;
+const closeCountKey = (date: string, outlet: string) => `period:closecount:${date}:${outlet}`;
 
 export async function isPeriodLocked(outlet: string, date = todayLocalISO()): Promise<boolean> {
   const row = await (prisma as any).setting.findUnique({ where: { key: lockKey(date, outlet) } }).catch(() => null);
@@ -41,4 +42,30 @@ export async function countActiveProducts(outlet: string, date = todayLocalISO()
   const closed = Array.from(closedSet).filter((k) => totalSet.has(k)).length;
   const active = Math.max(0, total - closed);
   return { total, closed, active };
+}
+
+// --- New: per-day close count helpers (max 2 per day) ---
+export async function getCloseCount(outlet: string, date = todayLocalISO()): Promise<number> {
+  try {
+    const row = await (prisma as any).setting.findUnique({ where: { key: closeCountKey(date, outlet) } });
+    const n = Number(row?.value?.count || 0);
+    return Number.isFinite(n) ? n : 0;
+  } catch { return 0; }
+}
+
+export async function incrementCloseCount(outlet: string, date = todayLocalISO()): Promise<number> {
+  const key = closeCountKey(date, outlet);
+  let next = 0;
+  try {
+    const existing = await (prisma as any).setting.findUnique({ where: { key } });
+    const prev = Number(existing?.value?.count || 0);
+    next = (Number.isFinite(prev) ? prev : 0) + 1;
+    const value = { count: next, updatedAt: new Date().toISOString() };
+    if (existing) await (prisma as any).setting.update({ where: { key }, data: { value } });
+    else await (prisma as any).setting.create({ data: { key, value } });
+  } catch {
+    // Best-effort create
+    try { await (prisma as any).setting.upsert({ where: { key }, update: { value: { count: next } }, create: { key, value: { count: 1 } } }); next = Math.max(1, next); } catch {}
+  }
+  return next;
 }

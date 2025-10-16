@@ -517,8 +517,17 @@ export default function AttendantDashboardPage() {
       pricebookSnapshot[k] = { sellPrice: Number(p.sellPrice || 0), active: !!p.active };
     });
 
-    try { await postJSON("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot }); }
-    catch {}
+    let closeCount = 1;
+    try {
+      const res = await postJSON<{ ok: boolean; closeCount?: number }>("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot });
+      closeCount = Number(res?.closeCount || 1);
+    } catch (e: any) {
+      const msg = typeof e?.message === 'string' ? e.message : '';
+      if (/Max closes reached/i.test(msg)) {
+        alert("You've already started two periods today. You cannot close more than 2 periods in the same day.");
+        return; // abort rotation/UI changes
+      }
+    }
 
     // Fire low-stock notifications (non-blocking)
     try {
@@ -534,24 +543,40 @@ export default function AttendantDashboardPage() {
 
   setSubmitted(true);
   setTab("summary");
-  setSummaryMode("previous");
-  try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
-  try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
-  await refreshPeriodAndHeader(outlet, prevDate(dateStr));
+  if (closeCount >= 2) {
+    // End-of-day rotation: show previous and advance stock to tomorrow
+    setSummaryMode("previous");
+    try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
+    try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
+    await refreshPeriodAndHeader(outlet, prevDate(dateStr));
+  } else {
+    // Midday period switch: stay on current day; keep Summary on current
+    setSummaryMode("current");
+    try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'current'); } catch {}
+    await refreshPeriodAndHeader(outlet, undefined);
+  }
     // refresh closing/waste reads from DB for consistency
     try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
     // Clear input buffers for deposits and expenses for the new period
     setDeposits([]);
     setExpenses([]);
-    // Switch stock UI to the new period (tomorrow) and refresh opening-effective
-    const tomorrow = nextDate(dateStr);
-    setStockDate(tomorrow);
+    // Advance stock UI only if this was the second close for the day
     setRows([]);
     setLocked({});
-    try {
-      const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(tomorrow)}&outlet=${encodeURIComponent(outlet)}`);
-      setOpeningRowsRaw(r1.rows || []);
-    } catch { setOpeningRowsRaw([]); }
+    if (closeCount >= 2) {
+      const tomorrow = nextDate(dateStr);
+      setStockDate(tomorrow);
+      try {
+        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(tomorrow)}&outlet=${encodeURIComponent(outlet)}`);
+        setOpeningRowsRaw(r1.rows || []);
+      } catch { setOpeningRowsRaw([]); }
+    } else {
+      // Stay on same day; rehydrate opening-effective (unchanged) if needed
+      try {
+        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`);
+        setOpeningRowsRaw(r1.rows || []);
+      } catch { setOpeningRowsRaw([]); }
+    }
     try {
       const r2 = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
       setSupplyHistory((r2 as any).rows || []);

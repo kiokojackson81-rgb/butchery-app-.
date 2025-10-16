@@ -24,6 +24,7 @@ import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
 import { createReviewItem } from "@/server/review";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
+import { getCloseCount, incrementCloseCount } from "@/server/trading_period";
 import {
   buildButtonPayload,
   buildListPayload,
@@ -186,18 +187,64 @@ function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number
   Object.assign(r, patch);
 }
 
-// ===== Attendant day lock helpers (soft lock in Setting) =====
-const dayLockKey = (date: string, outlet: string) => `lock:attendant:${date}:${outlet}`;
+// ===== Attendant day lock helpers disabled (allow up to 2 closes per day) =====
+async function isDayLocked(date: string, outlet: string): Promise<boolean> { return false; }
 
-async function isDayLocked(date: string, outlet: string): Promise<boolean> {
-  const lock = await (prisma as any).setting.findUnique({ where: { key: dayLockKey(date, outlet) } }).catch(() => null);
-  return Boolean(lock?.value?.locked);
-}
-
-async function lockDay(date: string, outlet: string, actorCode?: string) {
-  const key = dayLockKey(date, outlet);
-  const value = { locked: true, lockedAt: new Date().toISOString(), by: actorCode || "wa" };
-  await (prisma as any).setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+// After a successful day-close, bump per-day close count and seed tomorrow's opening rows on 2nd close
+async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
+  try {
+    const next = await incrementCloseCount(outlet, date).catch(() => 1);
+    if (next < 2) return; // Only seed on the second close of the calendar day
+    // Compute tomorrow
+    const d1 = new Date(date + "T00:00:00.000Z");
+    d1.setUTCDate(d1.getUTCDate() + 1);
+    const tomorrow = d1.toISOString().slice(0, 10);
+    // Build components: yesterday closing, today supply, todays closings
+    const d0 = new Date(date + "T00:00:00.000Z"); d0.setUTCDate(d0.getUTCDate() - 1);
+    const y = d0.toISOString().slice(0,10);
+    const [prevClosings, todaySupplyRows, todaysClosings] = await Promise.all([
+      (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }).catch(() => []),
+      (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }).catch(() => []),
+      (prisma as any).attendantClosing.findMany({ where: { date, outletName: outlet } }).catch(() => []),
+    ]);
+    const prevOpenByItem: Record<string, number> = {};
+    for (const r of prevClosings || []) {
+      const k = String((r as any).itemKey);
+      const qty = Number((r as any).closingQty || 0);
+      if (!Number.isFinite(qty)) continue;
+      prevOpenByItem[k] = (prevOpenByItem[k] || 0) + qty;
+    }
+    const supplyByItem: Record<string, number> = {};
+    for (const r of todaySupplyRows || []) {
+      const k = String((r as any).itemKey);
+      const qty = Number((r as any).qty || 0);
+      if (!Number.isFinite(qty)) continue;
+      supplyByItem[k] = (supplyByItem[k] || 0) + qty;
+    }
+    const closingByItem: Record<string, { closingQty: number; wasteQty: number }> = {};
+    for (const r of todaysClosings || []) {
+      const k = String((r as any).itemKey);
+      closingByItem[k] = {
+        closingQty: Number((r as any).closingQty || 0),
+        wasteQty: Number((r as any).wasteQty || 0),
+      };
+    }
+    // Overwrite tomorrow's opening rows
+    try { await (prisma as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } }); } catch {}
+    const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+    const keys = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem), ...Object.keys(closingByItem)]);
+    for (const key of keys) {
+      const base = Number(prevOpenByItem[key] || 0);
+      const add = Number(supplyByItem[key] || 0);
+      const close = Number((closingByItem[key]?.closingQty) || 0);
+      const waste = Number((closingByItem[key]?.wasteQty) || 0);
+      const nextQty = Math.max(0, base + add - close - waste);
+      if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
+    }
+    if (data.length > 0) {
+      try { await (prisma as any).supplyOpeningRow.createMany({ data }); } catch {}
+    }
+  } catch {}
 }
 
 // Fetch items already closed for this date/outlet
@@ -974,20 +1021,7 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
-      // Guard: day-level lock
-      if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-        await saveSession(phone, { state: "MENU", ...cur });
-        await safeSendGreetingOrMenu({
-          phone,
-          role: s.role || "attendant",
-          outlet: s.outlet,
-          force: true,
-          source: "day_locked_guard",
-          sessionLike: s,
-        });
-        return;
-      }
+      // No day-level lock guard (multiple periods allowed; enforce via count)
       // Guard: product already closed today
       if (s.outlet) {
         const closed = await getClosedKeys(cur.date, s.outlet);
@@ -1046,20 +1080,7 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
-      // Guard: day-level lock
-      if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-        await saveSession(phone, { state: "MENU", ...cur });
-        await safeSendGreetingOrMenu({
-          phone,
-          role: s.role || "attendant",
-          outlet: s.outlet,
-          force: true,
-          source: "day_locked_guard_waste",
-          sessionLike: s,
-        });
-        return;
-      }
+      // No day-level lock guard
       item.waste = val;
       // If openEff is zero but user entered positive closing, auto-cap closing to 0 to keep flow moving
       try {
@@ -1362,10 +1383,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
       return true;
     }
-    if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      return true;
-    }
+    // No day-level lock guard
 
     // DRY fallback: In dev/dry mode, short-circuit to CLOSING_PICK without DB dependencies
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
@@ -1548,13 +1566,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   // List product selection
   if (id.startsWith("PROD_")) {
     const key = id.replace(/^PROD_/, "");
-    // Guard: day-level lock
-    if (s.outlet && (await isDayLocked(cur.date, s.outlet))) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      await saveSession(phone, { state: "MENU", ...cur });
-      try { await safeSendGreetingOrMenu({ phone, role: 'attendant', outlet: s.outlet, force: true, source: 'prod_day_locked', sessionLike: s }); } catch {}
-      return true;
-    }
+    // No day-level lock guard
     const prods = await getAssignedProducts(s.code || "");
     const name = prods.find((p) => p.key === key)?.name || key;
     // Guard: already closed product
@@ -1693,10 +1705,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
-    if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      return true;
-    }
+    // No day-level lock guard
     if (!cur.rows.length) {
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
@@ -1840,6 +1849,21 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       `Paste the M-Pesa SMS when ready.`,
     ];
     await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
+    // Update close count and seed tomorrow's opening on second close;
+    // If this is a third attempt, notify and skip bumping.
+    try {
+      const count = await getCloseCount(s.outlet, cur.date).catch(() => 0);
+      if (count >= 2) {
+        await sendText(
+          phone,
+          "Note: You’ve already closed twice today. A third close won't start a new period.",
+          "AI_DISPATCH_TEXT",
+          { gpt_sent: true }
+        );
+      } else {
+        await bumpCloseCountAndMaybeSeed(s.outlet, cur.date);
+      }
+    } catch {}
     const nextButtons = buildClosingNextActionsButtons();
     const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
     await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
@@ -1851,10 +1875,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
-    if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
-      return true;
-    }
+    // No day-level lock guard
     if (!cur.rows.length) {
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
@@ -1882,172 +1903,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         for (const r of supply || []) {
           const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
           byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
-        }
-        const bad = cur.rows.find((r) => {
-          const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
-          const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
-          return Number(r.closing || 0) > maxClosing + 1e-6;
-        });
-        if (bad) {
-          const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
-          const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
-          await sendText(
-            phone,
-            `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
-            "AI_DISPATCH_TEXT",
-            { gpt_sent: true }
-          );
-        } else {
-          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-        }
-      } catch {
-        await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-      }
-      await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-      const available = await getAvailableClosingProducts(s, cur);
-      await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
-      return true;
-    }
-    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
-    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
-    
-    const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
-    await saveSession(phone, {
-      state: "WAIT_DEPOSIT",
-      rows: [],
-      currentItem: undefined,
-      inactiveKeys: newInactive,
-    });
-    await updateWaState(phoneE164, {
-      currentAction: "menu",
-      closingDraft: undefined,
-      lastMessageAt: new Date().toISOString(),
-    });
-    const successLines = [
-      `Closing submitted for ${s.outlet} (${cur.date}).`,
-      `Expected deposit: KSh ${totals.expectedDeposit}.`,
-      `Paste the M-Pesa SMS when ready.`,
-    ];
-    await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
-    const nextButtons = buildClosingNextActionsButtons();
-    const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
-    await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
-    return true;
-  }
-  if (id === "SUMMARY_LOCK") {
-    if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
-      return true;
-    }
-    if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
-      return true;
-    }
-    // Pre-lock confirmation similar to submit: warn about missing closings/expenses
-    try {
-      const assigned = await getAssignedProducts(s.code || "");
-      const y = prevDateISO(cur.date);
-      const [prevRows, supplyRows, expensesToday, alreadyClosed] = await Promise.all([
-        (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }).catch(() => []),
-        (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }).catch(() => []),
-        (prisma as any).attendantExpense.count({ where: { date: cur.date, outletName: s.outlet } }).catch(() => 0),
-        (prisma as any).attendantClosing.findMany({ where: { date: cur.date, outletName: s.outlet }, select: { itemKey: true } }).catch(() => []),
-      ]);
-      const openEffLc = new Map<string, number>();
-      for (const r of prevRows || []) {
-        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
-        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).closingQty || 0));
-      }
-      for (const r of supplyRows || []) {
-        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
-        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).qty || 0));
-      }
-      const closedKeyLc = new Set<string>();
-      for (const r of (alreadyClosed || [])) {
-        const k = String((r as any).itemKey || '').toLowerCase();
-        if (k) closedKeyLc.add(k);
-      }
-      for (const r of (cur.rows || [])) {
-        const k = String((r as any).key || '').toLowerCase();
-        if (k) closedKeyLc.add(k);
-      }
-      const openingKeysLc = new Set<string>((supplyRows || []).map((r: any) => String(r.itemKey || '').toLowerCase()).filter(Boolean));
-      const universe = openingKeysLc.size > 0 ? Array.from(openingKeysLc.values()) : (assigned || []).map((p: any) => String(p.key || '').toLowerCase()).filter(Boolean);
-      const missing: string[] = [];
-      for (const kLc of universe) {
-        const open = Number(openEffLc.get(kLc) || 0);
-        if (open > 0 && !closedKeyLc.has(kLc)) missing.push(kLc);
-      }
-      if (missing.length || !expensesToday) {
-        let nameByLc = new Map<string, string>();
-        try {
-          const allKeys = Array.from(new Set(universe));
-          const prods = await (prisma as any).product.findMany({ where: { key: { in: allKeys } }, select: { key: true, name: true } });
-          for (const p of prods || []) nameByLc.set(String(p.key || '').toLowerCase(), String(p.name || ''));
-        } catch {}
-        const missingNames = missing
-          .slice(0, 8)
-          .map((k) => nameByLc.get(k) || k.toUpperCase())
-          .join(", ");
-        const more = missing.length > 8 ? `, +${missing.length - 8} more` : '';
-        const parts: string[] = [];
-        if (missing.length) parts.push(`Missing closings: ${missingNames}${more}. They will be assumed as 0.`);
-        if (!expensesToday) parts.push("No expenses recorded for today. It will be assumed to be KSh 0.");
-        const confirmText = `${parts.join("\n\n")}\n\nProceed and lock day anyway?`;
-        const confirmButtons = [
-          { type: "reply", reply: { id: "SUMMARY_LOCK_CONFIRM", title: "Yes, Lock Day" } },
-          { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Edit Entries" } },
-        ];
-        const payload = buildButtonPayload(phone.replace(/^\+/, ""), confirmText, confirmButtons as any);
-        await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
-        await saveSession(phone, { state: "SUMMARY", ...cur });
-        return true;
-      }
-    } catch {}
-    // Save any staged rows then lock the day
-    if (cur.rows.length) {
-      try {
-        await saveClosings({
-          date: cur.date,
-          outletName: s.outlet,
-          rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
-        });
-      } catch (e: any) {
-        // Mirror SUMMARY_SUBMIT error handling
-        try {
-          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-          const y = dt.toISOString().slice(0, 10);
-          const [prev, supply] = await Promise.all([
-            (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
-            (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
-          ]);
-          // Case-insensitive aggregation
-          const byKeyLc = new Map<string, { openEff: number }>();
-          for (const r of prev || []) {
-            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
-            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
-          }
-          for (const r of supply || []) {
-            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
-            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
-          }
-          const bad = cur.rows.find((r) => {
-            const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
-            const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
-            return Number(r.closing || 0) > maxClosing + 1e-6;
-          });
-          if (bad) {
-            const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
-            const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
-            await sendText(
-              phone,
-              `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
-              "AI_DISPATCH_TEXT",
-              { gpt_sent: true }
-            );
-          } else {
-            await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-          }
+        // SUMMARY_LOCK and SUMMARY_LOCK_CONFIRM flows removed (no calendar-day locking)
         } catch {
           await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         }
@@ -2057,81 +1913,26 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         return true;
       }
     }
-    await lockDay(cur.date, s.outlet, s.code || undefined);
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
     try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
     try { await startNewActivePeriod(s.outlet); } catch {}
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
-    return true;
-  }
-  if (id === "SUMMARY_LOCK_CONFIRM") {
-    if (!s.outlet) {
-      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
-      return true;
-    }
-    if (await isDayLocked(cur.date, s.outlet)) {
-      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
-      return true;
-    }
-    if (cur.rows.length) {
-      try {
-        await saveClosings({
-          date: cur.date,
-          outletName: s.outlet,
-          rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
-        });
-      } catch (e: any) {
-        // Mirror error handling
-        try {
-          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-          const y = dt.toISOString().slice(0, 10);
-          const [prev, supply] = await Promise.all([
-            (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
-            (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
-          ]);
-          const byKeyLc = new Map<string, { openEff: number }>();
-          for (const r of prev || []) {
-            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
-            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
-          }
-          for (const r of supply || []) {
-            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
-            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
-          }
-          const bad = cur.rows.find((r) => {
-            const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
-            const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
-            return Number(r.closing || 0) > maxClosing + 1e-6;
-          });
-          if (bad) {
-            const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
-            const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
-            await sendText(
-              phone,
-              `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
-              "AI_DISPATCH_TEXT",
-              { gpt_sent: true }
-            );
-          } else {
-            await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-          }
-        } catch {
-          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
-        }
-        await saveSession(phone, { state: "CLOSING_PICK", ...cur });
-        const available = await getAvailableClosingProducts(s, cur);
-        await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
-        return true;
+    // Update close count and seed on 2nd close; warn if already at 2
+    try {
+      const count = await getCloseCount(s.outlet, cur.date).catch(() => 0);
+      if (count >= 2) {
+        await sendText(
+          phone,
+          "Note: You’ve already closed twice today. A third close won't start a new period.",
+          "AI_DISPATCH_TEXT",
+          { gpt_sent: true }
+        );
+      } else {
+        await bumpCloseCountAndMaybeSeed(s.outlet, cur.date);
       }
-    }
-  await lockDay(cur.date, s.outlet, s.code || undefined);
-    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
-    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
-  try { await startNewActivePeriod(s.outlet); } catch {}
-    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
+    } catch {}
+    await sendText(phone, `Closing submitted. Expected deposit: KSh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
     return true;
   }
   if (id === "SUMMARY_MODIFY") {
