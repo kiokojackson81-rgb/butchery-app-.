@@ -46,8 +46,8 @@ export async function POST(req: Request) {
     const keys = rawKeys.map((k) => (k ?? "").trim()).filter((k) => k.length > 0);
     let prunedCount = 0;
 
-    // Preload opening-effective map for validation
-    const openEffMap: Map<string, number> = new Map();
+    // Preload opening-effective map for validation (case-insensitive)
+    const openEffMap: Map<string, number> = new Map(); // keys = itemKey.toLowerCase()
     try {
       const y = new Date((day + "T00:00:00.000Z")); y.setUTCDate(y.getUTCDate() - 1);
       const yStr = y.toISOString().slice(0,10);
@@ -56,11 +56,13 @@ export async function POST(req: Request) {
         (prisma as any).supplyOpeningRow.findMany({ where: { date: day, outletName: outletName } }),
       ]);
       for (const r of prevClosing || []) {
-        const k = (r as any).itemKey; const q = Number((r as any).closingQty || 0);
+        const k = String((r as any).itemKey || "").toLowerCase();
+        const q = Number((r as any).closingQty || 0);
         if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q);
       }
       for (const r of todaySupply || []) {
-        const k = (r as any).itemKey; const q = Number((r as any).qty || 0);
+        const k = String((r as any).itemKey || "").toLowerCase();
+        const q = Number((r as any).qty || 0);
         if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q);
       }
     } catch {}
@@ -73,7 +75,7 @@ export async function POST(req: Request) {
         const wasteQty = Number.isFinite(rawWaste) ? Math.max(0, rawWaste) : 0;
 
         // Validate: closing cannot exceed opening-effective minus waste (tolerance 1e-6)
-        const openEff = Number(openEffMap.get(itemKey) || 0);
+        const openEff = Number(openEffMap.get(String(itemKey).toLowerCase()) || 0);
         const maxClosing = Math.max(0, openEff - wasteQty);
         if (closingQty > maxClosing + 1e-6) {
           throw new Error(`Invalid closing for ${itemKey}: closing ${closingQty} exceeds available ${maxClosing} (OpeningEff ${openEff} - Waste ${wasteQty}).`);

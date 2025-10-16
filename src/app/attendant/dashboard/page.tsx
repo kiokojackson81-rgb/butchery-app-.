@@ -308,10 +308,15 @@ export default function AttendantDashboardPage() {
   // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
   useEffect(() => {
     if (!outlet) return;
+    // Map external API keys to our canonical catalog keys, case-insensitive
+    const canonByLc: Record<string, ItemKey> = {} as any;
+    (Object.keys(catalog) as ItemKey[]).forEach((k) => { canonByLc[String(k).toLowerCase()] = k; });
     const byItem: Record<ItemKey, number> = {} as any;
     (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
-      const key = r.itemKey as ItemKey;
-      byItem[key] = (byItem[key] || 0) + Number(r.qty || 0);
+      const lc = String(r.itemKey).toLowerCase();
+      const canon = canonByLc[lc];
+      if (!canon) return;
+      byItem[canon] = (byItem[canon] || 0) + Number(r.qty || 0);
     });
     const built: Row[] = (Object.keys(byItem) as ItemKey[])
       .filter((k) => !!catalog[k])
@@ -320,7 +325,7 @@ export default function AttendantDashboardPage() {
         const prod = catalog[key];
         return {
           key,
-          name: prod?.name || key.toUpperCase(),
+          name: prod?.name || String(key).toUpperCase(),
           unit: prod?.unit || "kg",
           opening: byItem[key] || 0,
           closing: "",
@@ -340,11 +345,17 @@ export default function AttendantDashboardPage() {
         );
         const c = j?.closingMap || {};
         const w = j?.wasteMap || {};
+        // Lowercase views for case-insensitive matching
+        const cLc: Record<string, number> = {};
+        const wLc: Record<string, number> = {};
+        Object.keys(c).forEach((k) => { cLc[String(k).toLowerCase()] = Number(c[k] || 0); });
+        Object.keys(w).forEach((k) => { wLc[String(k).toLowerCase()] = Number(w[k] || 0); });
         const toLock: Record<string, boolean> = {};
         setRows((prev) => prev.map((r) => {
-          const has = Object.prototype.hasOwnProperty.call(c, r.key) || Object.prototype.hasOwnProperty.call(w, r.key);
+          const lc = String(r.key).toLowerCase();
+          const has = Object.prototype.hasOwnProperty.call(cLc, lc) || Object.prototype.hasOwnProperty.call(wLc, lc);
           if (has) toLock[r.key] = true;
-          return has ? { ...r, closing: Number(c[r.key] ?? r.closing ?? 0), waste: Number(w[r.key] ?? r.waste ?? 0) } : r;
+          return has ? { ...r, closing: Number(cLc[lc] ?? r.closing ?? 0), waste: Number(wLc[lc] ?? r.waste ?? 0) } : r;
         }));
         setLocked((p) => ({ ...p, ...toLock }));
       } catch {}
@@ -413,7 +424,10 @@ export default function AttendantDashboardPage() {
     try {
       await postJSON("/api/attendant/closing/item", { itemKey: r.key, closingQty: toNum(r.closing), wasteQty: toNum(r.waste) });
       setLocked(prev => ({ ...prev, [r.key]: true }));
-    } catch {}
+    } catch (e: any) {
+      const msg = typeof e?.message === "string" ? e.message : "Failed to submit";
+      alert(msg);
+    }
   }
 
   const submitStock = async () => {
@@ -426,7 +440,10 @@ export default function AttendantDashboardPage() {
     // Persist remaining unsaved rows in one shot for convenience
     try {
       await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
-    } catch {}
+    } catch (e: any) {
+      const msg = typeof e?.message === "string" ? e.message : "Failed to submit stock";
+      alert(msg);
+    }
 
     // snapshot for next period
     const openingSnapshot: Record<string, number> = {};
@@ -503,7 +520,10 @@ export default function AttendantDashboardPage() {
       try {
         await postJSON("/api/expenses/item", { name: e.name.trim(), amount: toNum(e.amount) });
         setExpenses(prev => prev.map(x => x.id === e.id ? { ...x, saved: true } : x));
-      } catch {}
+      } catch (e: any) {
+        const msg = typeof e?.message === "string" ? e.message : "Failed to submit expense";
+        alert(msg);
+      }
     }
     if (outlet) await refreshPeriodAndHeader(outlet);
   };

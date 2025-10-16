@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     const date = new Date().toISOString().slice(0, 10);
 
     const { itemKey, closingQty, wasteQty } = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number };
-    const key = (itemKey || "").trim();
+  const key = (itemKey || "").trim();
     if (!key) return NextResponse.json({ ok: false, error: "itemKey required" }, { status: 400 });
     const closing = Number.isFinite(Number(closingQty)) ? Math.max(0, Number(closingQty)) : 0;
     const waste = Number.isFinite(Number(wasteQty)) ? Math.max(0, Number(wasteQty)) : 0;
@@ -23,11 +23,21 @@ export async function POST(req: Request) {
       try {
         const dt = new Date(date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
         const y = dt.toISOString().slice(0,10);
-        const [prev, supply] = await Promise.all([
-          (prisma as any).attendantClosing.findFirst({ where: { date: y, outletName, itemKey: key } }),
-          (prisma as any).supplyOpeningRow.findFirst({ where: { date, outletName, itemKey: key } }),
+        // Fetch both sets then sum matching keys case-insensitively
+        const [prevMany, supplyMany] = await Promise.all([
+          (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }),
+          (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName } }),
         ]);
-        const openEff = Number((prev?.closingQty || 0)) + Number((supply?.qty || 0));
+        const target = key.toLowerCase();
+        let openEff = 0;
+        for (const r of prevMany || []) {
+          const k = String((r as any).itemKey || "").toLowerCase();
+          if (k === target) openEff += Number((r as any).closingQty || 0) || 0;
+        }
+        for (const r of supplyMany || []) {
+          const k = String((r as any).itemKey || "").toLowerCase();
+          if (k === target) openEff += Number((r as any).qty || 0) || 0;
+        }
         const maxClosing = Math.max(0, openEff - waste);
         if (closing > maxClosing + 1e-6) {
           return NextResponse.json({ ok: false, error: `Invalid closing for ${key}: ${closing} exceeds available ${maxClosing} (OpeningEff ${openEff} - Waste ${waste}).` }, { status: 400 });
