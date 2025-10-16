@@ -63,8 +63,8 @@ export async function POST(req: Request) {
         };
       }
 
-      // Only seed "tomorrow" opening after the second close of the day
-      if (nextCount >= 2) {
+      // Seed "tomorrow" opening after the first close of the day
+      if (nextCount >= 1) {
         // Clear and seed
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
         const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];

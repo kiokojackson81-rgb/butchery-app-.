@@ -543,7 +543,7 @@ export default function AttendantDashboardPage() {
 
   setSubmitted(true);
   setTab("summary");
-  if (closeCount >= 2) {
+  if (closeCount >= 1) {
     // End-of-day rotation: show previous and advance stock to tomorrow
     setSummaryMode("previous");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
@@ -563,7 +563,7 @@ export default function AttendantDashboardPage() {
     // Advance stock UI only if this was the second close for the day
     setRows([]);
     setLocked({});
-    if (closeCount >= 2) {
+    if (closeCount >= 1) {
       const tomorrow = nextDate(dateStr);
       setStockDate(tomorrow);
       try {
