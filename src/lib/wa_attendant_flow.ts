@@ -1443,23 +1443,25 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         ? (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, unit: true } }).catch(() => [])
         : [],
     ]);
-    const unitByKey = new Map<string, string>();
-    for (const p of prodRows as any[]) unitByKey.set(String(p.key), String(p.unit || "kg"));
-    const openEff = new Map<string, number>();
+    // Case-insensitive maps to avoid key-casing drift between tables (product vs closings vs supply rows)
+    const unitByKeyLc = new Map<string, string>();
+    for (const p of prodRows as any[]) unitByKeyLc.set(String(p.key).toLowerCase(), String(p.unit || "kg"));
+    const openEffLc = new Map<string, number>();
     for (const r of (prevClosings as any[]) || []) {
-      const k = String(r.itemKey || ""); if (!k) continue;
+      const kLc = String(r.itemKey || "").toLowerCase(); if (!kLc) continue;
       const q = Number(r.closingQty || 0);
-      openEff.set(k, (openEff.get(k) || 0) + (Number.isFinite(q) ? q : 0));
+      openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + (Number.isFinite(q) ? q : 0));
     }
     for (const r of (todaySupply as any[]) || []) {
-      const k = String(r.itemKey || ""); if (!k) continue;
+      const kLc = String(r.itemKey || "").toLowerCase(); if (!kLc) continue;
       const q = Number(r.qty || 0);
-      openEff.set(k, (openEff.get(k) || 0) + (Number.isFinite(q) ? q : 0));
+      openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + (Number.isFinite(q) ? q : 0));
     }
 
     const lines = assigned.map((p) => {
-      const qty = Number(openEff.get(p.key) || 0);
-      const unit = (unitByKey.get(p.key) || "kg").trim();
+      const kLc = String(p.key).toLowerCase();
+      const qty = Number(openEffLc.get(kLc) || 0);
+      const unit = (unitByKeyLc.get(kLc) || "kg").trim();
       return `- ${p.name}: ${fmtQty(qty)} ${unit}`;
     });
     await sendText(
@@ -1663,7 +1665,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         outletName: s.outlet,
         rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
       });
-    } catch (e: any) {
+  } catch (e: any) {
       // Find the first offending row by recomputing allowed max and notifying
       try {
         const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
@@ -1672,22 +1674,23 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
           (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
         ]);
-        const byKey = new Map<string, { openEff: number }>();
+        // Case-insensitive aggregation to match keys across sources
+        const byKeyLc = new Map<string, { openEff: number }>();
         for (const r of prev || []) {
-          const k = String((r as any).itemKey || ""); if (!k) continue;
-          byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).closingQty || 0) });
+          const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+          byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
         }
         for (const r of supply || []) {
-          const k = String((r as any).itemKey || ""); if (!k) continue;
-          byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).qty || 0) });
+          const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+          byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
         }
         const bad = cur.rows.find((r) => {
-          const openEff = Number(byKey.get(r.key)?.openEff || 0);
+          const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
           const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
           return Number(r.closing || 0) > maxClosing + 1e-6;
         });
         if (bad) {
-          const openEff = Number(byKey.get(bad.key)?.openEff || 0);
+          const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
           const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
           await sendText(
             phone,
@@ -1757,22 +1760,23 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
             (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
             (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
           ]);
-          const byKey = new Map<string, { openEff: number }>();
+          // Case-insensitive aggregation
+          const byKeyLc = new Map<string, { openEff: number }>();
           for (const r of prev || []) {
-            const k = String((r as any).itemKey || ""); if (!k) continue;
-            byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).closingQty || 0) });
+            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
           }
           for (const r of supply || []) {
-            const k = String((r as any).itemKey || ""); if (!k) continue;
-            byKey.set(k, { openEff: (byKey.get(k)?.openEff || 0) + Number((r as any).qty || 0) });
+            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
           }
           const bad = cur.rows.find((r) => {
-            const openEff = Number(byKey.get(r.key)?.openEff || 0);
+            const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
             const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
             return Number(r.closing || 0) > maxClosing + 1e-6;
           });
           if (bad) {
-            const openEff = Number(byKey.get(bad.key)?.openEff || 0);
+            const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
             const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
             await sendText(
               phone,
