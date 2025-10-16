@@ -39,6 +39,7 @@ function today() { return new Date().toISOString().split("T")[0]; }
 function prevDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0,10); }
 function nextDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0,10); }
 function summaryKeyFor(date: string, outlet: string) { return `attendant_summary_${date}_${outlet}`; }
+function rotationBannerKeyFor(date: string, outlet: string) { return `attendant_rotation_banner_${date}_${outlet}`; }
 function id() { return Math.random().toString(36).slice(2); }
 // Note: We deliberately avoid reading non-bridged keys from localStorage.
 // writeJSON removed; we no longer persist to localStorage as primary store
@@ -88,6 +89,7 @@ export default function AttendantDashboardPage() {
   const [summaryMode, setSummaryMode] = useState<"current" | "previous">("current");
   // Date used for stock rows (opening/closing overlay). Defaults to today's date, moves to next day after rotation.
   const [stockDate, setStockDate] = useState<string>(today());
+  const [showRotationBanner, setShowRotationBanner] = useState(false);
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -322,6 +324,12 @@ export default function AttendantDashboardPage() {
         const mode = saved === 'previous' ? 'previous' : 'current';
         setSummaryMode(mode as any);
         await refreshPeriodAndHeader(outlet, mode === 'previous' ? prevDate(dateStr) : undefined);
+        // Initialize rotation banner visibility from storage if present
+        try {
+          const bKey = rotationBannerKeyFor(dateStr, outlet);
+          const bVal = window.localStorage.getItem(bKey);
+          setShowRotationBanner(bVal === 'show');
+        } catch {}
       } catch {
         await refreshPeriodAndHeader(outlet);
       }
@@ -528,6 +536,7 @@ export default function AttendantDashboardPage() {
   setTab("summary");
   setSummaryMode("previous");
   try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
+  try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
   await refreshPeriodAndHeader(outlet, prevDate(dateStr));
     // refresh closing/waste reads from DB for consistency
     try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
@@ -781,7 +790,14 @@ export default function AttendantDashboardPage() {
       {tab === "stock" && (
         <>
           <section className="rounded-2xl border p-4 shadow-sm mb-4">
-            <h2 className="font-semibold mb-2">Closing & Waste — {stockDate}</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-semibold">Closing & Waste — {stockDate}</h2>
+              {(() => { const unsaved = rows.filter(r => !locked[r.key] && (toNum(r.closing) > 0 || toNum(r.waste) > 0)).length; return unsaved > 0 ? (
+                <span className="inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-yellow-50 border-yellow-200 text-yellow-700">
+                  Unsaved: {unsaved}
+                </span>
+              ) : null; })()}
+            </div>
             <div className="table-wrap">
               <table className="w-full text-sm">
                 <thead>
@@ -1083,7 +1099,26 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold">Till Payments (Active Period)</h3>
-            <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
+            <div className="flex items-center gap-2">
+              {Math.abs(computed.varianceKsh) > 0.5 && (
+                <button
+                  className="btn-mobile text-xs border rounded-xl px-3 py-1"
+                  onClick={async()=>{
+                    if (!outlet) return;
+                    const raw = window.prompt("Recount till: enter counted cash amount (Ksh)", countedTill === "" ? "" : String(countedTill));
+                    if (raw == null) return;
+                    const n = Number(raw);
+                    if (!isFinite(n) || n < 0) { alert("Enter a non-negative number"); return; }
+                    try {
+                      setCountedTill(n);
+                      await postJSON('/api/tillcount', { date: dateStr, outlet, counted: n });
+                    } catch {}
+                    try { await refreshPeriodAndHeader(outlet); } catch {}
+                  }}
+                >Recount Till</button>
+              )}
+              <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
+            </div>
           </div>
           <div className="text-sm text-gray-600 mb-2">
             Total Till Payments: <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
@@ -1119,6 +1154,17 @@ export default function AttendantDashboardPage() {
       {/* ===== SUMMARY ===== */}
       {tab === "summary" && (
         <section className="rounded-2xl border p-4">
+          {showRotationBanner && summaryMode === 'previous' && (
+            <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-blue-50 border-blue-200 text-blue-800 w-full">
+              <div>
+                Summary is showing <span className="font-semibold">Previous day</span> results. Stock & Supply have moved to the new period.
+              </div>
+              <button
+                className="ml-auto text-xs underline decoration-dotted"
+                onClick={()=>{ try { if (outlet) window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'dismissed'); } catch {} setShowRotationBanner(false); }}
+              >Dismiss</button>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
               <h3 className="font-semibold">Summary</h3>
@@ -1145,11 +1191,24 @@ export default function AttendantDashboardPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <CardKPI label="Weight Sales (Ksh)" value={`Ksh ${fmt(kpi.weightSales)}`} />
             <CardKPI label="Expenses (Ksh)" value={`Ksh ${fmt(kpi.expenses)}`} />
-            <CardKPI label="Today Total Sales (Ksh)" value={`Ksh ${fmt(kpi.todayTotalSales)}`} />
+            <CardKPI
+              label="Today Total Sales (Ksh)"
+              value={`Ksh ${fmt(kpi.todayTotalSales)}`}
+              tooltip={"Calculated from stock: sum over items of (opening − closing − waste) × price, then minus expenses."}
+            />
             <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} />
             <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} />
-            <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} />
-            <CardKPI label="Carryover (Prev)" value={`Ksh ${fmt((kpi as any).carryoverPrev || 0)}`} />
+            <CardKPI
+              label="Till Sales (Net)"
+              value={`Ksh ${fmt(kpi.tillSalesNet)}`}
+              tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."}
+            />
+            <CardKPI
+              label="Carryover (Prev)"
+              value={`Ksh ${fmt((kpi as any).carryoverPrev || 0)}`}
+              tooltip={"Outstanding from the previous day not yet deposited. Added to today's deposit requirement."}
+            />
+            <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
           </div>
 
           {/* ✅ Highlight red ONLY when > 0 */}
@@ -1158,6 +1217,7 @@ export default function AttendantDashboardPage() {
               label="Amount to Deposit (Ksh)"
               value={`Ksh ${fmt(kpi.amountToDeposit)}`}
               highlightDanger={kpi.amountToDeposit > 0}
+              tooltip={"Carryover (Prev) + Today Total Sales − Verified Deposits"}
             />
           </div>
         </section>
@@ -1173,12 +1233,14 @@ function CardKPI({
   subtitle,
   highlight,
   highlightDanger,
+  tooltip,
 }: {
   label: string;
   value: string;
   subtitle?: string;
   highlight?: boolean;         // legacy yellow style (kept)
   highlightDanger?: boolean;   // NEW red style when true
+  tooltip?: string;            // Optional explanatory tooltip
 }) {
   const base = "rounded-2xl border p-4";
   const yellow = "bg-yellow-50 border-yellow-200";
@@ -1187,7 +1249,16 @@ function CardKPI({
 
   return (
     <div className={wrapClass}>
-      <div className={`text-sm ${highlightDanger ? "text-red-700" : "text-gray-500"}`}>{label}</div>
+      <div className={`text-sm ${highlightDanger ? "text-red-700" : "text-gray-500"}`}>
+        <span>{label}</span>
+        {tooltip && (
+          <span
+            className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full border text-[10px] align-middle"
+            title={tooltip}
+            aria-label={tooltip}
+          >i</span>
+        )}
+      </div>
       <div className={`text-xl font-semibold mt-1 ${highlightDanger ? "text-red-700" : ""}`}>{value}</div>
       {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
     </div>
