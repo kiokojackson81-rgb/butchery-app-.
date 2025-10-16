@@ -14,6 +14,8 @@ import {
   expenseFollowupButtons,
 } from "@/lib/wa_messages";
 import { saveClosings } from "@/server/closings";
+import { upsertAndNotifySupervisorCommission } from "@/server/commission";
+import { sendDayCloseNotifications } from "@/server/notifications/day_close";
 import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
 import { getAssignedProducts } from "@/server/products";
@@ -1659,6 +1661,72 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
+
+    // Pre-submit confirmation: warn for any items with opening>0 that have no closing today,
+    // and warn if there are no expenses recorded.
+    try {
+      const assigned = await getAssignedProducts(s.code || "");
+      const y = prevDateISO(cur.date);
+      const [prevRows, supplyRows, expensesToday, alreadyClosed] = await Promise.all([
+        (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }).catch(() => []),
+        (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }).catch(() => []),
+        (prisma as any).attendantExpense.count({ where: { date: cur.date, outletName: s.outlet } }).catch(() => 0),
+        (prisma as any).attendantClosing.findMany({ where: { date: cur.date, outletName: s.outlet }, select: { itemKey: true } }).catch(() => []),
+      ]);
+      const openEffLc = new Map<string, number>();
+      for (const r of prevRows || []) {
+        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
+        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).closingQty || 0));
+      }
+      for (const r of supplyRows || []) {
+        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
+        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).qty || 0));
+      }
+      const closedKeyLc = new Set<string>();
+      for (const r of (alreadyClosed || [])) {
+        const k = String((r as any).itemKey || '').toLowerCase();
+        if (k) closedKeyLc.add(k);
+      }
+      for (const r of (cur.rows || [])) {
+        const k = String((r as any).key || '').toLowerCase();
+        if (k) closedKeyLc.add(k);
+      }
+      // If opening rows exist, restrict the universe to those; else use assigned products
+      const openingKeysLc = new Set<string>((supplyRows || []).map((r: any) => String(r.itemKey || '').toLowerCase()).filter(Boolean));
+      const universe = openingKeysLc.size > 0 ? Array.from(openingKeysLc.values()) : (assigned || []).map((p: any) => String(p.key || '').toLowerCase()).filter(Boolean);
+      const missing: string[] = [];
+      for (const kLc of universe) {
+        const open = Number(openEffLc.get(kLc) || 0);
+        if (open > 0 && !closedKeyLc.has(kLc)) missing.push(kLc);
+      }
+      if (missing.length || !expensesToday) {
+        // Build human-friendly names for missing keys
+        let nameByLc = new Map<string, string>();
+        try {
+          const keys = Array.from(new Set(universe.map((k) => k))).map((k) => ({ k, orig: k }));
+          const allKeys = Array.from(new Set(keys.map((x) => x.k)));
+          const prods = await (prisma as any).product.findMany({ where: { key: { in: allKeys } }, select: { key: true, name: true } });
+          for (const p of prods || []) nameByLc.set(String(p.key || '').toLowerCase(), String(p.name || ''));
+        } catch {}
+        const missingNames = missing
+          .slice(0, 8)
+          .map((k) => nameByLc.get(k) || k.toUpperCase())
+          .join(", ");
+        const more = missing.length > 8 ? `, +${missing.length - 8} more` : '';
+        const parts: string[] = [];
+        if (missing.length) parts.push(`Missing closings: ${missingNames}${more}. They will be assumed as 0.`);
+        if (!expensesToday) parts.push("No expenses recorded for today. It will be assumed to be KSh 0.");
+        const confirmText = `${parts.join("\n\n")}\n\nProceed and submit anyway?`;
+        const confirmButtons = [
+          { type: "reply", reply: { id: "SUMMARY_SUBMIT_CONFIRM", title: "Yes, Submit" } },
+          { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Edit Entries" } },
+        ];
+        const payload = buildButtonPayload(phone.replace(/^\+/, ""), confirmText, confirmButtons as any);
+        await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+        await saveSession(phone, { state: "SUMMARY", ...cur });
+        return true;
+      }
+    } catch {}
     try {
       await saveClosings({
         date: cur.date,
@@ -1710,7 +1778,97 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
-    await notifySupAdm(`Closing submitted for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
+    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
+  try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
+    await saveSession(phone, {
+      state: "WAIT_DEPOSIT",
+      rows: [],
+      currentItem: undefined,
+      inactiveKeys: newInactive,
+    });
+    await updateWaState(phoneE164, {
+      currentAction: "menu",
+      closingDraft: undefined,
+      lastMessageAt: new Date().toISOString(),
+    });
+    const successLines = [
+      `Closing submitted for ${s.outlet} (${cur.date}).`,
+      `Expected deposit: KSh ${totals.expectedDeposit}.`,
+      `Paste the M-Pesa SMS when ready.`,
+    ];
+    await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
+    const nextButtons = buildClosingNextActionsButtons();
+    const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
+    await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+    return true;
+  }
+  if (id === "SUMMARY_SUBMIT_CONFIRM") {
+    // User confirmed to submit despite warnings
+    if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return true;
+    }
+    if (await isDayLocked(cur.date, s.outlet)) {
+      await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Contact Supervisor.`, "AI_DISPATCH_TEXT");
+      return true;
+    }
+    if (!cur.rows.length) {
+      await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return true;
+    }
+    try {
+      await saveClosings({
+        date: cur.date,
+        outletName: s.outlet,
+        rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
+      });
+    } catch (e: any) {
+      // Mirror SUMMARY_SUBMIT error handling
+      try {
+        const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+        const y = dt.toISOString().slice(0, 10);
+        const [prev, supply] = await Promise.all([
+          (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
+          (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
+        ]);
+        const byKeyLc = new Map<string, { openEff: number }>();
+        for (const r of prev || []) {
+          const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+          byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
+        }
+        for (const r of supply || []) {
+          const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+          byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
+        }
+        const bad = cur.rows.find((r) => {
+          const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
+          const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
+          return Number(r.closing || 0) > maxClosing + 1e-6;
+        });
+        if (bad) {
+          const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
+          const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
+          await sendText(
+            phone,
+            `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
+            "AI_DISPATCH_TEXT",
+            { gpt_sent: true }
+          );
+        } else {
+          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+        }
+      } catch {
+        await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+      await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+      const available = await getAvailableClosingProducts(s, cur);
+      await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
+      return true;
+    }
+    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
+    
     const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
     await saveSession(phone, {
       state: "WAIT_DEPOSIT",
@@ -1743,6 +1901,67 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
       return true;
     }
+    // Pre-lock confirmation similar to submit: warn about missing closings/expenses
+    try {
+      const assigned = await getAssignedProducts(s.code || "");
+      const y = prevDateISO(cur.date);
+      const [prevRows, supplyRows, expensesToday, alreadyClosed] = await Promise.all([
+        (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }).catch(() => []),
+        (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }).catch(() => []),
+        (prisma as any).attendantExpense.count({ where: { date: cur.date, outletName: s.outlet } }).catch(() => 0),
+        (prisma as any).attendantClosing.findMany({ where: { date: cur.date, outletName: s.outlet }, select: { itemKey: true } }).catch(() => []),
+      ]);
+      const openEffLc = new Map<string, number>();
+      for (const r of prevRows || []) {
+        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
+        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).closingQty || 0));
+      }
+      for (const r of supplyRows || []) {
+        const kLc = String((r as any).itemKey || '').toLowerCase(); if (!kLc) continue;
+        openEffLc.set(kLc, (openEffLc.get(kLc) || 0) + Number((r as any).qty || 0));
+      }
+      const closedKeyLc = new Set<string>();
+      for (const r of (alreadyClosed || [])) {
+        const k = String((r as any).itemKey || '').toLowerCase();
+        if (k) closedKeyLc.add(k);
+      }
+      for (const r of (cur.rows || [])) {
+        const k = String((r as any).key || '').toLowerCase();
+        if (k) closedKeyLc.add(k);
+      }
+      const openingKeysLc = new Set<string>((supplyRows || []).map((r: any) => String(r.itemKey || '').toLowerCase()).filter(Boolean));
+      const universe = openingKeysLc.size > 0 ? Array.from(openingKeysLc.values()) : (assigned || []).map((p: any) => String(p.key || '').toLowerCase()).filter(Boolean);
+      const missing: string[] = [];
+      for (const kLc of universe) {
+        const open = Number(openEffLc.get(kLc) || 0);
+        if (open > 0 && !closedKeyLc.has(kLc)) missing.push(kLc);
+      }
+      if (missing.length || !expensesToday) {
+        let nameByLc = new Map<string, string>();
+        try {
+          const allKeys = Array.from(new Set(universe));
+          const prods = await (prisma as any).product.findMany({ where: { key: { in: allKeys } }, select: { key: true, name: true } });
+          for (const p of prods || []) nameByLc.set(String(p.key || '').toLowerCase(), String(p.name || ''));
+        } catch {}
+        const missingNames = missing
+          .slice(0, 8)
+          .map((k) => nameByLc.get(k) || k.toUpperCase())
+          .join(", ");
+        const more = missing.length > 8 ? `, +${missing.length - 8} more` : '';
+        const parts: string[] = [];
+        if (missing.length) parts.push(`Missing closings: ${missingNames}${more}. They will be assumed as 0.`);
+        if (!expensesToday) parts.push("No expenses recorded for today. It will be assumed to be KSh 0.");
+        const confirmText = `${parts.join("\n\n")}\n\nProceed and lock day anyway?`;
+        const confirmButtons = [
+          { type: "reply", reply: { id: "SUMMARY_LOCK_CONFIRM", title: "Yes, Lock Day" } },
+          { type: "reply", reply: { id: "SUMMARY_MODIFY", title: "Edit Entries" } },
+        ];
+        const payload = buildButtonPayload(phone.replace(/^\+/, ""), confirmText, confirmButtons as any);
+        await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+        await saveSession(phone, { state: "SUMMARY", ...cur });
+        return true;
+      }
+    } catch {}
     // Save any staged rows then lock the day
     if (cur.rows.length) {
       try {
@@ -1798,7 +2017,76 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     await lockDay(cur.date, s.outlet, s.code || undefined);
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
-    await notifySupAdm(`Attendant day locked for ${s.outlet} (${cur.date}). Expected deposit: KSh ${totals.expectedDeposit}.`);
+    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
+  try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
+    await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
+    return true;
+  }
+  if (id === "SUMMARY_LOCK_CONFIRM") {
+    if (!s.outlet) {
+      await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+      return true;
+    }
+    if (await isDayLocked(cur.date, s.outlet)) {
+      await sendText(phone, `Day is already locked for ${s.outlet} (${cur.date}).`, "AI_DISPATCH_TEXT");
+      return true;
+    }
+    if (cur.rows.length) {
+      try {
+        await saveClosings({
+          date: cur.date,
+          outletName: s.outlet,
+          rows: cur.rows.map((r) => ({ productKey: r.key, closingQty: r.closing, wasteQty: r.waste })),
+        });
+      } catch (e: any) {
+        // Mirror error handling
+        try {
+          const dt = new Date(cur.date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
+          const y = dt.toISOString().slice(0, 10);
+          const [prev, supply] = await Promise.all([
+            (prisma as any).attendantClosing.findMany({ where: { date: y, outletName: s.outlet } }),
+            (prisma as any).supplyOpeningRow.findMany({ where: { date: cur.date, outletName: s.outlet } }),
+          ]);
+          const byKeyLc = new Map<string, { openEff: number }>();
+          for (const r of prev || []) {
+            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).closingQty || 0) });
+          }
+          for (const r of supply || []) {
+            const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
+            byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
+          }
+          const bad = cur.rows.find((r) => {
+            const openEff = Number(byKeyLc.get(String(r.key).toLowerCase())?.openEff || 0);
+            const maxClosing = Math.max(0, openEff - Number(r.waste || 0));
+            return Number(r.closing || 0) > maxClosing + 1e-6;
+          });
+          if (bad) {
+            const openEff = Number(byKeyLc.get(String(bad.key).toLowerCase())?.openEff || 0);
+            const maxClosing = Math.max(0, openEff - Number(bad.waste || 0));
+            await sendText(
+              phone,
+              `Invalid closing for ${bad.name}. Entered ${fmtQty(bad.closing)} with waste ${fmtQty(bad.waste || 0)}. Max allowed: ${fmtQty(maxClosing)}. Opening = yesterday closing + today supply = ${fmtQty(openEff)}. Adjust and try again.`,
+              "AI_DISPATCH_TEXT",
+              { gpt_sent: true }
+            );
+          } else {
+            await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+          }
+        } catch {
+          await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+        }
+        await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+        const available = await getAvailableClosingProducts(s, cur);
+        await sendInteractive(listProducts(phone, available, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
+        return true;
+      }
+    }
+    await lockDay(cur.date, s.outlet, s.code || undefined);
+    const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+    try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
+    
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
     return true;

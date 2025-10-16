@@ -3,7 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { sendClosingSubmitted } from "@/lib/wa";
+// Legacy sendClosingSubmitted replaced by rich notifications
+import { sendDayCloseNotifications } from "@/server/notifications/day_close";
 import { upsertAndNotifySupervisorCommission } from "@/server/commission";
 
 type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
@@ -117,30 +118,8 @@ export async function POST(req: Request) {
     }
     const savedCount = rows.length;
 
-    // Try to notify the submitting attendant if we can resolve their phone.
-    try {
-      // Best-effort: notify all mapped phones for attendants at this outlet.
-      const maps: PhoneMap[] = await withRetry<PhoneMap[]>(
-        () => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }) as Promise<PhoneMap[]>
-      );
-      const codes = maps.map((m) => m.code).filter(Boolean) as string[];
-      const attendants: AttendantRow[] = codes.length
-        ? await withRetry<AttendantRow[]>(
-            () => (prisma as any).attendant.findMany({ where: { loginCode: { in: codes } } }) as Promise<AttendantRow[]>
-          )
-        : [];
-      const nameByCode = new Map<string, string>();
-      for (const a of attendants) {
-        if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
-      }
-  // A very rough expected value: number of items saved (business can refine to expected Ksh)
-  const expected = savedCount;
-      await Promise.allSettled(
-        maps.map((m) =>
-          sendClosingSubmitted(m.phoneE164 || "", nameByCode.get(m.code) || m.code || "Attendant", expected)
-        )
-      );
-    } catch {}
+    // Send rich day-close notifications to all parties (attendant, supervisor, admin, supplier)
+    try { await sendDayCloseNotifications({ date: day, outletName, attendantCode: null }); } catch {}
 
     // Fire-and-forget: compute profit, upsert commission, notify supervisors
     try { await upsertAndNotifySupervisorCommission(day, outletName); } catch {}

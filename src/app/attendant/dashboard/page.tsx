@@ -455,6 +455,26 @@ export default function AttendantDashboardPage() {
     const wasteMap: Record<string, number> = {};
     rows.forEach(r => { closingMap[r.key] = toNum(r.closing); wasteMap[r.key] = toNum(r.waste); });
 
+    // Pre-submit checks: warn if any item with opening > 0 has no closing entered (assumed 0),
+    // and warn if no expenses have been entered for today.
+    try {
+      const missingClosings = rows
+        .filter(r => Number(r.opening) > 0 && toNum(r.closing) <= 0)
+        .map(r => `${r.name}`);
+      const hasAnyExpense = expenses.some(e => toNum(e.amount) > 0 && (e.name || "").trim() !== "");
+      const messages: string[] = [];
+      if (missingClosings.length > 0) {
+        messages.push(`Missing closing for ${missingClosings.length} item(s):\n- ${missingClosings.slice(0, 10).join("\n- ")}${missingClosings.length > 10 ? "\n…" : ""}`);
+      }
+      if (!hasAnyExpense) {
+        messages.push("No expenses entered for today. It will be assumed to be Ksh 0.");
+      }
+      if (messages.length > 0) {
+        const ok = window.confirm(`${messages.join("\n\n")}\n\nProceed and submit with these values assumed as 0?`);
+        if (!ok) return;
+      }
+    } catch {}
+
     // Persist remaining unsaved rows in one shot for convenience
     try {
       await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
