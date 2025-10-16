@@ -76,33 +76,55 @@ async function ensureLoginProvision(loginCode: string) {
     }
   }
 
-  // Robust attendant provisioning: upsert by unique loginCode to avoid races/collisions
-  let attendant = await (prisma as any).attendant.upsert({
-    where: { loginCode: code },
-    update: { outletId: outletRow?.id ?? null },
-    create: {
-      name: person?.name || outletName || code,
-      loginCode: code,
-      outletId: outletRow?.id ?? null,
-    },
-    select: { id: true, outletId: true, loginCode: true, name: true },
-  }).catch(async () => {
-    // Fallback to find-first in case some providers don't allow upsert on optional unique
-    const existing = await (prisma as any).attendant.findFirst({
-      where: { loginCode: { equals: code, mode: "insensitive" } },
+  // Robust attendant provisioning with fallback for older DBs lacking new columns
+  let attendant = await (prisma as any).attendant
+    .upsert({
+      where: { loginCode: code },
+      update: { outletId: outletRow?.id ?? null },
+      create: {
+        name: person?.name || outletName || code,
+        loginCode: code,
+        outletId: outletRow?.id ?? null,
+      },
       select: { id: true, outletId: true, loginCode: true, name: true },
-    }).catch(() => null);
-    if (existing && !existing.outletId && outletRow?.id) {
+    })
+    .catch(async (err: any) => {
+      // If Prisma upsert fails due to schema drift (e.g., missing salaryAmount), do a raw SQL upsert
       try {
-        return await (prisma as any).attendant.update({
-          where: { id: existing.id },
-          data: { outletId: outletRow.id },
+        const desiredName = person?.name || outletName || code;
+        const desiredOutletId = outletRow?.id ?? null;
+        // Try to update if exists
+        const existing: any = await (prisma as any).$queryRaw`
+          SELECT id, "loginCode", "outletId", name FROM "Attendant" WHERE "loginCode" = ${code} LIMIT 1
+        `;
+        if (Array.isArray(existing) && existing.length > 0) {
+          const row = existing[0];
+          if (!row.outletId && desiredOutletId) {
+            await (prisma as any).$executeRaw`
+              UPDATE "Attendant" SET "outletId" = ${desiredOutletId} WHERE id = ${row.id}
+            `;
+          }
+        } else {
+          // Insert minimal columns only (avoid referencing new columns that may not exist yet)
+          await (prisma as any).$executeRaw`
+            INSERT INTO "Attendant" ("name", "loginCode", "outletId")
+            VALUES (${desiredName}, ${code}, ${desiredOutletId})
+            ON CONFLICT ("loginCode") DO UPDATE SET "outletId" = COALESCE("Attendant"."outletId", EXCLUDED."outletId")
+          `;
+        }
+        // Re-fetch
+        const refetched: any = await (prisma as any).$queryRaw`
+          SELECT id, "loginCode", "outletId", name FROM "Attendant" WHERE "loginCode" = ${code} LIMIT 1
+        `;
+        return Array.isArray(refetched) && refetched.length > 0 ? refetched[0] : null;
+      } catch (e) {
+        // Last resort: try normal findFirst once more
+        return await (prisma as any).attendant.findFirst({
+          where: { loginCode: { equals: code, mode: "insensitive" } },
           select: { id: true, outletId: true, loginCode: true, name: true },
-        });
-      } catch {}
-    }
-    return existing;
-  });
+        }).catch(() => null);
+      }
+    });
 
   const attendantId = attendant?.id;
   if (!attendantId) return existing;
