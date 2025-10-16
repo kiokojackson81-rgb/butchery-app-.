@@ -332,7 +332,16 @@ export default function AttendantDashboardPage() {
           waste: "",
         };
       });
-    setRows(built);
+    // Preserve any in-progress user input by merging with previous rows
+    setRows((prev) => {
+      if (!prev || prev.length === 0) return built;
+      const prevByKey = new Map(prev.map((r) => [r.key, r] as const));
+      return built.map((b) => {
+        const p = prevByKey.get(b.key);
+        if (!p) return b;
+        return { ...b, closing: p.closing, waste: p.waste };
+      });
+    });
   }, [openingRowsRaw, catalog, outlet]);
 
   // Overlay already saved closing/waste from DB and lock those rows
