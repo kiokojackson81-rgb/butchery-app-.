@@ -132,7 +132,7 @@ export async function POST(req: Request) {
       : body && body.loginCode
         ? [body]
         : [];
-    if (!Array.isArray(incoming) || incoming.length === 0) {
+    if (!Array.isArray(incoming)) {
       return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
     }
 
@@ -163,9 +163,8 @@ export async function POST(req: Request) {
       orderedCanonicals.push(canonical);
     }
 
-    if (cleanByCode.size === 0) {
-      return NextResponse.json({ ok: false, error: "No valid codes to save" }, { status: 400 });
-    }
+    // If there are no valid codes in payload, interpret as "remove all codes not present".
+    // We'll proceed to compute deletions based on previousByCode without returning 400.
 
     const seen = new Set<string>();
     const canonicalOrder: string[] = [];
