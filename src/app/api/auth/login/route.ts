@@ -8,7 +8,7 @@ import { createSession, serializeSessionCookie } from "@/lib/session";
 import { serializeRoleCookie } from "@/lib/roleSession";
 
 async function ensureLoginProvision(loginCode: string) {
-  const code = normalizeCode(loginCode || "");
+  const code = canonLoose(loginCode || "");
   if (!code) return null;
 
   const existing = await (prisma as any).loginCode.findUnique({ where: { code } }).catch(() => null);
@@ -33,12 +33,14 @@ async function ensureLoginProvision(loginCode: string) {
           let fromMirror: any = (obj as any)[code]
             || (obj as any)[normalizeCode(loginCode || "")]
             || (obj as any)[canonFull(loginCode || "")]
+            || (obj as any)[canonLoose(loginCode || "")]
             || null;
           // If not found, iterate keys and compare normalized forms
           if (!fromMirror) {
             for (const k of Object.keys(obj)) {
               const kn = normalizeCode(k);
-              if (kn === code) { fromMirror = (obj as any)[k]; break; }
+              const kl = canonLoose(k);
+              if (kn === code || kl === code) { fromMirror = (obj as any)[k]; break; }
             }
           }
           const outlet = String((fromMirror?.outlet as any) || "").trim();
