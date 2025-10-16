@@ -1903,8 +1903,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         for (const r of supply || []) {
           const kLc = String((r as any).itemKey || "").toLowerCase(); if (!kLc) continue;
           byKeyLc.set(kLc, { openEff: (byKeyLc.get(kLc)?.openEff || 0) + Number((r as any).qty || 0) });
-        // SUMMARY_LOCK and SUMMARY_LOCK_CONFIRM flows removed (no calendar-day locking)
-        } catch {
+        }
+      } catch {
           await sendText(phone, "Closing validation failed. Please review entries and try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         }
         await saveSession(phone, { state: "CLOSING_PICK", ...cur });
