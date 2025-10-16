@@ -671,12 +671,26 @@ export default function AdminPage() {
     const row = codes.find(c => c.id === id);
     const label = row?.code ? `${row.code} (${row?.name || ''})` : 'this code';
     if (!confirm(`Delete ${label}? This removes the code from database and related mappings.`)) return;
-    const next = codes.filter(c => c.id !== id);
-    setCodes(next);
-    try { await persistCodes(next); } catch (e) {
+    // Server-side single delete
+    try {
+      const res = await fetch('/api/admin/attendants/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ code: row?.code || '' }),
+      });
+      const txt = await res.text();
+      let j: any = null; try { j = JSON.parse(txt); } catch {}
+      if (!res.ok || !j?.ok) throw new Error(j?.error || txt || 'Failed');
+    } catch (e) {
       console.error('delete code failed', e);
       alert(`Failed to delete code: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      return;
     }
+    // Local update after server success
+    const next = codes.filter(c => c.id !== id);
+    setCodes(next);
+    saveLS(K_CODES, next);
   };
   const updateCode = (id: string, patch: Partial<PersonCode>) =>
     setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch } : c)));
