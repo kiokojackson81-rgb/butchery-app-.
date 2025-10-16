@@ -1151,9 +1151,31 @@ export default function AdminPage() {
                           key={`tick-${p.id}`}
                           className={`inline-flex items-center gap-2 text-xs border rounded-xl px-3 py-2 cursor-pointer ${checked ? "bg-black text-white" : ""} ${taken && !checked ? "opacity-40 cursor-not-allowed" : ""}`}
                           title={p.name}
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.preventDefault();
-                            if (!taken || checked) toggleScopeProduct(displayCode, p.key);
+                            if (checked) { toggleScopeProduct(displayCode, p.key); return; }
+                            if (!taken) { toggleScopeProduct(displayCode, p.key); return; }
+                            // Taken by another attendant in this outlet — offer reassignment
+                            const confirmMsg = `Reassign ${p.name} to ${ac.name || displayCode} for outlet ${entry.outlet}? This will remove it from the current attendant.`;
+                            const ok = window.confirm(confirmMsg);
+                            if (!ok) return;
+                            try {
+                              const res = await fetch('/api/admin/scope/reassign', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                cache: 'no-store',
+                                body: JSON.stringify({ outlet: entry.outlet, productKey: p.key, toCode: displayCode })
+                              });
+                              const text = await res.text();
+                              let json: any = null; try { json = JSON.parse(text); } catch {}
+                              if (!res.ok || !json?.ok) throw new Error(json?.error || text || 'Failed to reassign');
+                              // Locally reflect the change
+                              toggleScopeProduct(displayCode, p.key);
+                              try { await refreshScopeFromServer(); } catch {}
+                              alert('Reassigned successfully ✅');
+                            } catch (err: any) {
+                              alert(err?.message || 'Failed to reassign');
+                            }
                           }}
                         >
                           <input
