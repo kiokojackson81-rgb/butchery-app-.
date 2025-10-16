@@ -14,6 +14,7 @@ import { sendText, sendInteractive } from "@/lib/wa";
 // GPT/OOC removed for legacy-only mode
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
+import { updateDrySession } from "@/lib/dev_dry";
 // OOC helpers removed in legacy-only
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
@@ -395,6 +396,7 @@ export async function POST(req: Request) {
 
           // Refresh activity as early as possible to keep session alive
           try { await touchWaSession(phoneE164); } catch {}
+          try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
           let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
@@ -447,7 +449,7 @@ export async function POST(req: Request) {
             try {
               const dry = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
               if (!auth.ok && dry) {
-                auth = { ok: true, sess: { role: 'attendant', outlet: 'TestOutlet', code: 'ATT001', state: 'MENU' } } as any;
+                auth = { ok: true, sess: { phoneE164, role: 'attendant', outlet: 'TestOutlet', code: 'ATT001', state: 'MENU' } } as any;
                 try { console.info('[WA] DRY AUTH FALLBACK applied', { phone: phoneE164 }); } catch {}
               }
             } catch {}
@@ -492,6 +494,7 @@ export async function POST(req: Request) {
           const _sess = authOk(auth) ? auth.sess : undefined;
           const sessRole = String((_sess?.role) || "attendant");
           try { await touchWaSession(phoneE164); } catch {}
+          try { updateDrySession(phoneE164, { state: (auth as any)?.sess?.state || 'MENU', role: (auth as any)?.sess?.role || 'attendant', outlet: (auth as any)?.sess?.outlet || undefined }); } catch {}
 
           // Quick numeric shortcut: when GPT_ONLY is disabled, allow users to
           // type a single digit (1-7) to select the corresponding tab/menu

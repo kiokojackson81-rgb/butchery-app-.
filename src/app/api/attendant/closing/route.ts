@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 // Legacy sendClosingSubmitted replaced by rich notifications
 import { sendDayCloseNotifications } from "@/server/notifications/day_close";
 import { upsertAndNotifySupervisorCommission } from "@/server/commission";
+import { getPeriodState } from "@/server/trading_period";
 
 type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
 type PhoneMap = { code: string; phoneE164: string | null };
@@ -46,6 +47,12 @@ export async function POST(req: Request) {
     const rawKeys = Array.from(new Set([...(Object.keys(safeClosing)), ...(Object.keys(safeWaste))]));
     const keys = rawKeys.map((k) => (k ?? "").trim()).filter((k) => k.length > 0);
     let prunedCount = 0;
+
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(outletName, day);
+    if (state !== "OPEN") {
+      return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${day}).` }, { status: 409 });
+    }
 
     // Preload opening-effective map for validation (case-insensitive)
     const openEffMap: Map<string, number> = new Map(); // keys = itemKey.toLowerCase()

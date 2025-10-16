@@ -36,6 +36,8 @@ function fmt(n: number | undefined | null) {
   return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 function today() { return new Date().toISOString().split("T")[0]; }
+function prevDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0,10); }
+function summaryKeyFor(date: string, outlet: string) { return `attendant_summary_${date}_${outlet}`; }
 function id() { return Math.random().toString(36).slice(2); }
 // Note: We deliberately avoid reading non-bridged keys from localStorage.
 // writeJSON removed; we no longer persist to localStorage as primary store
@@ -82,6 +84,7 @@ export default function AttendantDashboardPage() {
   const [tab, setTab] = useState<"stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
   const [submitted, setSubmitted] = useState(false);
   const [activeFrom, setActiveFrom] = useState<string | null>(null);
+  const [summaryMode, setSummaryMode] = useState<"current" | "previous">("current");
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -308,8 +311,18 @@ export default function AttendantDashboardPage() {
       } catch { setCountedTill(""); }
     })();
 
-    // API-backed bits
-    refreshPeriodAndHeader(outlet).catch(()=>{});
+    // API-backed bits (respect persisted summary mode)
+    (async () => {
+      try {
+        const key = summaryKeyFor(dateStr, outlet);
+        const saved = (typeof window !== 'undefined' ? window.localStorage.getItem(key) : null) || 'current';
+        const mode = saved === 'previous' ? 'previous' : 'current';
+        setSummaryMode(mode as any);
+        await refreshPeriodAndHeader(outlet, mode === 'previous' ? prevDate(dateStr) : undefined);
+      } catch {
+        await refreshPeriodAndHeader(outlet);
+      }
+    })();
     refreshTill(outlet).catch(()=>{});
     setSubmitted(false);
   }, [dateStr, outlet, catalog]);
@@ -508,9 +521,11 @@ export default function AttendantDashboardPage() {
       }
     } catch {}
 
-    setSubmitted(true);
-    setTab("summary");
-    await refreshPeriodAndHeader(outlet);
+  setSubmitted(true);
+  setTab("summary");
+  setSummaryMode("previous");
+  try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
+  await refreshPeriodAndHeader(outlet, prevDate(dateStr));
     // refresh closing/waste reads from DB for consistency
     try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
     // Clear input buffers for deposits and expenses for the new period
@@ -576,7 +591,7 @@ export default function AttendantDashboardPage() {
     } catch {}
   }
 
-  async function refreshPeriodAndHeader(outletName: string) {
+  async function refreshPeriodAndHeader(outletName: string, summaryDate?: string) {
     try {
       const pa = await getJSON<{ ok: boolean; active: { periodStartAt: string } | null }>(`/api/period/active?outlet=${encodeURIComponent(outletName)}`);
       const startAt = pa?.active?.periodStartAt ?? null;
@@ -585,8 +600,10 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
+      const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
+      const url = summaryDate ? `${base}&date=${encodeURIComponent(summaryDate)}` : base;
       const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number } }>(
-        `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`
+        url
       );
       if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
       setKpi({
@@ -1096,7 +1113,20 @@ export default function AttendantDashboardPage() {
       {tab === "summary" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold">Summary (Active Period)</h3>
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold">Summary</h3>
+              <div className="inline-flex items-center gap-1 text-xs">
+                <button
+                  className={`px-2 py-1 rounded-lg border ${summaryMode==='current' ? 'bg-black text-white' : ''}`}
+                  onClick={async()=>{ if(!outlet) return; setSummaryMode('current'); try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'current'); } catch {}; await refreshPeriodAndHeader(outlet, undefined); }}
+                >Current</button>
+                <button
+                  className={`px-2 py-1 rounded-lg border ${summaryMode==='previous' ? 'bg-black text-white' : ''}`}
+                  onClick={async()=>{ if(!outlet) return; setSummaryMode('previous'); try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}; await refreshPeriodAndHeader(outlet, prevDate(dateStr)); }}
+                >Previous</button>
+                <span className="ml-2 text-[11px] text-gray-500">Showing: {summaryMode === 'previous' ? 'Previous' : 'Current'}</span>
+              </div>
+            </div>
             <button
               className="btn-mobile border rounded-xl px-3 py-1 text-xs"
               onClick={() => window.print()}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getDrySession } from "@/lib/dev_dry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +25,14 @@ export async function GET(req: Request) {
     const e164 = digits.startsWith("+") ? digits : "+" + digits;
     if (!e164 || e164.length < 10) return NextResponse.json({ ok: false, error: "phone required" }, { status: 400 });
 
-    const session = await (prisma as any).waSession.findUnique({ where: { phoneE164: e164 } }).catch(() => null);
-    return NextResponse.json({ ok: true, session });
+    let session = await (prisma as any).waSession.findUnique({ where: { phoneE164: e164 } }).catch(() => null);
+    if (!session) {
+      // DRY fallback: read from in-memory store if DB is down
+      const dry = getDrySession(e164);
+      if (dry) session = { phoneE164: dry.phoneE164, role: dry.role, outlet: dry.outlet, state: dry.state, cursor: dry.cursor } as any;
+    }
+    // Back-compat: older tests expect `js.sess.state` instead of `js.session.state`
+    return NextResponse.json({ ok: true, session, sess: session });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "session lookup failed" }, { status: 500 });
   }

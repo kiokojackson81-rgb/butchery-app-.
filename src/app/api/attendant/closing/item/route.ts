@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { getPeriodState } from "@/server/trading_period";
 
 export async function POST(req: Request) {
   try {
@@ -16,6 +17,12 @@ export async function POST(req: Request) {
     const { itemKey, closingQty, wasteQty } = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number };
   const key = (itemKey || "").trim();
     if (!key) return NextResponse.json({ ok: false, error: "itemKey required" }, { status: 400 });
+
+    // Guard: Trading period must be OPEN
+    const state = await getPeriodState(outletName, date);
+    if (state !== "OPEN") {
+      return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
+    }
     const closing = Number.isFinite(Number(closingQty)) ? Math.max(0, Number(closingQty)) : 0;
     const waste = Number.isFinite(Number(wasteQty)) ? Math.max(0, Number(wasteQty)) : 0;
 

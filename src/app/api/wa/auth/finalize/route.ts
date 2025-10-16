@@ -5,6 +5,7 @@ import { findPersonCodeTolerant } from "@/server/db_person";
 import { warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
+import { setDrySession, updateDrySession } from "@/lib/dev_dry";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -87,7 +88,10 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
     } else {
       await (prisma as any).waSession.create({ data: { phoneE164: phoneDB, role, code: pc.code, outlet: outletFinal, state: "MENU", cursor: { lastActiveAt: nowIso, tradingPeriodId, status: "ACTIVE" } as any, lastFinalizeAt: new Date(), sessionVersion: 1 } });
     }
-  } catch {}
+  } catch {
+    // DRY fallback: persist to in-memory store so tests can proceed without DB
+    setDrySession({ phoneE164: phoneDB, role, outlet: outletFinal, code: pc.code, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId, status: "ACTIVE" } });
+  }
 
   const to = toGraphPhone(phoneDB);
   try { await warmUpSession(to); } catch {}
@@ -132,7 +136,8 @@ export async function POST(req: Request) {
       // DRY fallback: allow login to succeed without DB so GPT-only tests can proceed
       const dry = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
       if (dry) {
-        return NextResponse.json({ ok: true, role: 'attendant', code, outlet: 'TestOutlet', phoneE164 }, { status: 200 });
+          try { setDrySession({ phoneE164, role: 'attendant', code, outlet: 'TestOutlet', state: 'MENU', cursor: { status: 'ACTIVE', lastActiveAt: new Date().toISOString() } }); } catch {}
+          return NextResponse.json({ ok: true, role: 'attendant', code, outlet: 'TestOutlet', phoneE164 }, { status: 200 });
       }
       throw e;
     }

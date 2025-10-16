@@ -7,7 +7,8 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const outlet = searchParams.get("outlet") || "";
-  const date = new Date().toISOString().slice(0, 10);
+  const dateParam = (searchParams.get("date") || "").slice(0, 10);
+  const date = dateParam || new Date().toISOString().slice(0, 10);
   if (!outlet)
     return NextResponse.json({
       ok: true,

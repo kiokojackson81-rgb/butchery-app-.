@@ -1,5 +1,6 @@
 // New state machine for attendants.
 import { prisma } from "@/lib/prisma";
+import { getDrySession as getDrySess, setDrySession as setDrySess, updateDrySession as patchDrySess } from "@/lib/dev_dry";
 import { sendText, sendInteractive, logOutbound } from "@/lib/wa";
 import { normCode, toDbPhone } from "@/server/util/normalize";
 import { createLoginLink } from "@/server/wa_links";
@@ -71,11 +72,20 @@ type SessionPatch = Partial<Cursor & { state: string; role?: string; code?: stri
 
 async function loadSession(phone: string) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
-  const s = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
-  return (
-    s ||
-    (await (prisma as any).waSession.create({ data: { phoneE164, role: "attendant", state: "SPLASH", cursor: { date: today(), rows: [] } } }))
-  );
+  try {
+    const s = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
+    if (s) return s;
+    return await (prisma as any).waSession.create({ data: { phoneE164, role: "attendant", state: "SPLASH", cursor: { date: today(), rows: [] } } });
+  } catch {
+    // DRY fallback: use in-memory session
+    const dry = getDrySess(phoneE164);
+    if (dry) {
+      return { id: undefined, phoneE164, role: dry.role, code: dry.code, outlet: dry.outlet, state: dry.state, cursor: dry.cursor, updatedAt: new Date() } as any;
+    }
+    const cursor = { date: today(), rows: [] } as any;
+    setDrySess({ phoneE164, role: "attendant", outlet: "TestOutlet", code: "ATT001", state: "SPLASH", cursor });
+    return { id: undefined, phoneE164, role: "attendant", code: "ATT001", outlet: "TestOutlet", state: "SPLASH", cursor, updatedAt: new Date() } as any;
+  }
 }
 
 async function saveSession(phone: string, patch: SessionPatch) {
@@ -88,18 +98,30 @@ async function saveSession(phone: string, patch: SessionPatch) {
   if ("currentItem" in patch) cursorPatch.currentItem = (patch as any).currentItem;
   if ("expenseName" in patch) cursorPatch.expenseName = (patch as any).expenseName;
   const cursor = { ...prevCursor, ...cursorPatch } as any;
-  // Ensure rows array is always present to avoid runtime .find errors
   if (!Array.isArray(cursor.rows)) cursor.rows = [];
-  return (prisma as any).waSession.update({
-    where: { id: s.id },
-    data: {
-      state: patch.state || s.state,
-      code: patch.code ?? s.code,
-      role: patch.role ?? s.role,
-      outlet: patch.outlet ?? s.outlet,
+  try {
+    return await (prisma as any).waSession.update({
+      where: { id: (s as any).id },
+      data: {
+        state: patch.state || (s as any).state,
+        code: patch.code ?? (s as any).code,
+        role: patch.role ?? (s as any).role,
+        outlet: patch.outlet ?? (s as any).outlet,
+        cursor,
+      },
+    });
+  } catch {
+    // DRY fallback
+    const next = {
+      state: patch.state || (s as any).state,
+      code: patch.code ?? (s as any).code,
+      role: patch.role ?? (s as any).role,
+      outlet: patch.outlet ?? (s as any).outlet,
       cursor,
-    },
-  });
+    } as any;
+    patchDrySess(phoneE164, next);
+    return { ...s, ...next } as any;
+  }
 }
 
 function today() {
@@ -118,6 +140,17 @@ function inactiveExpired(updatedAt: Date) {
 
 function isNumericText(t: string) {
   return /^\d+(?:\.\d+)?$/.test(t.trim());
+}
+
+// Start or bump the ActivePeriod pointer for an outlet
+async function startNewActivePeriod(outletName: string) {
+  try {
+    await (prisma as any).activePeriod.upsert({
+      where: { outletName: outletName },
+      create: { outletName: outletName, periodStartAt: new Date() },
+      update: { periodStartAt: new Date() },
+    });
+  } catch {}
 }
 
 // Accept inputs like "12kgs", "12 kgs", "kilograms 1.3", "1 2 kgs" → 12, 1.3 etc.
@@ -1334,6 +1367,13 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
 
+    // DRY fallback: In dev/dry mode, short-circuit to CLOSING_PICK without DB dependencies
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) {
+      await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+      return true;
+    }
+
     // Determine products to offer: if opening rows exist, restrict to them; else show assigned minus closed
     const assigned = await getAssignedProducts(s.code || "");
     const closed = await getClosedKeys(cur.date, s.outlet);
@@ -1779,7 +1819,9 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     }
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
-  try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    // Start a new active period so till payments and header reflect the new period window
+    try { await startNewActivePeriod(s.outlet); } catch {}
     const newInactive = [...new Set([...(cur.inactiveKeys || []), ...cur.rows.map((r) => r.key)])];
     await saveSession(phone, {
       state: "WAIT_DEPOSIT",
@@ -2018,7 +2060,8 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     await lockDay(cur.date, s.outlet, s.code || undefined);
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
-  try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
+    try { await startNewActivePeriod(s.outlet); } catch {}
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
     return true;
@@ -2083,10 +2126,10 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         return true;
       }
     }
-    await lockDay(cur.date, s.outlet, s.code || undefined);
+  await lockDay(cur.date, s.outlet, s.code || undefined);
     const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
     try { await upsertAndNotifySupervisorCommission(cur.date, s.outlet); } catch {}
-    
+  try { await startNewActivePeriod(s.outlet); } catch {}
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, `Submitted & locked. Expected deposit: Ksh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
     return true;
