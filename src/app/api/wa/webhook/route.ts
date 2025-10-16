@@ -394,11 +394,8 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // Refresh activity as early as possible to keep session alive
-          try { await touchWaSession(phoneE164); } catch {}
+          // Do not touch session before auth; avoid extending stale sessions
           try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
-            // Do not touch session before auth; avoid extending stale sessions
-            try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
           let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
@@ -474,33 +471,25 @@ export async function POST(req: Request) {
               try {
                 const { url } = await createLoginLink(phoneE164).catch(() => ({ url: (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login" }));
                 if (!recent) {
+                  // Single outbound on expiry: log and send centralized login prompt only
                   await logOutbound({ direction: "in", payload: { type: "LOGIN_PROMPT", phone: phoneE164, reason: auth.reason }, status: "LOGIN_PROMPT", type: "WARN" });
-                  // send template/reopen via centralized gate (debounced)
                   await promptWebLogin(phoneE164, auth.reason);
-                  // Send a short login nudge
-                  const to = toGraphPhone(phoneE164);
-                  const replyText = `Still no sign-in detected. Please open:\n${url}`;
-                  try { await sendTextSafe(to, replyText, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 } else {
-                  // Suppressed duplicate login prompt → still send a lightweight reminder (deduped)
+                  // If a prompt was already sent within 24h, send a lightweight reminder (one message only)
                   const to = toGraphPhone(phoneE164);
                   const replyText = `Please use the login link to continue:\n${url}`;
                   try { await sendTextSafe(to, replyText, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
                 }
               } catch {}
-              try { await touchWaSession(phoneE164); } catch {}
-                // Only touch session after we validate auth to extend activity
-                try { await touchWaSession(phoneE164); } catch {}
-                // Do not extend session on unauthenticated branch
+              // Do not extend session on unauthenticated branch
               continue;
             }
           }
 
           const _sess = authOk(auth) ? auth.sess : undefined;
           const sessRole = String((_sess?.role) || "attendant");
+          // Authenticated: now extend last activity (single touch)
           try { await touchWaSession(phoneE164); } catch {}
-            // Authenticated: now extend last activity
-            try { await touchWaSession(phoneE164); } catch {}
           try { updateDrySession(phoneE164, { state: (auth as any)?.sess?.state || 'MENU', role: (auth as any)?.sess?.role || 'attendant', outlet: (auth as any)?.sess?.outlet || undefined }); } catch {}
 
           // Quick numeric shortcut: when GPT_ONLY is disabled, allow users to
