@@ -74,29 +74,33 @@ async function ensureLoginProvision(loginCode: string) {
     }
   }
 
-  let attendant = await (prisma as any).attendant.findFirst({
-    where: { loginCode: { equals: code, mode: "insensitive" } },
+  // Robust attendant provisioning: upsert by unique loginCode to avoid races/collisions
+  let attendant = await (prisma as any).attendant.upsert({
+    where: { loginCode: code },
+    update: { outletId: outletRow?.id ?? null },
+    create: {
+      name: person?.name || outletName || code,
+      loginCode: code,
+      outletId: outletRow?.id ?? null,
+    },
     select: { id: true, outletId: true, loginCode: true, name: true },
-  }).catch(() => null);
-
-  if (attendant) {
-    if (!attendant.outletId && outletRow?.id) {
-      attendant = await (prisma as any).attendant.update({
-        where: { id: attendant.id },
-        data: { outletId: outletRow.id },
-        select: { id: true, outletId: true, loginCode: true, name: true },
-      }).catch(() => attendant);
-    }
-  } else {
-    attendant = await (prisma as any).attendant.create({
-      data: {
-        name: person?.name || outletName || code,
-        loginCode: code,
-        outletId: outletRow?.id ?? null,
-      },
+  }).catch(async () => {
+    // Fallback to find-first in case some providers don't allow upsert on optional unique
+    const existing = await (prisma as any).attendant.findFirst({
+      where: { loginCode: { equals: code, mode: "insensitive" } },
       select: { id: true, outletId: true, loginCode: true, name: true },
     }).catch(() => null);
-  }
+    if (existing && !existing.outletId && outletRow?.id) {
+      try {
+        return await (prisma as any).attendant.update({
+          where: { id: existing.id },
+          data: { outletId: outletRow.id },
+          select: { id: true, outletId: true, loginCode: true, name: true },
+        });
+      } catch {}
+    }
+    return existing;
+  });
 
   const attendantId = attendant?.id;
   if (!attendantId) return existing;
@@ -202,6 +206,27 @@ export async function POST(req: Request) {
         console.error('admin_codes lookup failed', err);
         return NextResponse.json({ ok: false, error: 'SESSION_STORE_UNAVAILABLE' }, { status: 503 });
       }
+    }
+
+    // Final safety: if still no row but scope mirror provides an outlet for this code, try provisioning once more
+    if (!row) {
+      try {
+        const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+        const map = (scopeRow as any)?.value || null;
+        if (map && typeof map === "object") {
+          const key = full;
+          let entry = (map as any)[key] || (map as any)[canonFull(loginCode || "")] || null;
+          if (!entry) {
+            for (const k of Object.keys(map)) {
+              if (normalizeCode(k) === key) { entry = (map as any)[k]; break; }
+            }
+          }
+          const outlet = entry && typeof entry === "object" ? String((entry as any)?.outlet || "").trim() : "";
+          if (outlet) {
+            row = await ensureLoginProvision(loginCode || "");
+          }
+        }
+      } catch {}
     }
 
     if (!row) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
