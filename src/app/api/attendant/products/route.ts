@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { canonFull } from "@/lib/codeNormalize";
 import { getRoleSession } from "@/lib/roleSession";
+import { upsertAssignmentForCode } from "@/server/assignments";
 
 type ProductOut = {
   key: string;
@@ -50,6 +51,38 @@ export async function GET() {
             .filter(Boolean)
             .sort()
         : [];
+    }
+
+    // Fallback: consult Setting('attendant_scope') mirror if DB tables don't have entries yet
+    if ((!outletName || productKeys.length === 0)) {
+      try {
+        const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+        const map = (scopeRow as any)?.value || null;
+        if (map && typeof map === "object") {
+          const entry = (map as any)[code] || null;
+          if (entry && typeof entry === "object") {
+            const outRaw = String((entry as any).outlet || "").trim();
+            const keysRaw = Array.isArray((entry as any).productKeys) ? (entry as any).productKeys as any[] : [];
+            const keys = keysRaw.map((k: any) => String(k || "").trim()).filter((k: string) => k.length > 0).sort();
+            if (outRaw) outletName = outRaw;
+            if (keys.length > 0) productKeys = keys;
+          }
+        }
+      } catch {}
+    }
+
+    // If we have an outlet but no product keys yet, derive from active Product and active Pricebook rows
+    if (outletName && productKeys.length === 0) {
+      const [activeProducts, activePB] = await Promise.all([
+        (prisma as any).product.findMany({ where: { active: true }, select: { key: true } }),
+        (prisma as any).pricebookRow.findMany({ where: { outletName, active: true }, select: { productKey: true } }),
+      ]);
+      const productSet = new Set<string>((activeProducts || []).map((p: any) => String(p.key)));
+      const pbSet = new Set<string>((activePB || []).map((r: any) => String(r.productKey)));
+      productKeys = Array.from([...productSet].filter((k) => pbSet.has(k))).sort();
+
+      // Persist for consistency so subsequent reads are fast and consistent
+      try { if (productKeys.length > 0) await upsertAssignmentForCode(code, outletName, productKeys); } catch {}
     }
 
     if (!outletName || productKeys.length === 0) {
