@@ -543,7 +543,7 @@ export default function AttendantDashboardPage() {
 
   setSubmitted(true);
   setTab("summary");
-  if (closeCount >= 1) {
+  if (closeCount >= 2) {
     // End-of-day rotation: show previous and advance stock to tomorrow
     setSummaryMode("previous");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
@@ -563,7 +563,7 @@ export default function AttendantDashboardPage() {
     // Advance stock UI only if this was the second close for the day
     setRows([]);
     setLocked({});
-    if (closeCount >= 1) {
+    if (closeCount >= 2) {
       const tomorrow = nextDate(dateStr);
       setStockDate(tomorrow);
       try {
@@ -573,7 +573,7 @@ export default function AttendantDashboardPage() {
     } else {
       // Stay on same day; rehydrate opening-effective (unchanged) if needed
       try {
-        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`);
+        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
         setOpeningRowsRaw(r1.rows || []);
       } catch { setOpeningRowsRaw([]); }
     }
