@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { normalizeCode, canonNum, canonFull } from "@/lib/codeNormalize";
+import { normalizeCode, canonNum, canonFull, canonLoose } from "@/lib/codeNormalize";
 import { createSession, serializeSessionCookie } from "@/lib/session";
 import { serializeRoleCookie } from "@/lib/roleSession";
 
@@ -23,13 +23,25 @@ async function ensureLoginProvision(loginCode: string) {
   let fallbackOutlet: string | null = null;
   if (!assignment && !scope) {
     try {
+      // 3a) Prefer the structured scope mirror if present (admin UI writes Setting 'attendant_scope').
+      //     This helps when assignments were saved locally/mirrored but relational sync hasn't run yet.
+      try {
+        const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+        const obj = (scopeRow as any)?.value || null;
+        if (obj && typeof obj === "object") {
+          const fromMirror = obj[code] || obj[normalizeCode(loginCode || "")] || obj[canonFull(loginCode || "")] || null;
+          const outlet = String((fromMirror?.outlet as any) || "").trim();
+          if (outlet) fallbackOutlet = outlet;
+        }
+      } catch {}
+
       const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
       const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
       const attendants = list.filter(
         (p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "attendant"
       );
       const selected = attendants.find((p: any) => normalizeCode(p?.code || "") === code);
-      if (selected?.outlet) fallbackOutlet = String(selected.outlet);
+      if (!fallbackOutlet && selected?.outlet) fallbackOutlet = String(selected.outlet);
     } catch {}
   }
   if (!assignment && !scope && !fallbackOutlet && !existing) return null;
@@ -106,6 +118,7 @@ export async function POST(req: Request) {
     }
     const { loginCode } = (await req.json().catch(() => ({}))) as { loginCode?: string };
   const full = normalizeCode(loginCode || "");
+  const loose = canonLoose(loginCode || "");
   const num = canonNum(loginCode || "");
 
     if (!full && !num) {
@@ -125,7 +138,7 @@ export async function POST(req: Request) {
     }
 
     // 2) Fallback to digits-only if unique
-    if (!row && num) {
+  if (!row && num) {
       try {
         // Compare as text using a parameterized query to avoid type errors and SQL injection
         const list: any[] = await (prisma as any).$queryRaw`
@@ -161,8 +174,11 @@ export async function POST(req: Request) {
         const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
         const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
         const attendants = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
+        // Exact (normalized) match first
         const matchFull = attendants.find((p: any) => normalizeCode(p?.code || '') === full);
-        let selected = matchFull;
+        // Loose match: ignore all non-alphanumeric, so "Jackson A" matches "jacksona"
+        const matchLoose = matchFull ? null : attendants.find((p: any) => canonLoose(p?.code || '') === loose);
+        let selected = matchFull || matchLoose || null;
         if (!selected && num) {
           const matches = attendants.filter((p: any) => canonNum(p?.code || '') === num);
           if (matches.length === 1) selected = matches[0];

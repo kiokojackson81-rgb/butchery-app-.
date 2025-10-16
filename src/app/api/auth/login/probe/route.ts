@@ -3,14 +3,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { normalizeCode, canonNum } from "@/lib/codeNormalize";
+import { normalizeCode, canonNum, canonLoose } from "@/lib/codeNormalize";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const codeIn = url.searchParams.get("code") || "";
   const full = normalizeCode(codeIn);
+  const loose = canonLoose(codeIn);
   const num = canonNum(codeIn);
-  const out: any = { ok: true, input: { codeIn, full, num } };
+  const out: any = { ok: true, input: { codeIn, full, loose, num } };
 
   if (!process.env.DATABASE_URL && !process.env.DATABASE_URL_UNPOOLED) {
     return NextResponse.json({ ok: false, error: "DB_NOT_CONFIGURED" }, { status: 503 });
@@ -28,8 +29,10 @@ export async function GET(req: Request) {
     // 2) Can read LoginCode by digits-only?
     try {
       if (num) {
+        // Note: avoid unquoted camelCase identifiers in raw SQL (Postgres lowercases unquoted identifiers).
+        // We only need id/code for the probe, so skip attendantId to prevent casing issues.
         const list: any[] = await (prisma as any).$queryRaw`
-          SELECT id, code, attendantId FROM "LoginCode"
+          SELECT id, code FROM "LoginCode"
           WHERE regexp_replace(code, '\\D', '', 'g') = ${num}
           LIMIT 3
         `;
@@ -43,10 +46,29 @@ export async function GET(req: Request) {
 
     // 3) admin_codes setting reachable?
     try {
-      const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
-      out.admin_codes = { present: !!settingsRow, type: typeof (settingsRow as any)?.value };
+  const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+  const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
+  const attendants = list.filter((p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "attendant");
+  const matchFull = attendants.find((p: any) => normalizeCode(p?.code || "") === full);
+  const matchLoose = !matchFull ? attendants.find((p: any) => canonLoose(p?.code || "") === loose) : null;
+  out.admin_codes = { present: !!settingsRow, type: typeof (settingsRow as any)?.value, matchFull: !!matchFull, matchLoose: !!matchLoose };
     } catch (e: any) {
       out.admin_codes = { error: String(e?.message || e) };
+    }
+
+    // 3b) attendant_scope mirror reachable? Also show outlet inference for this code if present.
+    try {
+      const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+      const obj = (scopeRow as any)?.value || null;
+      if (obj && typeof obj === "object") {
+        const entry = (obj as any)[full] || (obj as any)[normalizeCode(codeIn)] || null;
+        const outlet = entry && typeof entry === "object" ? String((entry as any)?.outlet || "").trim() : "";
+        out.scope_mirror = { present: true, outlet: outlet || null };
+      } else {
+        out.scope_mirror = { present: !!scopeRow, type: typeof (scopeRow as any)?.value };
+      }
+    } catch (e: any) {
+      out.scope_mirror = { error: String(e?.message || e) };
     }
 
     // 4) Attendant find by loginCode (case-insensitive) and outlet binding

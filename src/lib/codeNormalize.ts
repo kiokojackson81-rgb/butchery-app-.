@@ -15,3 +15,9 @@ export function normalizeCode(input: string): string {
   const trimmed = String(input || "").trim();
   return trimmed.toLowerCase().replace(/\s+/g, "");
 }
+
+// Extra-tolerant canonicalizer for user input: lowercase and remove ALL non-alphanumerics.
+// Example: "Jackson A" => "jacksona", "JACKSON-A" => "jacksona"
+export function canonLoose(input: string): string {
+  return String(input || "").toLowerCase().replace(/[^a-z0-9]+/gi, "");
+}
