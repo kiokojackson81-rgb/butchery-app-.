@@ -731,7 +731,7 @@ export default function AttendantDashboardPage() {
             {attendantName && (
               <>
                 <span className="mx-2 text-gray-400">•</span>
-                Attendant: <span className="font-medium">{attendantName}{attendantCode ? ` (${attendantCode})` : ""}</span>
+                Attendant: <span className="font-medium">{attendantName}</span>
               </>
             )}
             {periodStartAt ? (
