@@ -486,7 +486,26 @@ export default function AdminPage() {
     saveLS(K_SCOPE, scope);
     try { await pushLocalStorageKeyToDB(K_SCOPE as any); } catch {}
 
-    // 2) Write-through to server AttendantAssignment
+    // 2) Best-effort: upsert phone mappings for involved codes so WA notifications can be delivered
+    try {
+      const entries = Object.entries(scope);
+      if (entries.length > 0) {
+        const roleByCode: Record<string, PersonCode["role"]> = {};
+        for (const c of codes) {
+          const norm = canonFull(c.code || "");
+          if (norm) roleByCode[norm] = c.role;
+        }
+        await Promise.allSettled(entries.map(([code, val]) => {
+          const norm = canonFull(code || "");
+          const phone = (phones[norm] || "").trim();
+          const role = roleByCode[norm] || "attendant";
+          const outletName = val?.outlet || undefined;
+          return phone ? savePhoneFor(norm, role, outletName) : Promise.resolve();
+        }));
+      }
+    } catch {}
+
+    // 3) Write-through to server AttendantAssignment (server will notify on change)
     try {
       const r = await pushAssignmentsToDB(scope);
       try { await refreshScopeFromServer(); } catch {}
