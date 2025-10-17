@@ -1182,6 +1182,16 @@ export default function AdminPage() {
                               const j = await r.json().catch(()=>({ ok:false }));
                               if (!j?.ok) throw new Error(j?.error || 'Failed');
                               const to = j?.redirect || '/';
+                              try {
+                                const rj: any = j || {};
+                                if (rj.role === 'supervisor') {
+                                  sessionStorage.setItem('supervisor_code', rj.code || 'supervisor');
+                                  sessionStorage.setItem('supervisor_name', rj.code || 'Supervisor');
+                                } else if (rj.role === 'supplier') {
+                                  sessionStorage.setItem('supplier_code', rj.code || 'supplier');
+                                  sessionStorage.setItem('supplier_name', rj.code || 'Supplier');
+                                }
+                              } catch {}
                               // slight delay to ensure cookies are applied
                               setTimeout(()=>{ window.location.href = to; }, 200);
                             } catch (e: any) {
@@ -1789,6 +1799,16 @@ function QuickAdminTools() {
       if (!j?.ok) throw new Error(j?.error || 'Failed');
       const to = j?.redirect || '/';
       setMsg(`Impersonation ok → ${to}`);
+      try {
+        const rj: any = j || {};
+        if (rj.role === 'supervisor') {
+          sessionStorage.setItem('supervisor_code', rj.code || 'supervisor');
+          sessionStorage.setItem('supervisor_name', rj.code || 'Supervisor');
+        } else if (rj.role === 'supplier') {
+          sessionStorage.setItem('supplier_code', rj.code || 'supplier');
+          sessionStorage.setItem('supplier_name', rj.code || 'Supplier');
+        }
+      } catch {}
       // small delay to ensure cookie is applied on client before navigate
       setTimeout(()=>{ window.location.href = to; }, 300);
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }

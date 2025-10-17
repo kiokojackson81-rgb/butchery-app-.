@@ -99,8 +99,9 @@ export async function POST(req: Request) {
     }
 
     // supervisor / supplier — use lightweight role cookie only
-    const roleOutlet = (outlet || null) as string | null;
-    const res = NextResponse.json({ ok: true, role: roleKey, code: full || loose, outlet: roleOutlet, redirect: roleKey === "supplier" ? "/admin?tab=ops&opsTab=supply" : "/admin?tab=ops" });
+  const roleOutlet = (outlet || null) as string | null;
+  const redirect = roleKey === "supervisor" ? "/supervisor/dashboard" : roleKey === "supplier" ? "/supplier/dashboard" : "/admin";
+  const res = NextResponse.json({ ok: true, role: roleKey, code: full || loose, outlet: roleOutlet, redirect });
     res.headers.set("Set-Cookie", serializeRoleCookie({ role: roleKey, code: full || loose, outlet: roleOutlet }));
     return res;
   } catch (e) {
