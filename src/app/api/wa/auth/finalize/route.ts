@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canonFull, toE164DB, toGraphPhone } from "@/server/canon";
+import { canonFull as canonFullCode, normalizeCode } from "@/lib/codeNormalize";
 import { findPersonCodeTolerant } from "@/server/db_person";
 import { warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
@@ -42,15 +43,58 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
   const d = String(today.getDate()).padStart(2, "0");
   const tradingPeriodId = outletFinal ? `${y}-${m}-${d}@${outletFinal}` : null;
   if (role === "attendant") {
-    let scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } });
-    outletFinal = scope?.outletName ?? null;
+    // Align outlet resolution with login-link API for parity
+    // 1) Primary: AttendantScope
+    let scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } }).catch(() => null);
+    outletFinal = (scope as any)?.outletName ?? null;
+
+    // 2) Legacy assignment
+    if (!outletFinal) {
+      try {
+        const assign = await (prisma as any).attendantAssignment.findUnique({ where: { code: pc.code } });
+        outletFinal = (assign as any)?.outlet || null;
+      } catch {}
+    }
+
+    // 3) Settings mirror: attendant_scope
+    if (!outletFinal) {
+      try {
+        const row = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+        const map = (row as any)?.value || null;
+        if (map && typeof map === "object") {
+          const key = pc.code;
+          let entry = (map as any)[key]
+            || (map as any)[normalizeCode(key)]
+            || (map as any)[canonFullCode(key)]
+            || null;
+          if (!entry) {
+            for (const k of Object.keys(map)) {
+              if (normalizeCode(k) === normalizeCode(key)) { entry = (map as any)[k]; break; }
+            }
+          }
+          const out = entry && typeof entry === "object" ? String((entry as any)?.outlet || "").trim() : "";
+          if (out) outletFinal = out;
+        }
+      } catch {}
+    }
+
+    // 4) Settings mirror: admin_codes
+    if (!outletFinal) {
+      try {
+        const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+        const list: any[] = Array.isArray((row as any)?.value) ? (row as any).value : [];
+        const active = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
+        const byFull = active.find((p: any) => canonFullCode(p?.code || '') === canonFullCode(pc.code));
+        if (byFull?.outlet) outletFinal = String(byFull.outlet);
+      } catch {}
+    }
+
+    // 5) DRY fallback to avoid blocking local/dev
     if (!outletFinal) {
       if (!DRY) return { ok: false, error: "CODE_NOT_ASSIGNED" } as const;
-      // DRY-only: auto-create a scope assignment for tests
       try {
         scope = await (prisma as any).attendantScope.create({ data: { codeNorm: pc.code, outletName: "Test Outlet" } });
         outletFinal = scope.outletName;
-        // DRY-only: ensure a couple of sample products and attach to scope
         const ensureProd = async (key: string, name: string, unit = "kg", sellPrice = 0) => {
           const existed = await (prisma as any).product.findUnique({ where: { key } }).catch(() => null);
           if (!existed) await (prisma as any).product.create({ data: { key, name, unit, sellPrice, active: true } });
