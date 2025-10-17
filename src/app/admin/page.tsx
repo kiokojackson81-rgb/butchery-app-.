@@ -2159,7 +2159,45 @@ function QuickAdminTools() {
                         <td>{e.type}</td>
                         <td className="font-mono">{e.id}</td>
                         <td className="whitespace-pre-wrap">{e?.reason || ''}</td>
-                        <td className="font-mono whitespace-pre-wrap text-[10px]"><div>{JSON.stringify(e.before || {}, null, 2)}</div><div className="text-center">↓</div><div>{JSON.stringify(e.after || {}, null, 2)}</div></td>
+                        <td className="font-mono whitespace-pre-wrap text-[10px]">
+                          <div>{JSON.stringify(e.before || {}, null, 2)}</div>
+                          <div className="text-center">↓</div>
+                          <div>{JSON.stringify(e.after || {}, null, 2)}</div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              className="btn-mobile border rounded-lg px-2 py-1 text-[11px]"
+                              title="Restore to BEFORE snapshot"
+                              onClick={async ()=>{
+                                const rsn = window.prompt('Reason for restore (optional):', '');
+                                try {
+                                  const r = await fetch('/api/admin/history/edits/restore', {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ key: e.key, target: 'before', reason: rsn || undefined })
+                                  });
+                                  const j = await r.json().catch(()=>({ ok:false }));
+                                  if (!j?.ok) throw new Error(j?.error || 'Failed');
+                                  alert('Restored to BEFORE snapshot ✅');
+                                } catch (err:any) { alert(err?.message || 'Failed'); }
+                              }}
+                            >Restore (Before)</button>
+                            <button
+                              className="btn-mobile border rounded-lg px-2 py-1 text-[11px]"
+                              title="Restore to AFTER snapshot"
+                              onClick={async ()=>{
+                                const rsn = window.prompt('Reason for restore (optional):', '');
+                                try {
+                                  const r = await fetch('/api/admin/history/edits/restore', {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ key: e.key, target: 'after', reason: rsn || undefined })
+                                  });
+                                  const j = await r.json().catch(()=>({ ok:false }));
+                                  if (!j?.ok) throw new Error(j?.error || 'Failed');
+                                  alert('Restored to AFTER snapshot ✅');
+                                } catch (err:any) { alert(err?.message || 'Failed'); }
+                              }}
+                            >Restore (After)</button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                     {(!edits || edits.length === 0) && (
