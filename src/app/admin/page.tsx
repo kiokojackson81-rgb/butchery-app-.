@@ -37,8 +37,7 @@ type FixedExpense = {
 
 type AdminTab =
   | "outlets"
-  | "products"
-  | "pricebook"
+  | "pricing"
   | "ops"
   | "expenses"
   | "performance"
@@ -136,12 +135,18 @@ export default function AdminPage() {
   }, []);
 
   const [tab, setTab] = useState<AdminTab>("outlets");
+  const [pricingView, setPricingView] = useState<"global" | "outlet">("global");
   // Respect URL ?tab=... and ?opsTab=... on load
   useEffect(() => {
     const t = (searchParams.get("tab") || "").toLowerCase();
-    const allowedTabs = new Set<AdminTab>(["outlets","products","pricebook","ops","expenses","performance","data"]);
-    if (allowedTabs.has(t as AdminTab)) {
-      setTab(t as AdminTab);
+    // Back-compat: map legacy tabs to the new combined Pricing tab
+    if (t === "products") { setTab("pricing"); setPricingView("global"); }
+    else if (t === "pricebook") { setTab("pricing"); setPricingView("outlet"); }
+    else {
+      const allowedTabs = new Set<AdminTab>(["outlets","pricing","ops","expenses","performance","data"]);
+      if (allowedTabs.has(t as AdminTab)) {
+        setTab(t as AdminTab);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -976,8 +981,7 @@ export default function AdminPage() {
 
       <nav className="flex gap-2 mb-6 mobile-scroll-x">
         <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
-        <TabBtn active={tab==="products"}  onClick={() => setTab("products")}>Products & Prices</TabBtn>
-        <TabBtn active={tab==="pricebook"} onClick={() => setTab("pricebook")}>Outlet Pricebook</TabBtn>
+  <TabBtn active={tab==="pricing"}  onClick={() => setTab("pricing")}>Pricing</TabBtn>
         {/* Combined Ops: Supply View, Reports, Supply History */}
         <TabBtn active={tab==="ops"}       onClick={() => setTab("ops")}>Supply & Reports</TabBtn>
     <TabBtn active={tab==="expenses"}  onClick={() => setTab("expenses")}>Fixed Expenses</TabBtn>
@@ -1339,152 +1343,143 @@ export default function AdminPage() {
         </section>
       )}
 
-      {/* ---------- PRODUCTS (global) ---------- */}
-      {tab === "products" && (
+      {/* ---------- PRICING (combined) ---------- */}
+      {tab === "pricing" && (
         <section className="rounded-2xl border p-4">
-            <div className="flex items-center justify-between mb-3 mobile-scroll-x">
-            <h2 className="font-semibold">Products & Prices</h2>
-            <div className="flex gap-2">
-              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
-              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveProductsNow}>Submit / Save</button>
-              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>
-                Reset defaults
-              </button>
-            </div>
-          </div>
-
-          <div className="table-wrap">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2">Key</th>
-                  <th>Name</th>
-                  <th>Unit</th>
-                  <th>Sell Price (Ksh)</th>
-                  <th>Status</th>
-                  <th style={{width: 1}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.length === 0 && (
-                  <tr><td className="py-3 text-gray-500" colSpan={6}>No products yet.</td></tr>
-                )}
-                {products.map(p => (
-                  <tr key={p.id} className="border-b">
-                    <td className="py-2">
-       <input className="input-mobile border rounded-xl p-2 w-44"
-                             value={p.key}
-                             onChange={e => updateProduct(p.id, { key: e.target.value })}
-                             placeholder="unique key (e.g., beef)"/>
-                    </td>
-                    <td>
-       <input className="input-mobile border rounded-xl p-2 w-56"
-                             value={p.name}
-                             onChange={e => updateProduct(p.id, { name: e.target.value })}
-                             placeholder="Display name"/>
-                    </td>
-                    <td>
-          <select className="input-mobile border rounded-xl p-2"
-                              value={p.unit}
-                              onChange={e => updateProduct(p.id, { unit: e.target.value as Unit })}>
-                        <option value="kg">kg</option>
-                        <option value="pcs">pcs</option>
-                      </select>
-                    </td>
-                    <td>
-       <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1}
-                             value={p.sellPrice}
-                             onChange={e => updateProduct(p.id, { sellPrice: n(e.target.value) })}
-                             placeholder="Ksh"/>
-                    </td>
-                    <td>
-                      <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={p.active}
-                               onChange={e => updateProduct(p.id, { active: e.target.checked })}/>
-                        Active
-                      </label>
-                    </td>
-                    <td>
-                        <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeProduct(p.id)}>✕</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="text-xs text-gray-600 mt-2">
-              These prices are global defaults; per-outlet overrides live in the Outlet Pricebook tab.
-            </p>
-          </div>
-        </section>
-      )}
-
-      {/* ---------- OUTLET PRICEBOOK ---------- */}
-      {tab === "pricebook" && (
-        <section className="rounded-2xl border p-4">
-          <div className="flex items-center justify-between mb-3 mobile-scroll-x">
-            <h2 className="font-semibold">Outlet Pricebook</h2>
+          <div className="flex items-center justify-between mb-4 mobile-scroll-x">
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-600">Outlet</label>
-              <select
-                className="input-mobile border rounded-xl p-2 text-sm"
-                value={pbOutlet}
-                onChange={(e)=>setPbOutlet(e.target.value)}
-              >
-                <option value="">— select outlet —</option>
-                {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
-              </select>
-              <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={savePricebook}>Save</button>
+              <h2 className="font-semibold">Pricing</h2>
+              <span className="text-xs text-gray-400">Manage global products and per-outlet overrides</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className={`btn-mobile border rounded-xl px-3 py-1.5 text-sm ${pricingView === 'global' ? 'bg-black text-white' : ''}`}
+                onClick={()=>setPricingView('global')}
+                title="Global products & default prices"
+              >Global</button>
+              <button
+                className={`btn-mobile border rounded-xl px-3 py-1.5 text-sm ${pricingView === 'outlet' ? 'bg-black text-white' : ''}`}
+                onClick={()=>setPricingView('outlet')}
+                title="Per-outlet pricebook overrides"
+              >Outlet</button>
             </div>
           </div>
 
-          {!pbOutlet ? (
-            <p className="text-sm text-gray-600">Choose an outlet to edit its prices & availability.</p>
-          ) : (
-            <>
-              <div className="flex gap-2 mb-3 mobile-scroll-x">
-                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>copyGlobalToOutlet(pbOutlet)}>Copy from Global</button>
-                <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>resetOutletPricebook(pbOutlet)}>Reset this Outlet</button>
+          {pricingView === 'global' && (
+            <div>
+              <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+                <h3 className="font-medium">Products & Prices</h3>
+                <div className="flex gap-2">
+                  <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addProduct}>+ Add product</button>
+                  <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={saveProductsNow}>Submit / Save</button>
+                  <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => setProducts(seedDefaultProducts())}>Reset defaults</button>
+                </div>
               </div>
               <div className="table-wrap">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left border-b">
-                      <th className="py-2">Product</th>
+                      <th className="py-2">Key</th>
+                      <th>Name</th>
+                      <th>Unit</th>
                       <th>Sell Price (Ksh)</th>
-                      <th>Enabled</th>
+                      <th>Status</th>
+                      <th style={{width: 1}}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {products.length === 0 && (
-                      <tr><td className="py-3 text-gray-500" colSpan={3}>No products defined.</td></tr>
+                      <tr><td className="py-3 text-gray-500" colSpan={6}>No products yet.</td></tr>
                     )}
-                    {products.map(p => {
-                      const row = getPBRow(pbOutlet, p.key);
-                      return (
-                        <tr key={`pb-${p.id}`} className="border-b">
-                          <td className="py-2">{p.name} <span className="text-xs text-gray-500">({p.key})</span></td>
-                          <td>
-                            <input
-                              className="input-mobile border rounded-xl p-2 w-36"
-                              type="number" min={0} step={1}
-                              value={row.sellPrice}
-                              onChange={e=>setPBRow(pbOutlet, p.key, { sellPrice: n(e.target.value) })}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={row.active}
-                              onChange={e=>setPBRow(pbOutlet, p.key, { active: e.target.checked })}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {products.map(p => (
+                      <tr key={p.id} className="border-b">
+                        <td className="py-2">
+                          <input className="input-mobile border rounded-xl p-2 w-44" value={p.key} onChange={e => updateProduct(p.id, { key: e.target.value })} placeholder="unique key (e.g., beef)"/>
+                        </td>
+                        <td>
+                          <input className="input-mobile border rounded-xl p-2 w-56" value={p.name} onChange={e => updateProduct(p.id, { name: e.target.value })} placeholder="Display name"/>
+                        </td>
+                        <td>
+                          <select className="input-mobile border rounded-xl p-2" value={p.unit} onChange={e => updateProduct(p.id, { unit: e.target.value as Unit })}>
+                            <option value="kg">kg</option>
+                            <option value="pcs">pcs</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1} value={p.sellPrice} onChange={e => updateProduct(p.id, { sellPrice: n(e.target.value) })} placeholder="Ksh"/>
+                        </td>
+                        <td>
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={p.active} onChange={e => updateProduct(p.id, { active: e.target.checked })}/>
+                            Active
+                          </label>
+                        </td>
+                        <td>
+                          <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={() => removeProduct(p.id)}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
+                <p className="text-xs text-gray-600 mt-2">These prices are global defaults; per-outlet overrides live in the Outlet view.</p>
               </div>
-            </>
+            </div>
+          )}
+
+          {pricingView === 'outlet' && (
+            <div>
+              <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+                <h3 className="font-medium">Outlet Pricebook</h3>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600">Outlet</label>
+                  <select className="input-mobile border rounded-xl p-2 text-sm" value={pbOutlet} onChange={(e)=>setPbOutlet(e.target.value)}>
+                    <option value="">— select outlet —</option>
+                    {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+                  </select>
+                  <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={savePricebook}>Save</button>
+                </div>
+              </div>
+              {!pbOutlet ? (
+                <p className="text-sm text-gray-600">Choose an outlet to edit its prices & availability.</p>
+              ) : (
+                <>
+                  <div className="flex gap-2 mb-3 mobile-scroll-x">
+                    <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>copyGlobalToOutlet(pbOutlet)}>Copy from Global</button>
+                    <button className="btn-mobile border rounded-xl px-3 py-1.5 text-sm" onClick={()=>resetOutletPricebook(pbOutlet)}>Reset this Outlet</button>
+                  </div>
+                  <div className="table-wrap">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left border-b">
+                          <th className="py-2">Product</th>
+                          <th>Sell Price (Ksh)</th>
+                          <th>Enabled</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {products.length === 0 && (
+                          <tr><td className="py-3 text-gray-500" colSpan={3}>No products defined.</td></tr>
+                        )}
+                        {products.map(p => {
+                          const row = getPBRow(pbOutlet, p.key);
+                          return (
+                            <tr key={`pb-${p.id}`} className="border-b">
+                              <td className="py-2">{p.name} <span className="text-xs text-gray-500">({p.key})</span></td>
+                              <td>
+                                <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1} value={row.sellPrice} onChange={e=>setPBRow(pbOutlet, p.key, { sellPrice: n(e.target.value) })} />
+                              </td>
+                              <td>
+                                <input type="checkbox" checked={row.active} onChange={e=>setPBRow(pbOutlet, p.key, { active: e.target.checked })} />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </section>
       )}
