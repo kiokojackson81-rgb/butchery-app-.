@@ -1,9 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-// GPT has been removed; skip this suite by default to avoid false failures.
-test.describe('GPT-only specs (disabled)', () => {
-  test.skip(true, 'GPT/OOC routing removed; suite disabled.');
-});
+// Disable this legacy spec file entirely. Use wa.gpt-only.smoke.spec.ts instead.
+test.skip(true, 'GPT/OOC legacy spec disabled; use wa.gpt-only.smoke.spec.ts');
 
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 const DRY = (process.env.WA_DRY_RUN === "true") || true;
