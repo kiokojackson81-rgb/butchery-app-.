@@ -1740,6 +1740,8 @@ function QuickAdminTools() {
   const [outletOptions, setOutletOptions] = React.useState<Array<{ id: string; name: string; active: boolean }>>([]);
   const [peopleOptions, setPeopleOptions] = React.useState<Array<{ code: string; name?: string; role: string; active: boolean }>>([]);
   const [loadingLists, setLoadingLists] = React.useState<boolean>(false);
+  const [wipeModal, setWipeModal] = React.useState<null | { type: 'outlet' | 'attendant'; target: string }>(null);
+  const [wipeAck, setWipeAck] = React.useState<string>("");
 
   // Load dropdown lists for outlets and person codes
   React.useEffect(() => {
@@ -1835,29 +1837,37 @@ function QuickAdminTools() {
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
-  const wipeInactiveAttendant = async () => {
+  const wipeInactiveAttendant = () => {
     const c = (code || '').trim();
     if (!c) { setMsg('Pick code'); return; }
-    if (!confirm(`Wipe data for attendant code ${c}? This removes sessions, assignments, and attendant record. Only if inactive.`)) return;
-    setBusy(true); setMsg('');
-    try {
-      const r = await fetch('/api/admin/wipe/attendant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ code: c, onlyIfInactive: true }) });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || 'Failed');
-      setMsg(`Wiped attendant ${j.code}. Deleted: ${JSON.stringify(j.deleted)}`);
-    } catch (e:any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+    setWipeAck("");
+    setWipeModal({ type: 'attendant', target: c });
   };
 
-  const wipeInactiveOutlet = async () => {
+  const wipeInactiveOutlet = () => {
     const on = (outlet || '').trim();
     if (!on) { setMsg('Pick outlet'); return; }
-    if (!confirm(`Wipe per-outlet data for ${on}? Only if outlet is inactive.`)) return;
-    setBusy(true); setMsg('');
+    setWipeAck("");
+    setWipeModal({ type: 'outlet', target: on });
+  };
+
+  const performWipe = async () => {
+    if (!wipeModal) return;
+    const target = wipeModal.target;
+    setBusy(true); setMsg("");
     try {
-      const r = await fetch('/api/admin/wipe/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ outletName: on, onlyIfInactive: true }) });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || 'Failed');
-      setMsg(`Wiped outlet ${j.outletName}. Deleted: ${JSON.stringify(j.deleted)}`);
+      if (wipeModal.type === 'attendant') {
+        const r = await fetch('/api/admin/wipe/attendant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ code: target, onlyIfInactive: true }) });
+        const j = await r.json().catch(()=>({ ok:false }));
+        if (!j?.ok) throw new Error(j?.error || 'Failed');
+        setMsg(`Wiped attendant ${j.code}. Deleted: ${JSON.stringify(j.deleted)}`);
+      } else {
+        const r = await fetch('/api/admin/wipe/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ outletName: target, onlyIfInactive: true }) });
+        const j = await r.json().catch(()=>({ ok:false }));
+        if (!j?.ok) throw new Error(j?.error || 'Failed');
+        setMsg(`Wiped outlet ${j.outletName}. Deleted: ${JSON.stringify(j.deleted)}`);
+      }
+      setWipeModal(null);
     } catch (e:any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
@@ -1959,6 +1969,75 @@ function QuickAdminTools() {
         </div>
       </div>
       {msg && <div className="text-sm text-gray-700">{msg}</div>}
+
+      {/* Wipe confirmation modal */}
+      {wipeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-[92vw] max-w-xl p-4">
+            <h4 className="font-semibold mb-2">
+              {wipeModal.type === 'attendant' ? 'Confirm Wipe: Attendant' : 'Confirm Wipe: Outlet'}
+            </h4>
+            <p className="text-sm text-gray-700 mb-3">
+              You are about to permanently delete data for
+              <span className="font-mono font-semibold"> {wipeModal.target}</span>.
+              This action cannot be undone.
+            </p>
+            {wipeModal.type === 'attendant' ? (
+              <div className="text-sm text-gray-700 mb-3">
+                <div className="font-medium mb-1">This will remove:</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>WhatsApp sessions for this code</li>
+                  <li>Phone mapping for this code</li>
+                  <li>Assignments and product scope</li>
+                  <li>Login codes</li>
+                  <li>Deposits recorded by code</li>
+                  <li>Attendant sessions, shifts, KPIs</li>
+                  <li>Attendant record (and unlink message logs)</li>
+                  <li>PersonCode will be deactivated</li>
+                </ul>
+                <p className="text-xs text-gray-500 mt-2">Note: Wipe proceeds only if the person code is inactive.</p>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-700 mb-3">
+                <div className="font-medium mb-1">This will remove per‑outlet data:</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>ActivePeriod pointer</li>
+                  <li>Supply opening rows</li>
+                  <li>Attendant closings, expenses, deposits, till counts</li>
+                  <li>Pricebook rows and attendant assignments</li>
+                  <li>Review items</li>
+                  <li>Outlet performance and product supply stats</li>
+                  <li>Supply recommendations and interval performance</li>
+                  <li>Day close periods and supervisor commissions</li>
+                  <li>Outlet targets and waste thresholds</li>
+                  <li>Settings keys referencing this outlet</li>
+                  <li>Outlet will be deactivated and attendants unlinked</li>
+                </ul>
+                <p className="text-xs text-gray-500 mt-2">Note: Wipe proceeds only if the outlet is inactive.</p>
+              </div>
+            )}
+            <div className="rounded-xl border p-3 bg-gray-50 mb-3">
+              <label className="block text-xs text-gray-600 mb-1">Type the exact {wipeModal.type === 'attendant' ? 'code' : 'outlet name'} to confirm</label>
+              <input
+                className="input-mobile border rounded-xl p-2 w-full font-mono"
+                placeholder={wipeModal.target}
+                value={wipeAck}
+                onChange={e=>setWipeAck(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={()=>setWipeModal(null)} disabled={busy}>Cancel</button>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm bg-red-600 text-white disabled:opacity-50"
+                onClick={performWipe}
+                disabled={busy || wipeAck.trim() !== wipeModal.target}
+              >
+                Proceed & Wipe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
