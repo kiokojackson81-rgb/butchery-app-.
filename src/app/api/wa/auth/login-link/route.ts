@@ -10,8 +10,11 @@ export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export 
 
 function businessDeepLink(): string | null {
   const num = (process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || "").replace(/[^0-9]/g, "");
-  if (!num) return null;
-  return `https://wa.me/${num}`;
+  if (num) return `https://wa.me/${num}`;
+  // DRY/dev fallback so local testing doesn’t hard fail due to missing public phone
+  const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+  if (DRY) return `https://wa.me/254700000000`;
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -23,6 +26,24 @@ export async function POST(req: Request) {
 
     // 1) Try tolerant DB match (active-only)
     let pc: any = await findPersonCodeTolerant(full).catch((e:any) => { if (/ambiguous/i.test(String(e?.message))) throw Object.assign(new Error("AMBIGUOUS_CODE"), { code: "AMBIGUOUS_CODE" }); return null; });
+
+    // 1b) DRY/dev fallback: auto-seed a minimal PersonCode if not found to allow local flow
+    if (!pc) {
+      const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+      if (DRY && (full || num)) {
+        try {
+          const codeSeed = full || (num ? `dev${num}` : "");
+          if (codeSeed) {
+            const existed = await (prisma as any).personCode.findUnique({ where: { code: codeSeed } }).catch(() => null);
+            if (existed) {
+              pc = existed;
+            } else {
+              pc = await (prisma as any).personCode.create({ data: { code: codeSeed, role: "attendant", active: true } });
+            }
+          }
+        } catch {}
+      }
+    }
 
     // 2) If not found, fall back to Settings.admin_codes mirror and re-sync DB to avoid stale inactive rows
     if (!pc) {
@@ -51,7 +72,15 @@ export async function POST(req: Request) {
       } catch {}
     }
 
-    if (!pc) return NextResponse.json({ ok: false, code: "INVALID_CODE", message: "That code wasn’t found or is inactive. Check with Admin." }, { status: 404 });
+    // 2b) DRY/dev: if still not found (or DB unavailable), synthesize a minimal pc to keep local testing unblocked
+    if (!pc) {
+      const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+      if (DRY && (full || num)) {
+        pc = { code: full || (num ? `dev${num}` : ""), role: "attendant", active: true };
+      }
+    }
+
+  if (!pc) return NextResponse.json({ ok: false, code: "INVALID_CODE", message: "That code wasn’t found or is inactive. Check with Admin." }, { status: 404 });
 
     const role = String(pc.role || "attendant");
     let outlet: string | null = null;
@@ -113,6 +142,8 @@ export async function POST(req: Request) {
             const created = await (prisma as any).attendantScope.create({ data: { codeNorm: pc.code, outletName: "Test Outlet" } });
             outlet = created?.outletName || null;
           } catch {}
+          // If DB is unavailable, still assign a synthetic outlet for dev flows
+          if (!outlet) outlet = "Test Outlet";
         }
       }
 
@@ -122,14 +153,22 @@ export async function POST(req: Request) {
     // If wa phone provided, attempt direct finalize and bind
     if (wa) {
       try { await logOutbound({ direction: "in", payload: { event: "login.page.submit", code: full || num, phone_guess: wa }, status: "INFO" }); } catch {}
-      const fin = await finalizeLoginDirect(wa, pc.code);
-      if (!(fin as any)?.ok) {
+      let finOk = false;
+      try {
+        const fin = await finalizeLoginDirect(wa, pc.code);
+        finOk = !!(fin as any)?.ok;
+      } catch {
+        finOk = false; // dev fallback: ignore and proceed
+      }
+      if (!finOk) {
         // fall back to creating a pending session for webhook to finalize on first inbound
-        await (prisma as any).waSession.upsert({
-          where: { phoneE164: `+PENDING:${pc.code}` },
-          update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-          create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-        }).catch(() => {});
+        try {
+          await (prisma as any).waSession.upsert({
+            where: { phoneE164: `+PENDING:${pc.code}` },
+            update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+            create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+          });
+        } catch {}
       } else {
         // Finalize already triggered safeSendGreetingOrMenu. Avoid double-send here.
         try { await logOutbound({ direction: "in", payload: { event: "login.finalize.ok", phone: wa, role, outlet }, status: "INFO", type: "LOGIN_FINALIZE_OK" }); } catch {}
@@ -141,8 +180,10 @@ export async function POST(req: Request) {
         const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
         const mapped = String(pm?.phoneE164 || "").trim();
         if (mapped) {
-          const fin2 = await finalizeLoginDirect(mapped, pc.code);
-          finalized = !!(fin2 as any)?.ok;
+          try {
+            const fin2 = await finalizeLoginDirect(mapped, pc.code);
+            finalized = !!(fin2 as any)?.ok;
+          } catch { finalized = false; }
           if (finalized) {
             try { await logOutbound({ direction: "in", payload: { event: "login.finalize.ok.via_mapping", phone: mapped, role, outlet }, status: "INFO", type: "LOGIN_FINALIZE_OK" }); } catch {}
           }
@@ -150,11 +191,13 @@ export async function POST(req: Request) {
       } catch {}
       if (!finalized) {
         // Otherwise, create or refresh a pending session so webhook can bind on first inbound
-        await (prisma as any).waSession.upsert({
-          where: { phoneE164: `+PENDING:${pc.code}` },
-          update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-          create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-        }).catch(() => {});
+        try {
+          await (prisma as any).waSession.upsert({
+            where: { phoneE164: `+PENDING:${pc.code}` },
+            update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+            create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+          });
+        } catch {}
       }
     }
 
