@@ -1,0 +1,60 @@
+name: DB maintenance (Prisma migrate)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'What to do'
+        required: true
+        default: 'status+deploy'
+        type: choice
+        options:
+          - status
+          - status+deploy
+          - resolve-commission+deploy
+
+permissions:
+  contents: read
+
+jobs:
+  prisma:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED || secrets.DATABASE_URL }}
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma migrate status
+        run: npx prisma migrate status
+
+      - name: Resolve commission migration (P3009)
+        if: ${{ inputs.action == 'resolve-commission+deploy' }}
+        run: |
+          npx prisma migrate resolve --rolled-back "20251013_add_supervisor_commission" || true
+
+      - name: Deploy migrations
+        if: ${{ inputs.action != 'status' }}
+        run: |
+          npx prisma migrate deploy || echo "No migrations to apply"
+
+      - name: Post job summary
+        if: always()
+        run: |
+          echo "### DB maintenance job status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Action: ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "DB: using secrets.DATABASE_URL (${#secrets.DATABASE_URL} chars)" >> $GITHUB_STEP_SUMMARY
