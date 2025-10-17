@@ -914,9 +914,15 @@ export default function AttendantDashboardPage() {
                           const t = Number(supplyTodayLc[lc] || 0);
                           const eff = y + t;
                           if (eff <= 0) return null;
+                          const delta = Math.abs(eff - Number(r.opening || 0));
+                          const warn = delta > 0.01;
+                          const title = `Item: ${r.key}\nYesterday (${prevDate(stockDate)}): ${fmt(y)} ${r.unit}\nToday supply (${stockDate}): ${fmt(t)} ${r.unit}\n= OpeningEff: ${fmt(eff)} ${r.unit}\nDisplayed Opening: ${fmt(Number(r.opening || 0))} ${r.unit}${warn ? `\nΔ: ${fmt(delta)} ${r.unit}` : ''}`;
                           return (
-                            <div className="text-[10px] text-gray-500 mt-0.5">
-                              OpeningEff = {fmt(y)} + {fmt(t)}
+                            <div
+                              className={"text-[10px] mt-0.5 " + (warn ? "text-amber-600" : "text-gray-500")}
+                              title={title}
+                            >
+                              OpeningEff = {fmt(y)} + {fmt(t)}{warn ? " • check" : ""}
                             </div>
                           );
                         })()}
