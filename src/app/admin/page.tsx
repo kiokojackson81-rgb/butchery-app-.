@@ -2120,6 +2120,137 @@ function QuickAdminTools() {
           </div>
         </div>
       )}
+
+      {/* Edit Entries */}
+      <div className="rounded-2xl border p-3 mt-3">
+        <h4 className="font-semibold mb-3">Edit Entries (Admin)</h4>
+        <div className="grid sm:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Date</label>
+            <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Outlet</label>
+            {outletOptions.length > 0 ? (
+              <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+                <option value="">Pick outlet…</option>
+                {outletOptions.map(o => (
+                  <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+            )}
+          </div>
+          <div className="flex items-end">
+            <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full" onClick={async()=>{
+              if (!date || !outlet) { setMsg('Pick date and outlet'); return; }
+              try {
+                const [rt, rc] = await Promise.all([
+                  fetch(`/api/admin/day/txns?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }),
+                  fetch(`/api/admin/day/closings?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }),
+                ]);
+                const jt = await rt.json().catch(()=>({ ok:false }));
+                const jc = await rc.json().catch(()=>({ ok:false }));
+                ;(window as any).__ADMIN_EDIT_CTX__ = { deposits: jt?.deposits||[], expenses: jt?.expenses||[], closings: jc?.closings||[] };
+                setMsg('Loaded entries. Scroll below to edit.');
+              } catch (e:any) { setMsg(e?.message || 'Failed'); }
+            }}>Load</button>
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border p-2">
+            <h5 className="font-medium mb-2">Deposits</h5>
+            <AdminEditList kind="deposit" />
+          </div>
+          <div className="rounded-xl border p-2">
+            <h5 className="font-medium mb-2">Expenses</h5>
+            <AdminEditList kind="expense" />
+          </div>
+          <div className="rounded-xl border p-2">
+            <h5 className="font-medium mb-2">Closings</h5>
+            <AdminEditList kind="closing" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminEditList(props: { kind: 'deposit'|'expense'|'closing' }) {
+  const { kind } = props;
+  const [rows, setRows] = React.useState<any[]>([]);
+  const [tick, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const ctx = (window as any).__ADMIN_EDIT_CTX__ || {};
+    const r = kind === 'deposit' ? (ctx.deposits||[]) : kind === 'expense' ? (ctx.expenses||[]) : (ctx.closings||[]);
+    setRows(r);
+  }, [tick, kind]);
+
+  const save = async (id: string, patch: any) => {
+    try {
+      const url = kind === 'deposit' ? '/api/admin/edit/deposit' : kind === 'expense' ? '/api/admin/edit/expense' : '/api/admin/edit/closing';
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...patch }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setTick(x=>x+1);
+    } catch (e:any) { alert(e?.message || 'Failed'); }
+  };
+
+  if (!rows || rows.length === 0) return <div className="text-xs text-gray-500">No entries loaded yet.</div>;
+
+  return (
+    <div className="space-y-2 max-h-64 overflow-auto">
+      {rows.map((r: any) => (
+        <div key={r.id} className="rounded-lg border p-2 text-xs space-y-2">
+          <div className="text-gray-500">id: <span className="font-mono">{r.id}</span></div>
+          {kind === 'deposit' && (
+            <div className="grid grid-cols-2 gap-2">
+              <label>
+                <div>Amount</div>
+                <input className="input-mobile border rounded p-1 w-full" type="number" defaultValue={r.amount} onBlur={(e)=>save(r.id, { amount: Number(e.target.value) })} />
+              </label>
+              <label>
+                <div>Note</div>
+                <input className="input-mobile border rounded p-1 w-full" defaultValue={r.note||''} onBlur={(e)=>save(r.id, { note: e.target.value })} />
+              </label>
+              <label className="col-span-2">
+                <div>Status</div>
+                <select className="input-mobile border rounded p-1 w-full" defaultValue={r.status||'PENDING'} onChange={(e)=>save(r.id, { status: e.target.value })}>
+                  <option value="VALID">VALID</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="INVALID">INVALID</option>
+                </select>
+              </label>
+            </div>
+          )}
+          {kind === 'expense' && (
+            <div className="grid grid-cols-2 gap-2">
+              <label>
+                <div>Amount</div>
+                <input className="input-mobile border rounded p-1 w-full" type="number" defaultValue={r.amount} onBlur={(e)=>save(r.id, { amount: Number(e.target.value) })} />
+              </label>
+              <label>
+                <div>Name</div>
+                <input className="input-mobile border rounded p-1 w-full" defaultValue={r.name||''} onBlur={(e)=>save(r.id, { name: e.target.value })} />
+              </label>
+            </div>
+          )}
+          {kind === 'closing' && (
+            <div className="grid grid-cols-2 gap-2">
+              <label>
+                <div>Closing Qty</div>
+                <input className="input-mobile border rounded p-1 w-full" type="number" step="0.01" defaultValue={r.closingQty} onBlur={(e)=>save(r.id, { closingQty: Number(e.target.value) })} />
+              </label>
+              <label>
+                <div>Waste Qty</div>
+                <input className="input-mobile border rounded p-1 w-full" type="number" step="0.01" defaultValue={r.wasteQty} onBlur={(e)=>save(r.id, { wasteQty: Number(e.target.value) })} />
+              </label>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
