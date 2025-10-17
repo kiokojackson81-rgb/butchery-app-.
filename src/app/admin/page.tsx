@@ -1778,6 +1778,22 @@ function QuickAdminTools() {
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
+  const startNewPeriod = async () => {
+    if (!outlet) { setMsg("Pick outlet"); return; }
+    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
+    if (!confirm(`Start a new trading period now for ${outlet}?`)) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/admin/period/start-force?key=${encodeURIComponent(statusKey)}` , {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ outlet })
+      });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`New period started for ${j.outlet} (${j.date})`);
+    } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
   const clearWaSessions = async () => {
     if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
     if (!phone && !code) { setMsg("Enter phone or code to clear sessions"); return; }
@@ -1811,6 +1827,7 @@ function QuickAdminTools() {
       </div>
       <div className="flex items-center gap-2">
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
+        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={startNewPeriod} disabled={busy}>Start New Period Now</button>
       </div>
       <div className="grid sm:grid-cols-3 gap-3">
         <label className="text-sm">
