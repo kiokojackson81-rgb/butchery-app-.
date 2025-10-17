@@ -95,6 +95,16 @@ jobs:
           echo "==== dev.log (tail) ====" && tail -n 200 dev.log || true
           exit 1
 
+      - name: Debug - show commit and test header
+        run: |
+          echo "Commit SHA:" $(git rev-parse HEAD)
+          echo "First lines of playwright/wa.gpt-only.spec.ts:" 
+          sed -n '1,60p' playwright/wa.gpt-only.spec.ts | sed -n '1,60p'
+
+      - name: Debug - show server flags endpoint
+        run: |
+          curl -fsS http://localhost:3002/api/wa/dev/flags || true
+
       - name: Run Playwright (GPT-only)
         run: npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line,html --workers=1
 
