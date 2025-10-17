@@ -26,13 +26,9 @@ async function resolveOutletRow(outletName?: string | null) {
 export async function POST(req: Request) {
   try {
     const url = new URL(req.url);
-    const key = url.searchParams.get("key") || req.headers.get("x-status-key") || "";
-    const required = process.env.STATUS_PUBLIC_KEY || process.env.NEXT_PUBLIC_STATUS_PUBLIC_KEY || "";
-    if (!required || key !== required) {
-      return NextResponse.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
-    }
+    // Previously required STATUS_PUBLIC_KEY via query/header; removed to streamline admin Login-as.
 
-    const { role, code, outlet } = (await req.json().catch(() => ({}))) as { role?: Role; code?: string; outlet?: string };
+  const { role, code, outlet } = (await req.json().catch(() => ({}))) as { role?: Role; code?: string; outlet?: string };
     const roleKey = String(role || "").toLowerCase() as Role;
     const full = canonFull(code || "");
     const loose = canonLoose(code || "");

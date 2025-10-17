@@ -1173,16 +1173,9 @@ export default function AdminPage() {
                             const role = c.role;
                             const codeVal = (c.code || '').trim();
                             if (!codeVal) { alert('No code'); return; }
-                            let key = '';
-                            try { key = sessionStorage.getItem('status_public_key') || ''; } catch {}
-                            if (!key) {
-                              const input = window.prompt('Enter STATUS_PUBLIC_KEY to continue:', '');
-                              if (!input) return;
-                              key = input; try { sessionStorage.setItem('status_public_key', input); } catch {}
-                            }
                             const outletName = role === 'attendant' ? (scope[canonFull(codeVal)]?.outlet || '') : '';
                             try {
-                              const r = await fetch(`/api/admin/impersonate?key=${encodeURIComponent(key)}`, {
+                              const r = await fetch(`/api/admin/impersonate`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
                                 body: JSON.stringify({ role, code: codeVal, outlet: outletName || undefined })
                               });
@@ -1583,65 +1576,6 @@ export default function AdminPage() {
       {/* ---------- DATA ---------- */}
       {tab === "data" && (
         <section className="rounded-2xl border p-4">
-          <h2 className="font-semibold mb-3">Backup / Restore</h2>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="rounded-xl border p-3">
-              <h3 className="font-medium mb-2">Current Settings (read-only)</h3>
-              <textarea className="w-full h-64 border rounded-xl p-2 text-xs" readOnly value={payload} />
-              <div className="mt-2 flex gap-2 mobile-scroll-x">
-                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={exportJSON}>Download JSON</button>
-                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={resetDefaults}>Reset Defaults</button>
-                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={clearAll}>Clear All</button>
-                {/* Thin persistence helpers */}
-                <button
-                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-                  title="Push all admin keys to database"
-                  onClick={async () => {
-                    try { await pushAllToDB(); alert("Pushed all admin settings to DB ✅"); }
-                    catch { alert("Failed to push to DB. Check network/DB."); }
-                  }}
-                >
-                  Force Sync to DB
-                </button>
-                <button
-                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-                  title="Reload admin keys from database into localStorage"
-                  onClick={async () => {
-                    try { await hydrateLocalStorageFromDB(); alert("Hydrated from DB ✅. Reload to reflect in UI."); }
-                    catch { alert("Failed to hydrate from DB. Check network/DB."); }
-                  }}
-                >
-                  Refresh from DB
-                </button>
-                <button
-                  className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-                  title="Check DB persistence health"
-                  onClick={async () => {
-                    try {
-                      const r = await fetch("/api/admin/persistence/health", { cache: "no-store" });
-                      const j = await r.json().catch(()=>null as any);
-                      alert("Health: " + JSON.stringify(j));
-                    } catch {}
-                  }}
-                >
-                  Check DB Health
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-3">
-              <h3 className="font-medium mb-2">Import Settings</h3>
-              <textarea className="w-full h-64 border rounded-xl p-2 text-xs"
-                        placeholder='Paste JSON here…'
-                        value={importText}
-                        onChange={e => setImportText(e.target.value)} />
-              <div className="mt-2">
-                <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={importJSON}>Import JSON</button>
-              </div>
-            </div>
-          </div>
-
           {/* Admin WhatsApp */}
           <div className="rounded-xl border p-3 mt-4">
             <h3 className="font-medium mb-2">Admin WhatsApp</h3>
@@ -1795,20 +1729,15 @@ function QuickAdminTools() {
   const [msg, setMsg] = React.useState<string>("");
 
   // Persist STATUS_PUBLIC_KEY so other UI (e.g., Login as buttons) can reuse it
-  React.useEffect(() => {
-    try {
-      const k = sessionStorage.getItem("status_public_key") || "";
-      if (k) setStatusKey(k);
-    } catch {}
-  }, []);
+  // No longer requiring STATUS_PUBLIC_KEY for impersonation.
+  React.useEffect(() => {}, []);
 
   const clearDayData = async () => {
     if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
-    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
     if (!confirm(`Clear data for ${outlet} — ${date}? This deletes opening, closings, expenses, deposits, till and resets locks.`)) return;
     setBusy(true); setMsg("");
     try {
-      const r = await fetch(`/api/admin/data/clear?key=${encodeURIComponent(statusKey)}` , {
+      const r = await fetch(`/api/admin/data/clear` , {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
         body: JSON.stringify({ outlet, date })
       });
@@ -1820,11 +1749,10 @@ function QuickAdminTools() {
 
   const startNewPeriod = async () => {
     if (!outlet) { setMsg("Pick outlet"); return; }
-    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
     if (!confirm(`Start a new trading period now for ${outlet}?`)) return;
     setBusy(true); setMsg("");
     try {
-      const r = await fetch(`/api/admin/period/start-force?key=${encodeURIComponent(statusKey)}` , {
+      const r = await fetch(`/api/admin/period/start-force` , {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
         body: JSON.stringify({ outlet })
       });
@@ -1835,11 +1763,10 @@ function QuickAdminTools() {
   };
 
   const clearWaSessions = async () => {
-    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
     if (!phone && !code) { setMsg("Enter phone or code to clear sessions"); return; }
     setBusy(true); setMsg("");
     try {
-      const r = await fetch(`/api/admin/wa-session/clear?key=${encodeURIComponent(statusKey)}` , {
+      const r = await fetch(`/api/admin/wa-session/clear` , {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
         body: JSON.stringify({ phone: phone || undefined, code: code || undefined })
       });
@@ -1850,12 +1777,11 @@ function QuickAdminTools() {
   };
 
   const impersonate = async () => {
-    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
     const impersonateCode = (code || "").trim();
     if (!impersonateCode) { setMsg("Enter code to impersonate"); return; }
     setBusy(true); setMsg("");
     try {
-      const r = await fetch(`/api/admin/impersonate?key=${encodeURIComponent(statusKey)}`, {
+      const r = await fetch(`/api/admin/impersonate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
         body: JSON.stringify({ role: impRole, code: impersonateCode, outlet: outlet || undefined })
       });
@@ -1879,11 +1805,7 @@ function QuickAdminTools() {
           <div className="text-gray-600 mb-1">Date</div>
           <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
         </label>
-        <label className="text-sm">
-          <div className="text-gray-600 mb-1">STATUS_PUBLIC_KEY</div>
-          <input className="input-mobile border rounded-xl p-2 w-full font-mono" placeholder="paste runtime key" value={statusKey}
-                 onChange={e=>{ setStatusKey(e.target.value); try { sessionStorage.setItem("status_public_key", e.target.value || ""); } catch {} }} />
-        </label>
+        {/* STATUS_PUBLIC_KEY no longer required for impersonation */}
       </div>
       <div className="flex items-center gap-2">
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
@@ -1927,7 +1849,7 @@ function QuickAdminTools() {
             <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={impersonate} disabled={busy}>Login as</button>
           </div>
         </div>
-        <p className="text-xs text-gray-600 mt-2">Secured by STATUS_PUBLIC_KEY. Attendant creates a DB session cookie; others set a role cookie only.</p>
+  <p className="text-xs text-gray-600 mt-2">Attendant creates a DB session cookie; others set a role cookie only.</p>
       </div>
       {msg && <div className="text-sm text-gray-700">{msg}</div>}
     </div>

@@ -18,19 +18,11 @@ type ClearBody = {
   };
 };
 
-function unauthorized() {
-  return NextResponse.json(
-    { ok: false, error: "unauthorized", note: "Provide STATUS_PUBLIC_KEY via header x-status-key or ?key=" },
-    { status: 401 }
-  );
-}
+// Key check removed to allow no-key admin actions in local/internal scenarios.
 
 export async function POST(req: Request) {
   try {
-    const url = new URL(req.url);
-    const providedKey = req.headers.get("x-status-key") || url.searchParams.get("key") || "";
-    const requiredKey = process.env.STATUS_PUBLIC_KEY || "";
-    if (!requiredKey || providedKey !== requiredKey) return unauthorized();
+  // Previously enforced STATUS_PUBLIC_KEY via header/query. Now removed.
 
     const body = (await req.json().catch(() => ({}))) as ClearBody;
     const outlet = (body.outlet || "").trim();
