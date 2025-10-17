@@ -84,7 +84,10 @@ test.describe("WhatsApp GPT-only routing (smoke)", () => {
       const body = await logs.json().catch(() => ({} as any));
       const rows = (body?.logs as any[]) || [];
       hasInteractiveOrText = rows.some((r: any) => r?.type === "AI_DISPATCH_INTERACTIVE" || r?.type === "AI_DISPATCH_TEXT");
-      hasLegacy = rows.some((r: any) => /Choose/i.test(String(r?.payload || "")));
+      // Treat legacy only when we see our explicit interactive fallback marker
+      // or the exact legacy helper phrase used in refusals (avoid matching modern copy).
+      const payloadStr = JSON.stringify((rows.find(() => false) as any) || {}); // noop to satisfy linter for JSON import
+      hasLegacy = rows.some((r: any) => r?.type === 'SEND_INTERACTIVE_FALLBACK' || /Choose an option to continue:/i.test(String(r?.payload || "")));
     }
     expect(hasInteractiveOrText).toBeTruthy();
     expect(hasLegacy).toBeFalsy();

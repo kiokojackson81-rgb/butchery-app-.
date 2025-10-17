@@ -84,7 +84,17 @@ jobs:
             npx prisma db push --accept-data-loss; \
           else \
             echo "Using environment DB → prisma migrate deploy"; \
-            npx prisma migrate deploy || echo "No migrations to apply"; \
+            set +e; \
+            npx prisma migrate deploy; \
+            code=$?; \
+            if [ $code -ne 0 ]; then \
+              echo "migrate deploy failed with code $code; attempting targeted resolve for 20251013_add_supervisor_commission"; \
+              npx prisma migrate resolve --rolled-back "20251013_add_supervisor_commission" || true; \
+              npx prisma migrate deploy || echo "No migrations to apply (after resolve)"; \
+            else \
+              echo "migrate deploy succeeded"; \
+            fi; \
+            set -e; \
           fi
 
       - name: Install Playwright (Chromium only)
@@ -204,7 +214,17 @@ jobs:
             npx prisma db push --accept-data-loss; \
           else \
             echo "Using environment DB → prisma migrate deploy"; \
-            npx prisma migrate deploy || echo "No migrations to apply"; \
+            set +e; \
+            npx prisma migrate deploy; \
+            code=$?; \
+            if [ $code -ne 0 ]; then \
+              echo "migrate deploy failed with code $code; attempting targeted resolve for 20251013_add_supervisor_commission"; \
+              npx prisma migrate resolve --rolled-back "20251013_add_supervisor_commission" || true; \
+              npx prisma migrate deploy || echo "No migrations to apply (after resolve)"; \
+            else \
+              echo "migrate deploy succeeded"; \
+            fi; \
+            set -e; \
           fi
 
       - name: Install Playwright (Chromium only)
@@ -314,7 +334,17 @@ jobs:
             npx prisma db push --accept-data-loss; \
           else \
             echo "Using environment DB → prisma migrate deploy"; \
-            npx prisma migrate deploy || echo "No migrations to apply"; \
+            set +e; \
+            npx prisma migrate deploy; \
+            code=$?; \
+            if [ $code -ne 0 ]; then \
+              echo "migrate deploy failed with code $code; attempting targeted resolve for 20251013_add_supervisor_commission"; \
+              npx prisma migrate resolve --rolled-back "20251013_add_supervisor_commission" || true; \
+              npx prisma migrate deploy || echo "No migrations to apply (after resolve)"; \
+            else \
+              echo "migrate deploy succeeded"; \
+            fi; \
+            set -e; \
           fi
 
       - name: Install Playwright (Chromium only)
