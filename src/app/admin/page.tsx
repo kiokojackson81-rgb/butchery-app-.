@@ -1626,6 +1626,12 @@ export default function AdminPage() {
             <p className="text-xs text-gray-600 mt-2">Stores a PhoneMapping with role="admin" and code="ADMIN".</p>
           </div>
 
+          {/* Quick Admin Tools */}
+          <div className="rounded-xl border p-3 mt-4">
+            <h3 className="font-medium mb-2">Quick Admin Tools</h3>
+            <QuickAdminTools />
+          </div>
+
           {/* Low Stock Thresholds */}
           <div className="rounded-xl border p-3 mt-4">
             <h3 className="font-medium mb-2">Low Stock Thresholds</h3>
@@ -1746,6 +1752,83 @@ function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, 
 
 // Lazy client-only import for the embedded Performance tab
 const EmbeddedPerformance = dynamic(() => import("@/components/performance/PerformanceView"), { ssr: false });
+
+function QuickAdminTools() {
+  const [outlet, setOutlet] = React.useState<string>("");
+  const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
+  const [statusKey, setStatusKey] = React.useState<string>("");
+  const [phone, setPhone] = React.useState<string>("");
+  const [code, setCode] = React.useState<string>("");
+  const [busy, setBusy] = React.useState<boolean>(false);
+  const [msg, setMsg] = React.useState<string>("");
+
+  const clearDayData = async () => {
+    if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
+    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
+    if (!confirm(`Clear data for ${outlet} — ${date}? This deletes opening, closings, expenses, deposits, till and resets locks.`)) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/admin/data/clear?key=${encodeURIComponent(statusKey)}` , {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ outlet, date })
+      });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`Cleared: ${JSON.stringify(j.deleted)}`);
+    } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
+  const clearWaSessions = async () => {
+    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
+    if (!phone && !code) { setMsg("Enter phone or code to clear sessions"); return; }
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/admin/wa-session/clear?key=${encodeURIComponent(statusKey)}` , {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ phone: phone || undefined, code: code || undefined })
+      });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`WA sessions deleted: ${j.deleted}`);
+    } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">Outlet</div>
+          <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+        </label>
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">Date</div>
+          <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
+        </label>
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">STATUS_PUBLIC_KEY</div>
+          <input className="input-mobile border rounded-xl p-2 w-full font-mono" placeholder="paste runtime key" value={statusKey} onChange={e=>setStatusKey(e.target.value)} />
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
+      </div>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">WA Phone (E.164)</div>
+          <input className="input-mobile border rounded-xl p-2 w-full font-mono" placeholder="+2547…" value={phone} onChange={e=>setPhone(e.target.value)} />
+        </label>
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">Person Code</div>
+          <input className="input-mobile border rounded-xl p-2 w-full" placeholder="code" value={code} onChange={e=>setCode(e.target.value)} />
+        </label>
+        <div className="flex items-end">
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={clearWaSessions} disabled={busy}>Clear WA Sessions</button>
+        </div>
+      </div>
+      {msg && <div className="text-sm text-gray-700">{msg}</div>}
+    </div>
+  );
+}
 
 /**
  * Combined Ops component: groups Supply View, Reports, and Supply History under one umbrella with sub-tabs.
