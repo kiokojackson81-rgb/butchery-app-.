@@ -43,6 +43,15 @@ export async function GET(req: Request) {
           : [];
       }
     }
+    // Fallback: derive outlet from session outletRef/outletCode or allow an explicit ?outlet= when session exists
+    if (!outletName && sess) {
+      const outletFromSess = String((sess as any)?.attendant?.outletRef?.name || (sess as any)?.outletCode || "").trim();
+      if (outletFromSess) outletName = outletFromSess;
+      if (!outletName) {
+        const outletQ = String(searchParams.get("outlet") || "").trim();
+        if (outletQ) outletName = outletQ;
+      }
+    }
 
     if (!outletName) {
       // 401 in logs usually means the attendant session expired; dashboard will show empty history.

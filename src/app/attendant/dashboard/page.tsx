@@ -35,9 +35,11 @@ function fmt(n: number | undefined | null) {
   const num = typeof n === "number" && isFinite(n) ? n : 0;
   return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
-function today() { return new Date().toISOString().split("T")[0]; }
-function prevDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0,10); }
-function nextDate(d: string) { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0,10); }
+function today() {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).replace(/\//g, "-"); } catch { return new Date().toISOString().split("T")[0]; }
+}
+function prevDate(d: string) { try { const dt = new Date(`${d}T00:00:00+03:00`); dt.setUTCDate(dt.getUTCDate() - 1); return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(dt).replace(/\//g, "-"); } catch { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0,10); } }
+function nextDate(d: string) { try { const dt = new Date(`${d}T00:00:00+03:00`); dt.setUTCDate(dt.getUTCDate() + 1); return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(dt).replace(/\//g, "-"); } catch { const dt = new Date(d + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0,10); } }
 function summaryKeyFor(date: string, outlet: string) { return `attendant_summary_${date}_${outlet}`; }
 function rotationBannerKeyFor(date: string, outlet: string) { return `attendant_rotation_banner_${date}_${outlet}`; }
 function id() { return Math.random().toString(36).slice(2); }

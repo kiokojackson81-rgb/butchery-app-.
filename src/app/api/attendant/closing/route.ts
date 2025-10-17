@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 // Legacy sendClosingSubmitted replaced by rich notifications
 import { sendDayCloseNotifications } from "@/server/notifications/day_close";
 import { upsertAndNotifySupervisorCommission } from "@/server/commission";
+import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 
 type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
 type PhoneMap = { code: string; phoneE164: string | null };
@@ -40,7 +41,8 @@ export async function POST(req: Request) {
     const outletName = (outlet || "").trim();
     if (!outletName) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
 
-    const day = ((date || new Date().toISOString()) + "").slice(0, 10);
+  const tz = APP_TZ;
+  const day = ((date || dateISOInTZ(new Date(), tz)) + "").slice(0, 10);
     const safeClosing = (closingMap && typeof closingMap === "object") ? closingMap : {};
     const safeWaste = (wasteMap && typeof wasteMap === "object") ? wasteMap : {};
     const rawKeys = Array.from(new Set([...(Object.keys(safeClosing)), ...(Object.keys(safeWaste))]));
@@ -52,8 +54,7 @@ export async function POST(req: Request) {
     // Preload opening-effective map for validation (case-insensitive)
     const openEffMap: Map<string, number> = new Map(); // keys = itemKey.toLowerCase()
     try {
-      const y = new Date((day + "T00:00:00.000Z")); y.setUTCDate(y.getUTCDate() - 1);
-      const yStr = y.toISOString().slice(0,10);
+      const yStr = addDaysISO(day, -1, tz);
       const [prevClosing, todaySupply] = await Promise.all([
         (prisma as any).attendantClosing.findMany({ where: { date: yStr, outletName: outletName } }),
         (prisma as any).supplyOpeningRow.findMany({ where: { date: day, outletName: outletName } }),
