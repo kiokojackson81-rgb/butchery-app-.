@@ -2195,19 +2195,25 @@ function QuickAdminTools() {
             <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full" onClick={async()=>{
               if (!date || !outlet) { setMsg('Pick date and outlet'); return; }
               try {
-                const [rt, rc] = await Promise.all([
+                const [rt, rc, ro] = await Promise.all([
                   fetch(`/api/admin/day/txns?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }),
                   fetch(`/api/admin/day/closings?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }),
+                  fetch(`/api/admin/day/opening?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }),
                 ]);
                 const jt = await rt.json().catch(()=>({ ok:false }));
                 const jc = await rc.json().catch(()=>({ ok:false }));
-                ;(window as any).__ADMIN_EDIT_CTX__ = { deposits: jt?.deposits||[], expenses: jt?.expenses||[], closings: jc?.closings||[] };
+                const jo = await ro.json().catch(()=>({ ok:false }));
+                ;(window as any).__ADMIN_EDIT_CTX__ = { deposits: jt?.deposits||[], expenses: jt?.expenses||[], closings: jc?.closings||[], openings: jo?.openings||[] };
                 setMsg('Loaded entries. Scroll below to edit.');
               } catch (e:any) { setMsg(e?.message || 'Failed'); }
             }}>Load</button>
           </div>
         </div>
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-4 gap-3">
+          <div className="rounded-xl border p-2">
+            <h5 className="font-medium mb-2">Supply (Opening)</h5>
+            <AdminEditOpeningList />
+          </div>
           <div className="rounded-xl border p-2">
             <h5 className="font-medium mb-2">Deposits</h5>
             <AdminEditList kind="deposit" />
@@ -2296,8 +2302,61 @@ function AdminEditList(props: { kind: 'deposit'|'expense'|'closing' }) {
                 <div>Waste Qty</div>
                 <input className="input-mobile border rounded p-1 w-full" type="number" step="0.01" defaultValue={r.wasteQty} onBlur={(e)=>save(r.id, { wasteQty: Number(e.target.value) })} />
               </label>
+              <label className="col-span-2">
+                <div>Reason (optional)</div>
+                <input className="input-mobile border rounded p-1 w-full" placeholder="Why the correction?" onBlur={(e)=>save(r.id, { reason: e.target.value })} />
+              </label>
             </div>
           )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminEditOpeningList() {
+  const [rows, setRows] = React.useState<any[]>([]);
+  const [tick, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const ctx = (window as any).__ADMIN_EDIT_CTX__ || {};
+    setRows(ctx.openings || []);
+  }, [tick]);
+
+  const save = async (id: string, patch: any) => {
+    try {
+      const r = await fetch('/api/admin/edit/opening', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...patch }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setTick(x=>x+1);
+    } catch (e:any) { alert(e?.message || 'Failed'); }
+  };
+
+  if (!rows || rows.length === 0) return <div className="text-xs text-gray-500">No entries loaded yet.</div>;
+
+  return (
+    <div className="space-y-2 max-h-64 overflow-auto">
+      {rows.map((r: any) => (
+        <div key={r.id} className="rounded-lg border p-2 text-xs space-y-2">
+          <div className="text-gray-500">id: <span className="font-mono">{r.id}</span></div>
+          <div className="grid grid-cols-3 gap-2">
+            <label>
+              <div>Qty</div>
+              <input className="input-mobile border rounded p-1 w-full" type="number" step="0.01" defaultValue={r.qty} onBlur={(e)=>save(r.id, { qty: Number(e.target.value) })} />
+            </label>
+            <label>
+              <div>Unit</div>
+              <input className="input-mobile border rounded p-1 w-full" defaultValue={r.unit || ''} onBlur={(e)=>save(r.id, { unit: e.target.value })} />
+            </label>
+            <label>
+              <div>Buy Price</div>
+              <input className="input-mobile border rounded p-1 w-full" type="number" step="0.01" defaultValue={r.buyPrice} onBlur={(e)=>save(r.id, { buyPrice: Number(e.target.value) })} />
+            </label>
+            <label className="col-span-3">
+              <div>Reason (optional)</div>
+              <input className="input-mobile border rounded p-1 w-full" placeholder="Why the correction?" onBlur={(e)=>save(r.id, { reason: e.target.value })} />
+            </label>
+          </div>
         </div>
       ))}
     </div>
