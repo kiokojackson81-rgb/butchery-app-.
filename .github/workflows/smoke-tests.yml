@@ -1,0 +1,263 @@
+name: Smoke tests (Playwright)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, ci/* ]
+    paths:
+      - 'src/**'
+      - 'playwright/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'yarn.lock'
+      - 'tsconfig.json'
+      - '.github/workflows/smoke-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gpt-only:
+    name: GPT-only WA flow
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: butchery
+          POSTGRES_PASSWORD: butchery
+          POSTGRES_DB: butchery
+        options: >-
+          --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      NEXT_TELEMETRY_DISABLED: 1
+      APP_TZ: Africa/Nairobi
+      PORT: 3002
+      BASE_URL: http://localhost:3002
+      WA_DRY_RUN: 'true'
+      WA_GPT_ONLY: 'true'
+      WA_AI_ENABLED: 'true'
+      WA_INTERACTIVE_ENABLED: 'true'
+      WA_TABS_ENABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prisma generate and push
+        run: |
+          npx prisma generate
+          npx prisma db push
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start dev server (3002)
+        run: |
+          nohup npm run dev:3002 > dev.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be ready
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:3002/api/health/db && exit 0 || true
+            curl -fsS http://localhost:3002 && exit 0 || true
+            sleep 2
+          done
+          echo "Server did not become ready in time" >&2
+          echo "==== dev.log (tail) ====" && tail -n 200 dev.log || true
+          exit 1
+
+      - name: Run Playwright (GPT-only)
+        run: npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-gpt-only
+          path: |
+            playwright-report
+            test-results
+            dev.log
+          if-no-files-found: warn
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
+
+  legacy:
+    name: Legacy WA-only smoke
+    runs-on: ubuntu-latest
+    needs: gpt-only
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: butchery
+          POSTGRES_PASSWORD: butchery
+          POSTGRES_DB: butchery
+        options: >-
+          --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      NEXT_TELEMETRY_DISABLED: 1
+      APP_TZ: Africa/Nairobi
+      PORT: 3002
+      BASE_URL: http://localhost:3002
+      WA_DRY_RUN: 'true'
+      WA_GPT_ONLY: 'false'
+      WA_AI_ENABLED: 'false'
+      WA_INTERACTIVE_ENABLED: 'true'
+      WA_TABS_ENABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prisma generate and push
+        run: |
+          npx prisma generate
+          npx prisma db push
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start dev server (3002)
+        run: |
+          nohup npm run dev:3002 > dev.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be ready
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:3002/api/health/db && exit 0 || true
+            curl -fsS http://localhost:3002 && exit 0 || true
+            sleep 2
+          done
+          echo "Server did not become ready in time" >&2
+          echo "==== dev.log (tail) ====" && tail -n 200 dev.log || true
+          exit 1
+
+      - name: Run Playwright (legacy WA-only)
+        run: npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-legacy
+          path: |
+            playwright-report
+            test-results
+            dev.log
+          if-no-files-found: warn
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
+
+  period-3days:
+    name: 3-day period flow
+    runs-on: ubuntu-latest
+    needs: legacy
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: butchery
+          POSTGRES_PASSWORD: butchery
+          POSTGRES_DB: butchery
+        options: >-
+          --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      NEXT_TELEMETRY_DISABLED: 1
+      APP_TZ: Africa/Nairobi
+      PORT: 3002
+      BASE_URL: http://localhost:3002
+      WA_DRY_RUN: 'true'
+      WA_GPT_ONLY: 'false'
+      WA_AI_ENABLED: 'false'
+      WA_INTERACTIVE_ENABLED: 'true'
+      WA_TABS_ENABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prisma generate and push
+        run: |
+          npx prisma generate
+          npx prisma db push
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start dev server (3002)
+        run: |
+          nohup npm run dev:3002 > dev.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be ready
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:3002/api/health/db && exit 0 || true
+            curl -fsS http://localhost:3002 && exit 0 || true
+            sleep 2
+          done
+          echo "Server did not become ready in time" >&2
+          echo "==== dev.log (tail) ====" && tail -n 200 dev.log || true
+          exit 1
+
+      - name: Run Playwright (3-day flow)
+        run: npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --reporter=line --workers=1
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-3days
+          path: |
+            playwright-report
+            test-results
+            dev.log
+          if-no-files-found: warn
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
