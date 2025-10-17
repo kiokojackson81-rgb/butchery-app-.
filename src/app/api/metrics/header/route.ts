@@ -3,12 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const outlet = searchParams.get("outlet") || "";
+  const tz = APP_TZ;
   const dateParam = (searchParams.get("date") || "").slice(0, 10);
-  const date = dateParam || new Date().toISOString().slice(0, 10);
+  const date = dateParam || dateISOInTZ(new Date(), tz);
   if (!outlet)
     return NextResponse.json({
       ok: true,
@@ -59,9 +61,7 @@ export async function GET(req: Request) {
   const netTill = tillSalesGross - verifiedDeposits;
 
   // Previous day's outstanding carryover: (yRevenue - yExpenses - yVerifiedDeposits)
-  const dt = new Date(date + "T00:00:00.000Z");
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  const y = dt.toISOString().slice(0, 10);
+  const y = addDaysISO(date, -1, tz);
   const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
     prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet } }),
     prisma.attendantClosing.findMany({ where: { date: y, outletName: outlet } }),

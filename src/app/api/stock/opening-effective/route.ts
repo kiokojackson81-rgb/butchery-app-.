@@ -3,17 +3,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { APP_TZ, addDaysISO, dateISOInTZ } from "@/server/trading_period";
 
 function prevDateISO(d: string) {
-  const dt = new Date(d + "T00:00:00.000Z");
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  return dt.toISOString().slice(0, 10);
+  return addDaysISO(d, -1, APP_TZ);
 }
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const date = (searchParams.get("date") || "").slice(0, 10);
+  const tz = APP_TZ;
+  const date = ((searchParams.get("date") || "").slice(0, 10)) || dateISOInTZ(new Date(), tz);
     const outlet = (searchParams.get("outlet") || "").trim();
     if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
 

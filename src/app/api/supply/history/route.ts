@@ -4,19 +4,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { prisma } from "@/lib/prisma";
+import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 import { getSession } from "@/lib/session";
 
 type Row = { date: string; outlet: string; itemKey: string; name: string; qty: number; unit: string; buyPrice: number };
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function dateNDaysAgoISO(days: number) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
+function todayISO() { return dateISOInTZ(new Date(), APP_TZ); }
+function dateNDaysAgoISO(days: number) { return addDaysISO(todayISO(), -days, APP_TZ); }
 
 export async function GET(req: Request) {
   try {
@@ -51,6 +45,7 @@ export async function GET(req: Request) {
     }
 
     if (!outletName) {
+      // 401 in logs usually means the attendant session expired; dashboard will show empty history.
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 

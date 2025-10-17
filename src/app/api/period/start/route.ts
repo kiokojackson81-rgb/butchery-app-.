@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { getCloseCount, incrementCloseCount } from "@/server/trading_period";
+import { getCloseCount, incrementCloseCount, APP_TZ, addDaysISO, dateISOInTZ } from "@/server/trading_period";
 
 export async function POST(req: Request) {
   const { outlet, openingSnapshot, pricebookSnapshot } = (await req.json()) as {
@@ -13,10 +13,9 @@ export async function POST(req: Request) {
   };
   if (!outlet) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
 
-  const date = new Date().toISOString().slice(0, 10);
-  const dt = new Date(date + "T00:00:00.000Z");
-  dt.setUTCDate(dt.getUTCDate() + 1);
-  const tomorrow = dt.toISOString().slice(0, 10);
+  const tz = APP_TZ;
+  const date = dateISOInTZ(new Date(), tz);
+  const tomorrow = addDaysISO(date, 1, tz);
 
   // Enforce max 2 closes per calendar day per outlet
   const currentCount = await getCloseCount(outlet, date).catch(() => 0);
@@ -30,8 +29,7 @@ export async function POST(req: Request) {
     // Seed tomorrow's opening rows using: next = max(0, yesterdayClosing + todaySupply - todayClosing - todayWaste)
     try {
       // Build prevOpen from yesterday's closing
-      const d0 = new Date(date + "T00:00:00.000Z"); d0.setUTCDate(d0.getUTCDate() - 1);
-      const y = d0.toISOString().slice(0,10);
+  const y = addDaysISO(date, -1, tz);
       const [prevClosings, todaySupplyRows, todaysClosings] = await Promise.all([
         (tx as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
         (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
