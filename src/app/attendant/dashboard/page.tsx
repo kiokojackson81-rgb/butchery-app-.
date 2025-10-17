@@ -79,6 +79,8 @@ export default function AttendantDashboardPage() {
   const [locked, setLocked] = useState<Record<string, boolean>>({}); // per-item stock row saved flag
   const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: ItemKey; qty: number }>>([]);
   const [supplyHistory, setSupplyHistory] = useState<Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }>>([]);
+  // For transparency: show OpeningEff = yesterday closing + today supply per item
+  const [prevClosingLc, setPrevClosingLc] = useState<Record<string, number>>({}); // keys lowercased
 
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [depositsFromServer, setDepositsFromServer] = useState<Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }>>([]);
@@ -308,6 +310,17 @@ export default function AttendantDashboardPage() {
       try { await loadHist(); } catch { setSupplyHistory([]); }
     })();
 
+    // Yesterday's closings (for OpeningEff breakdown)
+    (async () => {
+      try {
+        const prev = prevDate(stockDate);
+        const j = await getJSON<{ ok: boolean; closingMap: Record<string, number> }>(`/api/attendant/closing?date=${encodeURIComponent(prev)}&outlet=${encodeURIComponent(outlet)}`);
+        const m: Record<string, number> = {};
+        Object.entries(j?.closingMap || {}).forEach(([k, v]) => { m[String(k).toLowerCase()] = Number(v || 0); });
+        setPrevClosingLc(m);
+      } catch { setPrevClosingLc({}); }
+    })();
+
     // deposits from DB (server source of truth)
     (async () => {
       try {
@@ -404,6 +417,21 @@ export default function AttendantDashboardPage() {
       });
     });
   }, [openingRowsRaw, catalog, outlet]);
+
+  // Derive today supply by item (lowercased keys) from supplyHistory
+  const supplyTodayLc = useMemo(() => {
+    const map: Record<string, number> = {};
+    try {
+      (supplyHistory || []).forEach((r) => {
+        if (r.date !== stockDate) return;
+        const lc = String(r.itemKey || "").toLowerCase();
+        const qty = Number(r.qty || 0);
+        if (!Number.isFinite(qty)) return;
+        map[lc] = (map[lc] || 0) + qty;
+      });
+    } catch {}
+    return map;
+  }, [supplyHistory, stockDate]);
 
   // Overlay already saved closing/waste from DB and lock those rows (for the same date as stock rows)
   useEffect(() => {
@@ -878,7 +906,21 @@ export default function AttendantDashboardPage() {
                   {rows.map(r => (
                     <tr key={r.key} className="border-b">
                       <td className="py-2">{r.name}</td>
-                      <td>{fmt(r.opening)} {r.unit}</td>
+                      <td>
+                        <div>{fmt(r.opening)} {r.unit}</div>
+                        {(() => {
+                          const lc = String(r.key).toLowerCase();
+                          const y = Number(prevClosingLc[lc] || 0);
+                          const t = Number(supplyTodayLc[lc] || 0);
+                          const eff = y + t;
+                          if (eff <= 0) return null;
+                          return (
+                            <div className="text-[10px] text-gray-500 mt-0.5">
+                              OpeningEff = {fmt(y)} + {fmt(t)}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td>
                         <input
                           className="input-mobile border rounded-xl p-2 w-28"
