@@ -6,9 +6,34 @@ import { prisma } from "@/lib/prisma";
 
 export type PeriodState = "OPEN" | "LOCKED";
 
+// Timezone handling (default Africa/Nairobi)
+export const APP_TZ = process.env.APP_TZ || "Africa/Nairobi";
+
+/** Format a Date into YYYY-MM-DD in the given IANA timezone (default Nairobi). */
+export function dateISOInTZ(d: Date = new Date(), tz: string = APP_TZ): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+/** Add N days to a YYYY-MM-DD (midnight in tz) and return YYYY-MM-DD in tz. */
+export function addDaysISO(dateStr: string, deltaDays: number, tz: string = APP_TZ): string {
+  // Construct a Date at tz-midnight using a stable offset string when possible.
+  // For Nairobi (no DST), "+03:00" is constant.
+  const tzOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00"; // fallback if custom tz used
+  const dt = new Date(`${dateStr}T00:00:00${tzOffset}`);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dateISOInTZ(dt, tz);
+}
+
 export function todayLocalISO(d: Date = new Date()) {
-  // Use server local date (calendar day) per spec
-  return d.toISOString().slice(0, 10);
+  // Use Nairobi calendar day (or APP_TZ if overridden)
+  return dateISOInTZ(d, APP_TZ);
 }
 
 const lockKey = (date: string, outlet: string) => `lock:attendant:${date}:${outlet}`;

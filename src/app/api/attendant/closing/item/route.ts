@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getPeriodState } from "@/server/trading_period";
+import { getPeriodState, APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 
 export async function POST(req: Request) {
   try {
@@ -14,8 +14,9 @@ export async function POST(req: Request) {
     if (!outletName) return NextResponse.json({ ok: false, error: "No outlet" }, { status: 400 });
 
     // Accept optional date from client (used after period rotation when UI advances to next day)
-    const body = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number; date?: string };
-    const date = String(body?.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const body = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number; date?: string };
+  const tz = APP_TZ;
+  const date = String(body?.date || dateISOInTZ(new Date(), tz)).slice(0, 10);
 
     const key = String(body?.itemKey || "").trim();
     const closingQty = body?.closingQty;
@@ -32,8 +33,7 @@ export async function POST(req: Request) {
 
       // Validate against opening-effective (yesterday closing + today's supply)
       try {
-        const dt = new Date(date + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-        const y = dt.toISOString().slice(0,10);
+        const y = addDaysISO(date, -1, tz);
         // Fetch both sets then sum matching keys case-insensitively
         const [prevMany, supplyMany] = await Promise.all([
           (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }),
