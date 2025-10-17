@@ -148,6 +148,12 @@ export default function AdminPage() {
         setTab(t as AdminTab);
       }
     }
+    // Optional deep-link: ?pricing=global|outlet
+    const pv = (searchParams.get("pricing") || "").toLowerCase();
+    if (pv === "global" || pv === "outlet") {
+      setTab("pricing");
+      setPricingView(pv as any);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const opsTabFromURL = useMemo<"supply"|"reports"|"history"|undefined>(() => {
@@ -1354,12 +1360,12 @@ export default function AdminPage() {
             <div className="flex items-center gap-2">
               <button
                 className={`btn-mobile border rounded-xl px-3 py-1.5 text-sm ${pricingView === 'global' ? 'bg-black text-white' : ''}`}
-                onClick={()=>setPricingView('global')}
+                onClick={()=>{ setPricingView('global'); try { const url = new URL(window.location.href); url.searchParams.set('tab','pricing'); url.searchParams.set('pricing','global'); history.replaceState(null,'',url.toString()); } catch {} }}
                 title="Global products & default prices"
               >Global</button>
               <button
                 className={`btn-mobile border rounded-xl px-3 py-1.5 text-sm ${pricingView === 'outlet' ? 'bg-black text-white' : ''}`}
-                onClick={()=>setPricingView('outlet')}
+                onClick={()=>{ setPricingView('outlet'); try { const url = new URL(window.location.href); url.searchParams.set('tab','pricing'); url.searchParams.set('pricing','outlet'); history.replaceState(null,'',url.toString()); } catch {} }}
                 title="Per-outlet pricebook overrides"
               >Outlet</button>
             </div>
