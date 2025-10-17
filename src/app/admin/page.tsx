@@ -1737,10 +1737,31 @@ function QuickAdminTools() {
   const [impRole, setImpRole] = React.useState<"attendant"|"supervisor"|"supplier">("attendant");
   const [busy, setBusy] = React.useState<boolean>(false);
   const [msg, setMsg] = React.useState<string>("");
+  const [outletOptions, setOutletOptions] = React.useState<Array<{ id: string; name: string; active: boolean }>>([]);
+  const [peopleOptions, setPeopleOptions] = React.useState<Array<{ code: string; name?: string; role: string; active: boolean }>>([]);
+  const [loadingLists, setLoadingLists] = React.useState<boolean>(false);
 
-  // Persist STATUS_PUBLIC_KEY so other UI (e.g., Login as buttons) can reuse it
-  // No longer requiring STATUS_PUBLIC_KEY for impersonation.
-  React.useEffect(() => {}, []);
+  // Load dropdown lists for outlets and person codes
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadLists() {
+      try {
+        setLoadingLists(true);
+        const [ro, rp] = await Promise.all([
+          fetch('/api/admin/list/outlets', { cache: 'no-store' }),
+          fetch('/api/admin/list/people', { cache: 'no-store' })
+        ]);
+        const jo = await ro.json().catch(()=>({ ok:false }));
+        const jp = await rp.json().catch(()=>({ ok:false }));
+        if (!cancelled) {
+          if (jo?.ok && Array.isArray(jo.rows)) setOutletOptions(jo.rows.map((r: any)=>({ id: r.id, name: r.name, active: !!r.active })));
+          if (jp?.ok && Array.isArray(jp.rows)) setPeopleOptions(jp.rows.map((r: any)=>({ code: r.code, name: r.name, role: r.role, active: !!r.active })));
+        }
+      } catch {} finally { if (!cancelled) setLoadingLists(false); }
+    }
+    loadLists();
+    return () => { cancelled = true; };
+  }, []);
 
   const clearDayData = async () => {
     if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
@@ -1814,12 +1835,47 @@ function QuickAdminTools() {
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
+  const wipeInactiveAttendant = async () => {
+    const c = (code || '').trim();
+    if (!c) { setMsg('Pick code'); return; }
+    if (!confirm(`Wipe data for attendant code ${c}? This removes sessions, assignments, and attendant record. Only if inactive.`)) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await fetch('/api/admin/wipe/attendant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ code: c, onlyIfInactive: true }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`Wiped attendant ${j.code}. Deleted: ${JSON.stringify(j.deleted)}`);
+    } catch (e:any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
+  const wipeInactiveOutlet = async () => {
+    const on = (outlet || '').trim();
+    if (!on) { setMsg('Pick outlet'); return; }
+    if (!confirm(`Wipe per-outlet data for ${on}? Only if outlet is inactive.`)) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await fetch('/api/admin/wipe/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify({ outletName: on, onlyIfInactive: true }) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`Wiped outlet ${j.outletName}. Deleted: ${JSON.stringify(j.deleted)}`);
+    } catch (e:any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
   return (
     <div className="space-y-3">
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <label className="text-sm">
           <div className="text-gray-600 mb-1">Outlet</div>
-          <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          {outletOptions.length > 0 ? (
+            <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+              <option value="">Pick outlet…</option>
+              {outletOptions.map(o => (
+                <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          )}
         </label>
         <label className="text-sm">
           <div className="text-gray-600 mb-1">Date</div>
@@ -1830,6 +1886,7 @@ function QuickAdminTools() {
       <div className="flex items-center gap-2">
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={startNewPeriod} disabled={busy}>Start New Period Now</button>
+        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={wipeInactiveOutlet} disabled={busy}>Wipe Inactive Outlet</button>
       </div>
       <div className="grid sm:grid-cols-3 gap-3">
         <label className="text-sm">
@@ -1838,7 +1895,16 @@ function QuickAdminTools() {
         </label>
         <label className="text-sm">
           <div className="text-gray-600 mb-1">Person Code</div>
-          <input className="input-mobile border rounded-xl p-2 w-full" placeholder="code" value={code} onChange={e=>setCode(e.target.value)} />
+          {peopleOptions.length > 0 ? (
+            <select className="input-mobile border rounded-xl p-2 w-full" value={code} onChange={e=>setCode(e.target.value)}>
+              <option value="">Pick person…</option>
+              {peopleOptions.map(p => (
+                <option key={p.code} value={p.code}>{p.code}{p.name ? ` — ${p.name}` : ''} [{p.role}] {p.active ? '' : '(inactive)'}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="code" value={code} onChange={e=>setCode(e.target.value)} />
+          )}
         </label>
         <div className="flex items-end">
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={clearWaSessions} disabled={busy}>Clear WA Sessions</button>
@@ -1859,17 +1925,38 @@ function QuickAdminTools() {
           </label>
           <label className="text-sm">
             <div className="text-gray-600 mb-1">Code</div>
-            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., JACKSONA1" value={code} onChange={e=>setCode(e.target.value)} />
+            {peopleOptions.length > 0 ? (
+              <select className="input-mobile border rounded-xl p-2 w-full" value={code} onChange={e=>setCode(e.target.value)}>
+                <option value="">Pick person…</option>
+                {peopleOptions.map(p => (
+                  <option key={p.code} value={p.code}>{p.code}{p.name ? ` — ${p.name}` : ''} [{p.role}] {p.active ? '' : '(inactive)'}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., JACKSONA1" value={code} onChange={e=>setCode(e.target.value)} />
+            )}
           </label>
           <label className="text-sm">
             <div className="text-gray-600 mb-1">Outlet (optional)</div>
-            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+            {outletOptions.length > 0 ? (
+              <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+                <option value="">—</option>
+                {outletOptions.map(o => (
+                  <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+            )}
           </label>
           <div className="flex items-end">
             <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={impersonate} disabled={busy}>Login as</button>
           </div>
         </div>
   <p className="text-xs text-gray-600 mt-2">Attendant creates a DB session cookie; others set a role cookie only.</p>
+        <div className="mt-3 flex items-center gap-2">
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={wipeInactiveAttendant} disabled={busy}>Wipe Inactive Attendant</button>
+        </div>
       </div>
       {msg && <div className="text-sm text-gray-700">{msg}</div>}
     </div>
