@@ -1291,7 +1291,20 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
           data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
         });
       } catch {}
-      try { await sendText(phone, "You've been logged out.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+      // After logout, include a fresh login link so attendants can re-login anytime.
+      try {
+        const urlObj = await createLoginLink(toDbPhone(phone));
+        await sendText(
+          phone,
+          `You've been logged out. Tap this link to log in via the website:\n${urlObj.url}`,
+          "AI_DISPATCH_TEXT",
+          { gpt_sent: true }
+        );
+      } catch {
+        // Fallback to a generic link if login-link generation fails
+        const origin = process.env.APP_ORIGIN || "https://barakafresh.com";
+        await sendText(phone, `You've been logged out. You can log in anytime at ${origin}/login`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
     }
     return true;
   }
