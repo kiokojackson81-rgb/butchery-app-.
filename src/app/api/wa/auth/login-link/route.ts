@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canonFull, canonNum } from "@/lib/codeNormalize";
+import { canonFull, canonNum, normalizeCode } from "@/lib/codeNormalize";
 import { finalizeLoginDirect } from "@/app/api/wa/auth/finalize/route";
 import { sendOpsMessage } from "@/lib/wa_dispatcher";
 import { findPersonCodeTolerant } from "@/server/db_person";
@@ -56,8 +56,66 @@ export async function POST(req: Request) {
     const role = String(pc.role || "attendant");
     let outlet: string | null = null;
     if (role === "attendant") {
-      const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } });
-      outlet = scope?.outletName ?? null;
+      // Align with web login: try multiple sources to resolve outlet before failing
+      // 1) Primary source: AttendantScope table (normalized code)
+      const scope = await (prisma as any).attendantScope
+        .findFirst({ where: { codeNorm: pc.code } })
+        .catch(() => null);
+      outlet = (scope as any)?.outletName ?? null;
+
+      // 2) Legacy assignment table used by older flows
+      if (!outlet) {
+        try {
+          const assign = await (prisma as any).attendantAssignment.findUnique({ where: { code: pc.code } });
+          outlet = (assign as any)?.outlet || null;
+        } catch {}
+      }
+
+      // 3) Settings mirror: attendant_scope (object map)
+      if (!outlet) {
+        try {
+          const row = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+          const map = (row as any)?.value || null;
+          if (map && typeof map === "object") {
+            const key = pc.code;
+            let entry = (map as any)[key]
+              || (map as any)[normalizeCode(key)]
+              || (map as any)[canonFull(key)]
+              || null;
+            if (!entry) {
+              for (const k of Object.keys(map)) {
+                if (normalizeCode(k) === normalizeCode(key)) { entry = (map as any)[k]; break; }
+              }
+            }
+            const out = entry && typeof entry === "object" ? String((entry as any)?.outlet || "").trim() : "";
+            if (out) outlet = out;
+          }
+        } catch {}
+      }
+
+      // 4) Settings mirror: admin_codes (array)
+      if (!outlet) {
+        try {
+          const row = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+          const list: any[] = Array.isArray((row as any)?.value) ? (row as any).value : [];
+          const active = list.filter((p: any) => !!p?.active && String(p?.role || '').toLowerCase() === 'attendant');
+          const fullKey = canonFull(pc.code);
+          const byFull = active.find((p: any) => canonFull(p?.code || '') === fullKey);
+          if (byFull?.outlet) outlet = String(byFull.outlet);
+        } catch {}
+      }
+
+      // 5) DRY fallback for local/dev to avoid blocking
+      if (!outlet) {
+        const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+        if (DRY) {
+          try {
+            const created = await (prisma as any).attendantScope.create({ data: { codeNorm: pc.code, outletName: "Test Outlet" } });
+            outlet = created?.outletName || null;
+          } catch {}
+        }
+      }
+
       if (!outlet) return NextResponse.json({ ok: false, code: "CODE_NOT_ASSIGNED", message: "Your outlet is not set. Ask Supervisor to assign your outlet." }, { status: 422 });
     }
 
