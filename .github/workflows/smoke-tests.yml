@@ -20,8 +20,6 @@ jobs:
   gpt-only:
     name: GPT-only WA flow
     runs-on: ubuntu-latest
-    environment:
-      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -34,7 +32,8 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      # Force CI to use the local Postgres service (never Production DB)
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -62,10 +61,10 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push
+      - name: Prisma generate and push (ephemeral)
         run: |
           npx prisma generate
-          npx prisma db push
+          npx prisma db push --accept-data-loss
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -87,7 +86,7 @@ jobs:
           exit 1
 
       - name: Run Playwright (GPT-only)
-        run: npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line --workers=1
+        run: npx playwright test -c playwright.config.ts playwright/wa.gpt-only.spec.ts --reporter=line,html --workers=1
 
       - name: Upload Playwright report
         if: always()
@@ -115,8 +114,6 @@ jobs:
     name: Legacy WA-only smoke
     runs-on: ubuntu-latest
     needs: gpt-only
-    environment:
-      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -129,7 +126,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -157,10 +154,10 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push
+      - name: Prisma generate and push (ephemeral)
         run: |
           npx prisma generate
-          npx prisma db push
+          npx prisma db push --accept-data-loss
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -182,7 +179,7 @@ jobs:
           exit 1
 
       - name: Run Playwright (legacy WA-only)
-        run: npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1
+        run: npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line,html --workers=1
 
       - name: Upload Playwright report
         if: always()
@@ -210,8 +207,6 @@ jobs:
     name: 3-day period flow
     runs-on: ubuntu-latest
     needs: legacy
-    environment:
-      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -224,7 +219,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -252,10 +247,10 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push
+      - name: Prisma generate and push (ephemeral)
         run: |
           npx prisma generate
-          npx prisma db push
+          npx prisma db push --accept-data-loss
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -277,7 +272,7 @@ jobs:
           exit 1
 
       - name: Run Playwright (3-day flow)
-        run: npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --reporter=line --workers=1
+        run: npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --reporter=line,html --workers=1
 
       - name: Upload Playwright report
         if: always()
