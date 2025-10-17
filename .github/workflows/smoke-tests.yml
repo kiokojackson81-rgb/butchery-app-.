@@ -34,8 +34,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
-      DATABASE_URL_UNPOOLED: ${{ vars.DATABASE_URL_UNPOOLED || secrets.DATABASE_URL_UNPOOLED || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -106,6 +105,12 @@ jobs:
         run: |
           if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
 
+      - name: Post job summary
+        if: always()
+        run: |
+          echo "### GPT-only job status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts: playwright-report-gpt-only, test-results, dev.log" >> $GITHUB_STEP_SUMMARY
+
   legacy:
     name: Legacy WA-only smoke
     runs-on: ubuntu-latest
@@ -124,8 +129,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
-      DATABASE_URL_UNPOOLED: ${{ vars.DATABASE_URL_UNPOOLED || secrets.DATABASE_URL_UNPOOLED || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -196,6 +200,12 @@ jobs:
         run: |
           if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
 
+      - name: Post job summary
+        if: always()
+        run: |
+          echo "### Legacy WA-only job status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts: playwright-report-legacy, test-results, dev.log" >> $GITHUB_STEP_SUMMARY
+
   period-3days:
     name: 3-day period flow
     runs-on: ubuntu-latest
@@ -214,8 +224,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
-      DATABASE_URL_UNPOOLED: ${{ vars.DATABASE_URL_UNPOOLED || secrets.DATABASE_URL_UNPOOLED || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -285,3 +294,9 @@ jobs:
         if: always()
         run: |
           if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
+
+      - name: Post job summary
+        if: always()
+        run: |
+          echo "### 3-day period flow job status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts: playwright-report-3days, test-results, dev.log" >> $GITHUB_STEP_SUMMARY
