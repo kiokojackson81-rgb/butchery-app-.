@@ -12,10 +12,14 @@ export async function POST(req: Request) {
     if (!sess) return NextResponse.json({ ok: false }, { status: 401 });
     const outletName = (sess as any).attendant?.outletRef?.name || (sess as any).outletCode || "";
     if (!outletName) return NextResponse.json({ ok: false, error: "No outlet" }, { status: 400 });
-    const date = new Date().toISOString().slice(0, 10);
 
-    const { itemKey, closingQty, wasteQty } = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number };
-  const key = (itemKey || "").trim();
+    // Accept optional date from client (used after period rotation when UI advances to next day)
+    const body = (await req.json()) as { itemKey?: string; closingQty?: number; wasteQty?: number; date?: string };
+    const date = String(body?.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+    const key = String(body?.itemKey || "").trim();
+    const closingQty = body?.closingQty;
+    const wasteQty = body?.wasteQty;
     if (!key) return NextResponse.json({ ok: false, error: "itemKey required" }, { status: 400 });
 
     // Guard: Trading period must be OPEN
@@ -23,8 +27,8 @@ export async function POST(req: Request) {
     if (state !== "OPEN") {
       return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
     }
-    const closing = Number.isFinite(Number(closingQty)) ? Math.max(0, Number(closingQty)) : 0;
-    const waste = Number.isFinite(Number(wasteQty)) ? Math.max(0, Number(wasteQty)) : 0;
+  const closing = Number.isFinite(Number(closingQty)) ? Math.max(0, Number(closingQty)) : 0;
+  const waste = Number.isFinite(Number(wasteQty)) ? Math.max(0, Number(wasteQty)) : 0;
 
       // Validate against opening-effective (yesterday closing + today's supply)
       try {

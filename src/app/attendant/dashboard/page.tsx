@@ -478,7 +478,8 @@ export default function AttendantDashboardPage() {
   async function submitRow(r: Row) {
     if (!outlet) return;
     try {
-      await postJSON("/api/attendant/closing/item", { itemKey: r.key, closingQty: toNum(r.closing), wasteQty: toNum(r.waste) });
+      // Pass the specific stock date; after rotation the UI may be on tomorrow
+      await postJSON("/api/attendant/closing/item", { date: stockDate, itemKey: r.key, closingQty: toNum(r.closing), wasteQty: toNum(r.waste) });
       setLocked(prev => ({ ...prev, [r.key]: true }));
     } catch (e: any) {
       const msg = typeof e?.message === "string" ? e.message : "Failed to submit";
