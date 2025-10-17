@@ -97,6 +97,10 @@ jobs:
             set -e; \
           fi
 
+      - name: Prisma migrate status (diag)
+        run: |
+          npx prisma migrate status || true
+
       - name: Install Playwright (Chromium only)
         run: npx playwright install --with-deps chromium
 
@@ -227,6 +231,10 @@ jobs:
             set -e; \
           fi
 
+      - name: Prisma migrate status (diag)
+        run: |
+          npx prisma migrate status || true
+
       - name: Install Playwright (Chromium only)
         run: npx playwright install --with-deps chromium
 
@@ -346,6 +354,10 @@ jobs:
             fi; \
             set -e; \
           fi
+
+      - name: Prisma migrate status (diag)
+        run: |
+          npx prisma migrate status || true
 
       - name: Install Playwright (Chromium only)
         run: npx playwright install --with-deps chromium
