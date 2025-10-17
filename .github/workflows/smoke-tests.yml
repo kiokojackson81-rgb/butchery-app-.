@@ -49,6 +49,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Force sync to latest main
+        if: ${{ github.ref_name == 'main' }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          git checkout -B main origin/main
+          echo "Using commit:" $(git rev-parse HEAD)
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -162,6 +169,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Force sync to latest main
+        if: ${{ github.ref_name == 'main' }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          git checkout -B main origin/main
+          echo "Using commit:" $(git rev-parse HEAD)
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -264,6 +278,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Force sync to latest main
+        if: ${{ github.ref_name == 'main' }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          git checkout -B main origin/main
+          echo "Using commit:" $(git rev-parse HEAD)
 
       - name: Setup Node
         uses: actions/setup-node@v4
