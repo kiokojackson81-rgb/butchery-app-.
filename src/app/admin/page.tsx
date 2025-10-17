@@ -1165,6 +1165,37 @@ export default function AdminPage() {
                       </td>
                       <td>
                         <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={()=>removeCode(c.id)}>✕</button>
+                        {/* Login as (impersonate) */}
+                        <button
+                          className="btn-mobile text-xs border rounded-lg px-2 py-1 ml-2"
+                          title="Login as this person"
+                          onClick={async ()=>{
+                            const role = c.role;
+                            const codeVal = (c.code || '').trim();
+                            if (!codeVal) { alert('No code'); return; }
+                            let key = '';
+                            try { key = sessionStorage.getItem('status_public_key') || ''; } catch {}
+                            if (!key) {
+                              const input = window.prompt('Enter STATUS_PUBLIC_KEY to continue:', '');
+                              if (!input) return;
+                              key = input; try { sessionStorage.setItem('status_public_key', input); } catch {}
+                            }
+                            const outletName = role === 'attendant' ? (scope[canonFull(codeVal)]?.outlet || '') : '';
+                            try {
+                              const r = await fetch(`/api/admin/impersonate?key=${encodeURIComponent(key)}`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+                                body: JSON.stringify({ role, code: codeVal, outlet: outletName || undefined })
+                              });
+                              const j = await r.json().catch(()=>({ ok:false }));
+                              if (!j?.ok) throw new Error(j?.error || 'Failed');
+                              const to = j?.redirect || '/';
+                              // slight delay to ensure cookies are applied
+                              setTimeout(()=>{ window.location.href = to; }, 200);
+                            } catch (e: any) {
+                              alert(e?.message || 'Failed to impersonate');
+                            }
+                          }}
+                        >Login as</button>
                       </td>
                     </tr>
                   ))}
@@ -1759,8 +1790,17 @@ function QuickAdminTools() {
   const [statusKey, setStatusKey] = React.useState<string>("");
   const [phone, setPhone] = React.useState<string>("");
   const [code, setCode] = React.useState<string>("");
+  const [impRole, setImpRole] = React.useState<"attendant"|"supervisor"|"supplier">("attendant");
   const [busy, setBusy] = React.useState<boolean>(false);
   const [msg, setMsg] = React.useState<string>("");
+
+  // Persist STATUS_PUBLIC_KEY so other UI (e.g., Login as buttons) can reuse it
+  React.useEffect(() => {
+    try {
+      const k = sessionStorage.getItem("status_public_key") || "";
+      if (k) setStatusKey(k);
+    } catch {}
+  }, []);
 
   const clearDayData = async () => {
     if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
@@ -1809,6 +1849,25 @@ function QuickAdminTools() {
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
+  const impersonate = async () => {
+    if (!statusKey) { setMsg("Enter STATUS_PUBLIC_KEY"); return; }
+    const impersonateCode = (code || "").trim();
+    if (!impersonateCode) { setMsg("Enter code to impersonate"); return; }
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/admin/impersonate?key=${encodeURIComponent(statusKey)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ role: impRole, code: impersonateCode, outlet: outlet || undefined })
+      });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      const to = j?.redirect || '/';
+      setMsg(`Impersonation ok → ${to}`);
+      // small delay to ensure cookie is applied on client before navigate
+      setTimeout(()=>{ window.location.href = to; }, 300);
+    } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
+  };
+
   return (
     <div className="space-y-3">
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1822,7 +1881,8 @@ function QuickAdminTools() {
         </label>
         <label className="text-sm">
           <div className="text-gray-600 mb-1">STATUS_PUBLIC_KEY</div>
-          <input className="input-mobile border rounded-xl p-2 w-full font-mono" placeholder="paste runtime key" value={statusKey} onChange={e=>setStatusKey(e.target.value)} />
+          <input className="input-mobile border rounded-xl p-2 w-full font-mono" placeholder="paste runtime key" value={statusKey}
+                 onChange={e=>{ setStatusKey(e.target.value); try { sessionStorage.setItem("status_public_key", e.target.value || ""); } catch {} }} />
         </label>
       </div>
       <div className="flex items-center gap-2">
@@ -1841,6 +1901,33 @@ function QuickAdminTools() {
         <div className="flex items-end">
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={clearWaSessions} disabled={busy}>Clear WA Sessions</button>
         </div>
+      </div>
+
+      {/* Impersonation */}
+      <div className="rounded-xl border p-3 mt-3">
+        <h4 className="font-medium mb-2">Impersonate (Login as)</h4>
+        <div className="grid sm:grid-cols-4 gap-3">
+          <label className="text-sm">
+            <div className="text-gray-600 mb-1">Role</div>
+            <select className="input-mobile border rounded-xl p-2 w-full" value={impRole} onChange={e=>setImpRole(e.target.value as any)}>
+              <option value="attendant">attendant</option>
+              <option value="supervisor">supervisor</option>
+              <option value="supplier">supplier</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <div className="text-gray-600 mb-1">Code</div>
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., JACKSONA1" value={code} onChange={e=>setCode(e.target.value)} />
+          </label>
+          <label className="text-sm">
+            <div className="text-gray-600 mb-1">Outlet (optional)</div>
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          </label>
+          <div className="flex items-end">
+            <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full disabled:opacity-50" onClick={impersonate} disabled={busy}>Login as</button>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 mt-2">Secured by STATUS_PUBLIC_KEY. Attendant creates a DB session cookie; others set a role cookie only.</p>
       </div>
       {msg && <div className="text-sm text-gray-700">{msg}</div>}
     </div>
