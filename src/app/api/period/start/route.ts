@@ -84,6 +84,12 @@ export async function POST(req: Request) {
         if (dataToday.length > 0) {
           await (tx as any).supplyOpeningRow.createMany({ data: dataToday });
         }
+        // Important: start a clean in-day period by clearing any saved closings for today.
+        // We already used today's closings above to compute the new base; now wipe them so the
+        // dashboard won't re-overlay/lock rows as "Submitted" after reload.
+        try {
+          await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } });
+        } catch {}
       } else if (nextCount >= 2) {
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
         const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];

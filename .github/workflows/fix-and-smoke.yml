@@ -1,0 +1,182 @@
+name: Fix migration + run smokes
+
+on:
+  workflow_dispatch:
+    inputs:
+      resolve_action:
+        description: 'Migration resolution action before tests'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - status
+          - resolve-commission-rolled-back
+          - resolve-commission-applied
+      suite:
+        description: 'Which suite to run'
+        required: true
+        default: 'gpt-only'
+        type: choice
+        options:
+          - gpt-only
+          - legacy
+          - period-3days
+          - all
+      use_prod_db:
+        description: 'Use Production DATABASE_URL secret for DB'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fix-and-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    name: Resolve + Smokes
+    runs-on: ubuntu-latest
+    environment: "Production – butchery-app"
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: butchery
+          POSTGRES_PASSWORD: butchery
+          POSTGRES_DB: butchery
+        options: >-
+          --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      # Prefer production env secret when selected via input; fallback to local Postgres service
+      DATABASE_URL: ${{ ((github.event_name == 'workflow_dispatch') && inputs.use_prod_db) && secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      NEXT_TELEMETRY_DISABLED: 1
+      APP_TZ: Africa/Nairobi
+      PORT: 3002
+      BASE_URL: http://localhost:3002
+      # Default to GPT-only flags; individual steps may override for legacy/period
+      WA_DRY_RUN: 'true'
+      WA_GPT_ONLY: 'true'
+      WA_AI_ENABLED: 'true'
+      WA_INTERACTIVE_ENABLED: 'true'
+      WA_TABS_ENABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Ensure DB envs
+        run: |
+          echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
+          echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma migrate status (diag)
+        if: ${{ inputs.resolve_action == 'status' }}
+        run: |
+          npx prisma migrate status || true
+
+      - name: Resolve commission migration as rolled-back (P3009)
+        if: ${{ inputs.resolve_action == 'resolve-commission-rolled-back' }}
+        run: |
+          npx prisma migrate resolve --rolled-back "20251013_add_supervisor_commission" || true
+
+      - name: Resolve commission migration as applied (P3009)
+        if: ${{ inputs.resolve_action == 'resolve-commission-applied' }}
+        run: |
+          npx prisma migrate resolve --applied "20251013_add_supervisor_commission" || true
+
+      - name: Deploy migrations (when using environment DB)
+        if: ${{ inputs.resolve_action != 'none' && startsWith(env.DATABASE_URL, 'postgresql') && !contains(env.DATABASE_URL, '@localhost:5432') }}
+        run: |
+          npx prisma migrate deploy || echo "No migrations to apply"
+
+      - name: If local DB, push schema
+        if: ${{ contains(env.DATABASE_URL, '@localhost:5432') }}
+        run: |
+          npx prisma db push --accept-data-loss
+
+      - name: Install Playwright (Chromium only)
+        run: npx playwright install --with-deps chromium
+
+      - name: Start dev server (3002)
+        run: |
+          nohup npm run dev:3002 > dev.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be ready
+        run: |
+          for i in {1..90}; do
+            curl -fsS http://localhost:3002/api/health/db && READY=1 || READY=0
+            if [ "$READY" -eq 1 ]; then exit 0; fi
+            sleep 2
+          done
+          echo "Server did not become ready in time" >&2
+          echo "==== dev.log (tail) ====" && tail -n 300 dev.log || true
+          exit 1
+
+      - name: Debug - show server flags endpoint
+        run: |
+          curl -fsS http://localhost:3002/api/wa/dev/flags || true
+
+      - name: Run Playwright (GPT-only)
+        if: ${{ inputs.suite == 'gpt-only' || inputs.suite == 'all' }}
+        run: npx playwright test -c playwright.config.ts playwright/wa.gpt-only.smoke.spec.ts --project=chromium --reporter=line,html --workers=1
+
+      - name: Run Playwright (legacy WA-only)
+        if: ${{ inputs.suite == 'legacy' || inputs.suite == 'all' }}
+        env:
+          WA_GPT_ONLY: 'false'
+          WA_AI_ENABLED: 'false'
+          WA_INTERACTIVE_ENABLED: 'true'
+          WA_TABS_ENABLED: 'true'
+        run: npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --project=chromium --reporter=line,html --workers=1
+
+      - name: Run Playwright (3-day flow)
+        if: ${{ inputs.suite == 'period-3days' || inputs.suite == 'all' }}
+        env:
+          WA_GPT_ONLY: 'false'
+          WA_AI_ENABLED: 'false'
+          WA_INTERACTIVE_ENABLED: 'true'
+          WA_TABS_ENABLED: 'true'
+        run: npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --project=chromium --reporter=line,html --workers=1
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix-and-smoke-${{ inputs.suite }}
+          path: |
+            playwright-report
+            test-results
+            dev.log
+          if-no-files-found: warn
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) || true; fi
+
+      - name: Post job summary
+        if: always()
+        run: |
+          echo "### Run status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Suite: ${{ inputs.suite }}" >> $GITHUB_STEP_SUMMARY
+          echo "Resolve action: ${{ inputs.resolve_action }}" >> $GITHUB_STEP_SUMMARY
+          echo "DB: $([[ "${DATABASE_URL}" == postgresql://butchery:* ]] && echo local || echo environment)" >> $GITHUB_STEP_SUMMARY
+          echo "Run link: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> $GITHUB_STEP_SUMMARY
