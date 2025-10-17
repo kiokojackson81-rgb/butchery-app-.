@@ -10,6 +10,9 @@ export const WA_TEMPLATES = {
   supplierOpeningReminder: 'barakaops_supplier_opening_reminder_v1',
   roleRemoved: 'barakaops_role_removed_v1',
   loginFailure: 'barakaops_login_failure_v1',
+  // Generic, latest templates (preferred for assignments/removals)
+  roleAssignment: 'barakaops_role_assignment_v3',
+  roleDeactivation: 'barakaops_role_deactivation_v2',
 } as const;
 
 export type WATemplateKey = keyof typeof WA_TEMPLATES;
@@ -45,4 +48,13 @@ This is an automated update from BarakaOps.`,
   barakaops_login_failure_v1: `Login unsuccessful for {{outlet}}.
 Check your code or contact Admin.
 Try again: {{link}}`,
+  // Reference bodies for the generic templates (docs only)
+  barakaops_role_assignment_v3: `System update: You’ve been assigned the role of {{role}} at {{outlet}}.
+You’re responsible for managing: {{scope}}.
+Use this secure link to access your account: {{link}}
+This is an automated update from BarakaOps.`,
+  barakaops_role_deactivation_v2: `System update: Your role as {{role}} at {{outlet}} has been deactivated.
+You will no longer have access to your outlet account or operations menu.
+For clarification, please contact your supervisor or admin.
+This is an automated update from BarakaOps.`,
 } as const;

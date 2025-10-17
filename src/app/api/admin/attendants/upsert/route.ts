@@ -326,41 +326,47 @@ export async function POST(req: Request) {
     // Fire assignment/role-removed notifications (best-effort)
     try {
       const APP_ORIGIN = process.env.APP_ORIGIN || "";
-      // Notify attendants about assignment changes using template
+      // Notify people about assignment changes using the generic role assignment template
       for (const code of canonicalOrder) {
         const pc = await (prisma as any).personCode.findFirst({ where: { code } }).catch(() => null);
         const role = String(pc?.role || "attendant").toLowerCase() as PersonRole;
         const pm = await (prisma as any).phoneMapping.findUnique({ where: { code } }).catch(() => null);
         const phone = pm?.phoneE164 as string | undefined;
         if (!phone) continue;
-        if (role === "attendant") {
+        const roleLabel = role === 'attendant' ? 'Attendant' : role === 'supervisor' ? 'Supervisor' : 'Supplier';
+        // Resolve outlet + scope depending on role
+        let outlet = "";
+        let scope = "";
+        if (role === 'attendant') {
           const sc = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: code }, include: { products: true } }).catch(() => null);
-          const outlet = sc?.outletName || "";
+          outlet = sc?.outletName || "";
           const keys: string[] = Array.isArray(sc?.products) ? sc.products.map((p: any) => p?.productKey).filter(Boolean) : [];
-          const rows = await (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, name: true } }).catch(() => []);
-          const nameByKey = new Map<string, string>();
-          for (const r of rows as any[]) nameByKey.set(r.key, r.name || r.key);
-          const products = keys.map((k) => nameByKey.get(k) ?? k).join(", ") || "no products";
-          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
-          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.attendantAssignment, params: [outlet, products, link], contextType: "ASSIGNMENT" }); } catch {}
-        } else if (role === "supervisor") {
-          const outlet = (await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null))?.outlet || "";
-          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
-          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supervisorAssignment, params: [outlet, link], contextType: "ASSIGNMENT" }); } catch {}
-        } else if (role === "supplier") {
-          const outlet = (await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null))?.outlet || "";
-          const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
-          try { await sendTemplate({ to: phone, template: WA_TEMPLATES.supplierAssignment, params: [outlet, link], contextType: "ASSIGNMENT" }); } catch {}
+          if (keys.length) {
+            const rows = await (prisma as any).product.findMany({ where: { key: { in: keys } }, select: { key: true, name: true } }).catch(() => []);
+            const nameByKey = new Map<string, string>();
+            for (const r of rows as any[]) nameByKey.set(r.key, r.name || r.key);
+            scope = keys.map((k) => nameByKey.get(k) ?? k).join(", ");
+          } else {
+            scope = "no products";
+          }
+        } else {
+          // Supervisor/Supplier: best effort outlet lookup
+          outlet = (await (prisma as any).attendantAssignment.findUnique({ where: { code } }).catch(() => null))?.outlet || "";
+          scope = roleLabel;
         }
+        const link = APP_ORIGIN ? `${APP_ORIGIN}/login` : (await getLoginLinkFor(phone));
+        try {
+          await sendTemplate({ to: phone, template: WA_TEMPLATES.roleAssignment, params: [roleLabel, outlet, scope, link], contextType: "ASSIGNMENT" });
+        } catch {}
       }
 
-      // Role removal notices
+      // Role removal notices (generic deactivation template)
       for (const ev of roleRemovalEvents) {
         const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: ev.code } }).catch(() => null);
         const phone = pm?.phoneE164 as string | undefined; if (!phone) continue;
-        const outlet = ev.outlet || "";
+        const outlet = ev.outlet || (await (prisma as any).attendantAssignment.findUnique({ where: { code: ev.code } }).catch(() => null))?.outlet || "";
         const roleLabel = ev.role === "attendant" ? "Attendant" : ev.role === "supervisor" ? "Supervisor" : "Supplier";
-  try { await sendTemplate({ to: phone, template: WA_TEMPLATES.roleRemoved, params: [roleLabel, outlet], contextType: "ASSIGNMENT" }); } catch {}
+        try { await sendTemplate({ to: phone, template: WA_TEMPLATES.roleDeactivation, params: [roleLabel, outlet], contextType: "ASSIGNMENT" }); } catch {}
       }
     } catch {}
 
