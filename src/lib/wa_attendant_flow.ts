@@ -24,7 +24,7 @@ import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
 import { createReviewItem } from "@/server/review";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
-import { getCloseCount, incrementCloseCount } from "@/server/trading_period";
+import { getCloseCount, incrementCloseCount, getPeriodState } from "@/server/trading_period";
 import {
   buildButtonPayload,
   buildListPayload,
@@ -1021,6 +1021,17 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
+      // Respect trading period lock
+      if (s.outlet) {
+        try {
+          const st = await getPeriodState(s.outlet, cur.date);
+          if (st === "LOCKED") {
+            await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). You cannot enter new closings.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+            await saveSession(phone, { state: "MENU", ...cur });
+            return;
+          }
+        } catch {}
+      }
       // No day-level lock guard (multiple periods allowed; enforce via count)
       // Guard: product already closed today
       if (s.outlet) {
@@ -1080,7 +1091,17 @@ export async function handleInboundText(phone: string, text: string) {
         await sendText(phone, "Pick a product first.", "AI_DISPATCH_TEXT", { gpt_sent: true });
         return;
       }
-      // No day-level lock guard
+      // Respect trading period lock
+      if (s.outlet) {
+        try {
+          const st = await getPeriodState(s.outlet, cur.date);
+          if (st === "LOCKED") {
+            await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). You cannot record closings.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+            await saveSession(phone, { state: "MENU", ...cur });
+            return;
+          }
+        } catch {}
+      }
       item.waste = val;
       // If openEff is zero but user entered positive closing, auto-cap closing to 0 to keep flow moving
       try {
@@ -1396,7 +1417,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT");
       return true;
     }
-    // No day-level lock guard
+    // Respect trading period lock
+    try {
+      const st = await getPeriodState(s.outlet, cur.date);
+      if (st === "LOCKED") {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). You cannot enter new closings.`, "AI_DISPATCH_TEXT");
+        return true;
+      }
+    } catch {}
 
     // DRY fallback: In dev/dry mode, short-circuit to CLOSING_PICK without DB dependencies
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
@@ -1474,11 +1502,31 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     return true;
   }
   if (id === "ATD_DEPOSIT" || id === "ATT_DEPOSIT" || id === "MENU_DEPOSIT") {
+    // Respect trading period lock
+    if (s.outlet) {
+      try {
+        const st = await getPeriodState(s.outlet, cur.date);
+        if (st === "LOCKED") {
+          await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Deposits cannot be recorded.`, "AI_DISPATCH_TEXT");
+          return true;
+        }
+      } catch {}
+    }
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
     await sendText(phone, "Paste the original M-Pesa SMS (no edits). We will extract the amount and reference.", "AI_DISPATCH_TEXT");
     return true;
   }
   if (id === "MENU_EXPENSE" || id === "ATD_EXPENSE" || id === "ATT_EXPENSE") {
+    // Respect trading period lock
+    if (s.outlet) {
+      try {
+        const st = await getPeriodState(s.outlet, cur.date);
+        if (st === "LOCKED") {
+          await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). Expenses cannot be recorded.`, "AI_DISPATCH_TEXT");
+          return true;
+        }
+      } catch {}
+    }
     await saveSession(phone, { state: "EXPENSE_NAME", ...cur });
     await sendInteractive(expenseNamePrompt(phone), "AI_DISPATCH_INTERACTIVE");
     return true;
@@ -1542,6 +1590,28 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       `Opening (carry-forward) for ${s.outlet} (${cur.date}):\n${lines.join("\n")}\n\nNote: Opening = yesterday closing + today deliveries.`,
       "AI_DISPATCH_TEXT"
     );
+
+    // Also list today's supply per assigned product
+    try {
+      const supplyMap = new Map<string, { qty: number; unit?: string }>();
+      for (const r of (todaySupply as any[]) || []) {
+        const kLc = String(r.itemKey || "").toLowerCase(); if (!kLc) continue;
+        const q = Number(r.qty || 0);
+        const u = String(r.unit || unitByKeyLc.get(kLc) || "kg");
+        supplyMap.set(kLc, { qty: (supplyMap.get(kLc)?.qty || 0) + (Number.isFinite(q) ? q : 0), unit: u });
+      }
+      const sLines = assigned.map((p) => {
+        const kLc = String(p.key).toLowerCase();
+        const rec = supplyMap.get(kLc) || { qty: 0, unit: unitByKeyLc.get(kLc) || "kg" };
+        const unit = String(rec.unit || unitByKeyLc.get(kLc) || "kg").trim();
+        return `- ${p.name}: ${fmtQty(Number(rec.qty || 0))} ${unit}`;
+      });
+      await sendText(
+        phone,
+        `Today supply for ${s.outlet} (${cur.date}):\n${sLines.join("\n")}`,
+        "AI_DISPATCH_TEXT"
+      );
+    } catch {}
 
     // After syncing supply, suggest next action
     const remaining = await getAvailableClosingProducts(s, cur);
@@ -1718,7 +1788,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
-    // No day-level lock guard
+    // Respect trading period lock
+    try {
+      const st = await getPeriodState(s.outlet, cur.date);
+      if (st === "LOCKED") {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). You cannot submit closing.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        return true;
+      }
+    } catch {}
     if (!cur.rows.length) {
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
@@ -1888,7 +1965,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
     }
-    // No day-level lock guard
+    // Respect trading period lock
+    try {
+      const st = await getPeriodState(s.outlet, cur.date);
+      if (st === "LOCKED") {
+        await sendText(phone, `Day is locked for ${s.outlet} (${cur.date}). You cannot submit closing.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        return true;
+      }
+    } catch {}
     if (!cur.rows.length) {
       await sendText(phone, "No closing entries recorded yet.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return true;
