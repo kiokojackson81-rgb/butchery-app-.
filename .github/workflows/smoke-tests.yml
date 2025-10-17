@@ -20,6 +20,8 @@ jobs:
   gpt-only:
     name: GPT-only WA flow
     runs-on: ubuntu-latest
+    environment:
+      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -32,8 +34,8 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      # Force CI to use the local Postgres service (never Production DB)
-      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      # Prefer production env secret when provided; fallback to local Postgres service
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -61,10 +63,18 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push (ephemeral)
+      - name: Prisma generate (always)
         run: |
           npx prisma generate
-          npx prisma db push --accept-data-loss
+      - name: Prisma migrate (prod-safe) or push (local)
+        run: |
+          if [[ "$DATABASE_URL" == postgresql://butchery:butchery@localhost* ]]; then \
+            echo "Using local ephemeral DB → prisma db push --accept-data-loss"; \
+            npx prisma db push --accept-data-loss; \
+          else \
+            echo "Using environment DB → prisma migrate deploy"; \
+            npx prisma migrate deploy || echo "No migrations to apply"; \
+          fi
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -114,6 +124,8 @@ jobs:
     name: Legacy WA-only smoke
     runs-on: ubuntu-latest
     needs: gpt-only
+    environment:
+      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -126,7 +138,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -154,10 +166,18 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push (ephemeral)
+      - name: Prisma generate (always)
         run: |
           npx prisma generate
-          npx prisma db push --accept-data-loss
+      - name: Prisma migrate (prod-safe) or push (local)
+        run: |
+          if [[ "$DATABASE_URL" == postgresql://butchery:butchery@localhost* ]]; then \
+            echo "Using local ephemeral DB → prisma db push --accept-data-loss"; \
+            npx prisma db push --accept-data-loss; \
+          else \
+            echo "Using environment DB → prisma migrate deploy"; \
+            npx prisma migrate deploy || echo "No migrations to apply"; \
+          fi
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -207,6 +227,8 @@ jobs:
     name: 3-day period flow
     runs-on: ubuntu-latest
     needs: legacy
+    environment:
+      name: "Production – butchery-app"
     services:
       postgres:
         image: postgres:16
@@ -219,7 +241,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -247,10 +269,18 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL:-postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10}" >> $GITHUB_ENV
           echo "DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-$DATABASE_URL}" >> $GITHUB_ENV
 
-      - name: Prisma generate and push (ephemeral)
+      - name: Prisma generate (always)
         run: |
           npx prisma generate
-          npx prisma db push --accept-data-loss
+      - name: Prisma migrate (prod-safe) or push (local)
+        run: |
+          if [[ "$DATABASE_URL" == postgresql://butchery:butchery@localhost* ]]; then \
+            echo "Using local ephemeral DB → prisma db push --accept-data-loss"; \
+            npx prisma db push --accept-data-loss; \
+          else \
+            echo "Using environment DB → prisma migrate deploy"; \
+            npx prisma migrate deploy || echo "No migrations to apply"; \
+          fi
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
