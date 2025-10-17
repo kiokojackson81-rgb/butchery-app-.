@@ -135,12 +135,27 @@ export async function POST(req: Request) {
         try { await logOutbound({ direction: "in", payload: { event: "login.finalize.ok", phone: wa, role, outlet }, status: "INFO", type: "LOGIN_FINALIZE_OK" }); } catch {}
       }
     } else {
-      // No wa phone provided: create or refresh pending session for webhook
-      await (prisma as any).waSession.upsert({
-        where: { phoneE164: `+PENDING:${pc.code}` },
-        update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-        create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
-      }).catch(() => {});
+      // No wa phone provided by the page. Try to find an existing mapping and finalize immediately
+      let finalized = false;
+      try {
+        const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: pc.code } });
+        const mapped = String(pm?.phoneE164 || "").trim();
+        if (mapped) {
+          const fin2 = await finalizeLoginDirect(mapped, pc.code);
+          finalized = !!(fin2 as any)?.ok;
+          if (finalized) {
+            try { await logOutbound({ direction: "in", payload: { event: "login.finalize.ok.via_mapping", phone: mapped, role, outlet }, status: "INFO", type: "LOGIN_FINALIZE_OK" }); } catch {}
+          }
+        }
+      } catch {}
+      if (!finalized) {
+        // Otherwise, create or refresh a pending session so webhook can bind on first inbound
+        await (prisma as any).waSession.upsert({
+          where: { phoneE164: `+PENDING:${pc.code}` },
+          update: { role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+          create: { phoneE164: `+PENDING:${pc.code}`, role, code: pc.code, outlet, state: "LOGIN", cursor: { issuedAt: Date.now() } },
+        }).catch(() => {});
+      }
     }
 
   const link = businessDeepLink();
