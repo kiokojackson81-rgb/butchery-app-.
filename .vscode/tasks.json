@@ -143,6 +143,13 @@
 			"command": "npm run -s typecheck",
 			"isBackground": false,
 			"group": "build"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

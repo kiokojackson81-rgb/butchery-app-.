@@ -290,10 +290,22 @@ export default function AttendantDashboardPage() {
 
     // Supply history (last 7 days, attendant scope)
     (async () => {
-      try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
-        setSupplyHistory((r as any).rows || []);
-      } catch { setSupplyHistory([]); }
+      async function loadHist() {
+        const res = await fetch(`/api/supply/history?days=7&sort=date_desc`, { cache: "no-store" });
+        if (res.status === 401) {
+          // Retry once after a short delay to allow session hydration
+          await new Promise(r => setTimeout(r, 400));
+          const res2 = await fetch(`/api/supply/history?days=7&sort=date_desc`, { cache: "no-store" });
+          if (!res2.ok) throw new Error("history unauthorized");
+          const j2 = await res2.json();
+          setSupplyHistory((j2 as any).rows || []);
+          return;
+        }
+        if (!res.ok) throw new Error("history failed");
+        const j = await res.json();
+        setSupplyHistory((j as any).rows || []);
+      }
+      try { await loadHist(); } catch { setSupplyHistory([]); }
     })();
 
     // deposits from DB (server source of truth)
@@ -739,7 +751,7 @@ export default function AttendantDashboardPage() {
             )}
             {periodStartAt ? (
               <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-green-50 border-green-200 text-green-700">
-                Active period since {new Date(periodStartAt).toLocaleTimeString()}
+                Active period since {new Date(periodStartAt).toLocaleTimeString(undefined, { timeZone: "Africa/Nairobi" })}
               </span>
             ) : (
               <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-yellow-50 border-yellow-200 text-yellow-700">
