@@ -2125,13 +2125,14 @@ function QuickAdminTools() {
           <div className="mt-4">
             <h5 className="font-medium mb-2">Admin Edits</h5>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-600">Most recent changes (before/after)</span>
+              <span className="text-xs text-gray-600">Most recent changes (before/after, with reason)</span>
               <button className="btn-mobile border rounded-xl px-2 py-1 text-xs" onClick={()=>{
-                const rows = (edits||[]).map((e:any)=>({ at: new Date(e.at).toISOString(), type: e.type, id: e.id, before: JSON.stringify(e.before||{}), after: JSON.stringify(e.after||{}) }));
-                const csv = ["at,type,id,before,after"].concat(rows.map(r=>{
+                const rows = (edits||[]).map((e:any)=>({ at: new Date(e.at).toISOString(), type: e.type, id: e.id, reason: (e as any)?.reason || '', before: JSON.stringify(e.before||{}), after: JSON.stringify(e.after||{}) }));
+                const csv = ["at,type,id,reason,before,after"].concat(rows.map(r=>{
+                  const reason = String(r.reason || "").replaceAll('"', '""');
                   const before = String(r.before || "").replaceAll('"', '""');
                   const after = String(r.after || "").replaceAll('"', '""');
-                  return `${r.at},${r.type},${r.id},"${before}","${after}"`;
+                  return `${r.at},${r.type},${r.id},"${reason}","${before}","${after}"`;
                 })).join("\n");
                 const a = document.createElement('a');
                 a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
@@ -2147,20 +2148,22 @@ function QuickAdminTools() {
                       <th className="py-2">At</th>
                       <th>Type</th>
                       <th>ID</th>
+                      <th>Reason</th>
                       <th>Before → After</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(edits || []).map((e, i) => (
+                    {(edits || []).map((e: any, i) => (
                       <tr key={i} className="border-b align-top">
                         <td className="py-2 whitespace-nowrap">{new Date(e.at).toLocaleString()}</td>
                         <td>{e.type}</td>
                         <td className="font-mono">{e.id}</td>
+                        <td className="whitespace-pre-wrap">{e?.reason || ''}</td>
                         <td className="font-mono whitespace-pre-wrap text-[10px]"><div>{JSON.stringify(e.before || {}, null, 2)}</div><div className="text-center">↓</div><div>{JSON.stringify(e.after || {}, null, 2)}</div></td>
                       </tr>
                     ))}
                     {(!edits || edits.length === 0) && (
-                      <tr><td className="py-2 text-gray-400" colSpan={4}>none</td></tr>
+                      <tr><td className="py-2 text-gray-400" colSpan={5}>none</td></tr>
                     )}
                   </tbody>
                 </table>
