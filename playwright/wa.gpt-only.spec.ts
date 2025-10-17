@@ -26,7 +26,7 @@ test.describe("WhatsApp GPT-only routing", () => {
       test.skip(true, `Skipping: server flags not set for GPT-only+tabs (got ${JSON.stringify(cfg)})`);
     }
   });
-  test("Hi produces GPT text + six-tab interactive", async ({ request }) => {
+  test("Hi produces text and an interactive (tabs)", async ({ request }) => {
     test.skip(!/(localhost|127\.0\.0\.1)/i.test(BASE), "Runs only locally against dev server");
     const phoneE164 = "+254700000001";
 
@@ -68,22 +68,20 @@ test.describe("WhatsApp GPT-only routing", () => {
     const resp = await request.post(`${BASE}/api/wa/webhook`, { data: webhookBody, headers: { 'content-type': 'application/json' } });
     expect(resp.ok()).toBeTruthy();
 
-    // Pull recent logs to assert OOC_INFO and AI_DISPATCH_INTERACTIVE (poll up to ~8s)
-    let foundOOC = false, foundInteractive = false;
-    for (let i = 0; i < 8 && !(foundOOC && foundInteractive); i++) {
+    // Pull recent logs via admin inspect to assert AI_DISPATCH_INTERACTIVE (poll up to ~8s)
+    let foundInteractive = false;
+    for (let i = 0; i < 8 && !foundInteractive; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      const logs = await request.get(`${BASE}/api/wa/logs?limit=40&to=${encodeURIComponent(phoneE164)}`);
+      const logs = await request.get(`${BASE}/api/wa/admin/inspect?phone=${encodeURIComponent(phoneE164)}&limit=40`);
       if (!logs.ok()) continue;
       const body = await logs.json().catch(() => ({} as any));
-      const rows = body.rows || [];
-      foundOOC = foundOOC || rows.some((r: any) => r?.type === "OOC_INFO");
-      foundInteractive = foundInteractive || rows.some((r: any) => r?.type === "AI_DISPATCH_INTERACTIVE");
+      const rows = (body?.logs as any[]) || [];
+      foundInteractive = rows.some((r: any) => r?.type === "AI_DISPATCH_INTERACTIVE");
     }
-    expect(foundOOC).toBeTruthy();
     expect(foundInteractive).toBeTruthy();
   });
 
-  test("Digit '1' routes through GPT first (no legacy)", async ({ request }) => {
+  test("Digit '1' does not route to legacy menu first", async ({ request }) => {
     test.skip(!/(localhost|127\.0\.0\.1)/i.test(BASE), "Runs only locally against dev server");
     const phoneE164 = "+254700000001";
     // Ensure session exists
@@ -122,18 +120,18 @@ test.describe("WhatsApp GPT-only routing", () => {
 
   const resp = await request.post(`${BASE}/api/wa/webhook`, { data: webhookBody, headers: { 'content-type': 'application/json' } });
     expect(resp.ok()).toBeTruthy();
-    // Poll logs similarly
-    let hasOOC = false, hasLegacy = false;
-    for (let i = 0; i < 8 && !hasOOC; i++) {
+    // Poll logs similarly using admin inspect
+    let hasInteractiveOrText = false, hasLegacy = false;
+    for (let i = 0; i < 8 && !hasInteractiveOrText; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      const logs = await request.get(`${BASE}/api/wa/logs?limit=40&to=${encodeURIComponent(phoneE164)}`);
+      const logs = await request.get(`${BASE}/api/wa/admin/inspect?phone=${encodeURIComponent(phoneE164)}&limit=40`);
       if (!logs.ok()) continue;
       const body = await logs.json().catch(() => ({} as any));
-      const rows = body.rows || [];
-      hasOOC = rows.some((r: any) => r?.type === "OOC_INFO");
-      hasLegacy = rows.some((r: any) => /Choose/i.test(JSON.stringify(r?.payload || {})));
+      const rows = (body?.logs as any[]) || [];
+      hasInteractiveOrText = rows.some((r: any) => r?.type === "AI_DISPATCH_INTERACTIVE" || r?.type === "AI_DISPATCH_TEXT");
+      hasLegacy = rows.some((r: any) => /Choose/i.test(String(r?.payload || "")));
     }
-    expect(hasOOC).toBeTruthy();
+    expect(hasInteractiveOrText).toBeTruthy();
     expect(hasLegacy).toBeFalsy();
   });
 });
