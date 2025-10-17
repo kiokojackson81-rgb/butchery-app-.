@@ -1745,6 +1745,7 @@ function QuickAdminTools() {
   const [histTab, setHistTab] = React.useState<'none'|'history'>('none');
   const [inactive, setInactive] = React.useState<{ outlets: any[]; products: any[]; people: any[] }|null>(null);
   const [wipes, setWipes] = React.useState<any[]|null>(null);
+  const [edits, setEdits] = React.useState<any[]|null>(null);
 
   // Load dropdown lists for outlets and person codes
   React.useEffect(() => {
@@ -1770,14 +1771,17 @@ function QuickAdminTools() {
 
   const loadHistory = async () => {
     try {
-      const [ri, rw] = await Promise.all([
+      const [ri, rw, re] = await Promise.all([
         fetch('/api/admin/history/inactive', { cache: 'no-store' }),
-        fetch('/api/admin/history/wipes?limit=100', { cache: 'no-store' })
+        fetch('/api/admin/history/wipes?limit=100', { cache: 'no-store' }),
+        fetch('/api/admin/history/edits?limit=200', { cache: 'no-store' }),
       ]);
       const ji = await ri.json().catch(()=>({ ok:false }));
       const jw = await rw.json().catch(()=>({ ok:false }));
+      const je = await re.json().catch(()=>({ ok:false }));
       if (ji?.ok) setInactive({ outlets: ji.outlets || [], products: ji.products || [], people: ji.people || [] });
       if (jw?.ok) setWipes(jw.events || []);
+      if (je?.ok) setEdits(je.events || []);
       setHistTab('history');
     } catch {}
   };
@@ -2115,6 +2119,51 @@ function QuickAdminTools() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4">
+            <h5 className="font-medium mb-2">Admin Edits</h5>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-600">Most recent changes (before/after)</span>
+              <button className="btn-mobile border rounded-xl px-2 py-1 text-xs" onClick={()=>{
+                const rows = (edits||[]).map((e:any)=>({ at: new Date(e.at).toISOString(), type: e.type, id: e.id, before: JSON.stringify(e.before||{}), after: JSON.stringify(e.after||{}) }));
+                const csv = ["at,type,id,before,after"].concat(rows.map(r=>{
+                  const before = String(r.before || "").replaceAll('"', '""');
+                  const after = String(r.after || "").replaceAll('"', '""');
+                  return `${r.at},${r.type},${r.id},"${before}","${after}"`;
+                })).join("\n");
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = `admin-edits-${new Date().toISOString().slice(0,10)}.csv`;
+                a.click();
+              }}>Export CSV</button>
+            </div>
+            <div className="text-xs text-gray-700">
+              <div className="max-h-64 overflow-auto border rounded-xl">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-2">At</th>
+                      <th>Type</th>
+                      <th>ID</th>
+                      <th>Before → After</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(edits || []).map((e, i) => (
+                      <tr key={i} className="border-b align-top">
+                        <td className="py-2 whitespace-nowrap">{new Date(e.at).toLocaleString()}</td>
+                        <td>{e.type}</td>
+                        <td className="font-mono">{e.id}</td>
+                        <td className="font-mono whitespace-pre-wrap text-[10px]"><div>{JSON.stringify(e.before || {}, null, 2)}</div><div className="text-center">↓</div><div>{JSON.stringify(e.after || {}, null, 2)}</div></td>
+                      </tr>
+                    ))}
+                    {(!edits || edits.length === 0) && (
+                      <tr><td className="py-2 text-gray-400" colSpan={4}>none</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
