@@ -1746,6 +1746,7 @@ function QuickAdminTools() {
   const [inactive, setInactive] = React.useState<{ outlets: any[]; products: any[]; people: any[] }|null>(null);
   const [wipes, setWipes] = React.useState<any[]|null>(null);
   const [edits, setEdits] = React.useState<any[]|null>(null);
+  const [histBanner, setHistBanner] = React.useState<string>("");
 
   // Load dropdown lists for outlets and person codes
   React.useEffect(() => {
@@ -1783,6 +1784,15 @@ function QuickAdminTools() {
       if (jw?.ok) setWipes(jw.events || []);
       if (je?.ok) setEdits(je.events || []);
       setHistTab('history');
+    } catch {}
+  };
+
+  // Refresh only Admin Edits list after a restore, without reloading everything
+  const refreshEdits = async () => {
+    try {
+      const re = await fetch('/api/admin/history/edits?limit=200', { cache: 'no-store' });
+      const je = await re.json().catch(()=>({ ok:false }));
+      if (je?.ok) setEdits(je.events || []);
     } catch {}
   };
 
@@ -2126,6 +2136,9 @@ function QuickAdminTools() {
             <h5 className="font-medium mb-2">Admin Edits</h5>
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-gray-600">Most recent changes (before/after, with reason)</span>
+              {histBanner && (
+                <span className="ml-3 text-[11px] px-2 py-1 rounded bg-green-100 text-green-800 border border-green-300">{histBanner}</span>
+              )}
               <button className="btn-mobile border rounded-xl px-2 py-1 text-xs" onClick={()=>{
                 const rows = (edits||[]).map((e:any)=>({ at: new Date(e.at).toISOString(), type: e.type, id: e.id, reason: (e as any)?.reason || '', before: JSON.stringify(e.before||{}), after: JSON.stringify(e.after||{}) }));
                 const csv = ["at,type,id,reason,before,after"].concat(rows.map(r=>{
@@ -2176,7 +2189,9 @@ function QuickAdminTools() {
                                   });
                                   const j = await r.json().catch(()=>({ ok:false }));
                                   if (!j?.ok) throw new Error(j?.error || 'Failed');
-                                  alert('Restored to BEFORE snapshot ✅');
+                                  setHistBanner('Restored to BEFORE snapshot ✅');
+                                  refreshEdits();
+                                  setTimeout(()=>setHistBanner(''), 2000);
                                 } catch (err:any) { alert(err?.message || 'Failed'); }
                               }}
                             >Restore (Before)</button>
@@ -2192,7 +2207,9 @@ function QuickAdminTools() {
                                   });
                                   const j = await r.json().catch(()=>({ ok:false }));
                                   if (!j?.ok) throw new Error(j?.error || 'Failed');
-                                  alert('Restored to AFTER snapshot ✅');
+                                  setHistBanner('Restored to AFTER snapshot ✅');
+                                  refreshEdits();
+                                  setTimeout(()=>setHistBanner(''), 2000);
                                 } catch (err:any) { alert(err?.message || 'Failed'); }
                               }}
                             >Restore (After)</button>
