@@ -1482,13 +1482,25 @@ export default function AdminPage() {
                         )}
                         {filteredProducts.map(p => {
                           const row = getPBRow(pbOutlet, p.key);
-                          const isOverride = row.sellPrice !== (p.sellPrice || 0) || row.active !== (p.active || false);
+                          const globalPrice = Number(p.sellPrice || 0);
+                          const outletPrice = Number(row.sellPrice || 0);
+                          const priceDiff = outletPrice !== globalPrice;
+                          const globalActive = !!p.active;
+                          const outletActive = !!row.active;
+                          const activeDiff = outletActive !== globalActive;
+                          const isOverride = priceDiff || activeDiff;
+                          const tooltip = (() => {
+                            const parts: string[] = [];
+                            if (priceDiff) parts.push(`Price — Global: ${globalPrice}, Outlet: ${outletPrice}`);
+                            if (activeDiff) parts.push(`Enabled — Global: ${globalActive ? 'Yes' : 'No'}, Outlet: ${outletActive ? 'Yes' : 'No'}`);
+                            return parts.join(' | ') || 'Differs from global';
+                          })();
                           return (
                             <tr key={`pb-${p.id}`} className="border-b">
                               <td className="py-2">
                                 {p.name} <span className="text-xs text-gray-500">({p.key})</span>
                                 {isOverride && (
-                                  <span className="ml-2 inline-flex items-center text-[10px] px-2 py-0.5 rounded-full border text-gray-600" title="Differs from global">
+                                  <span className="ml-2 inline-flex items-center text-[10px] px-2 py-0.5 rounded-full border text-gray-600" title={tooltip}>
                                     overridden
                                   </span>
                                 )}
