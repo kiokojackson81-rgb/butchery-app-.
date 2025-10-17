@@ -1,7 +1,25 @@
 name: Smoke tests (Playwright)
+run-name: >-
+  Smoke tests • suite=${{ inputs.suite || 'all' }} • prodDB=${{ inputs.use_prod_db || false }}
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Which suite to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gpt-only
+          - legacy
+          - period-3days
+      use_prod_db:
+        description: 'Use Production DATABASE_URL secret for DB'
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [ main, ci/* ]
     paths:
@@ -24,6 +42,7 @@ jobs:
   gpt-only:
     name: GPT-only WA flow
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'gpt-only' }}
     environment:
       name: "Production – butchery-app"
     services:
@@ -38,8 +57,8 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      # Prefer production env secret when provided; fallback to local Postgres service
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      # Prefer production env secret when selected via input; fallback to local Postgres service
+      DATABASE_URL: ${{ ((github.event_name == 'workflow_dispatch') && inputs.use_prod_db) && secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -159,6 +178,7 @@ jobs:
     name: Legacy WA-only smoke
     runs-on: ubuntu-latest
     needs: gpt-only
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'legacy' }}
     environment:
       name: "Production – butchery-app"
     services:
@@ -173,7 +193,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: ${{ ((github.event_name == 'workflow_dispatch') && inputs.use_prod_db) && secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
@@ -283,6 +303,7 @@ jobs:
     name: 3-day period flow
     runs-on: ubuntu-latest
     needs: legacy
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'period-3days' }}
     environment:
       name: "Production – butchery-app"
     services:
@@ -297,7 +318,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U butchery" --health-interval=10s --health-timeout=5s --health-retries=10
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
+      DATABASE_URL: ${{ ((github.event_name == 'workflow_dispatch') && inputs.use_prod_db) && secrets.DATABASE_URL || 'postgresql://butchery:butchery@localhost:5432/butchery?connect_timeout=10' }}
       NEXT_TELEMETRY_DISABLED: 1
       APP_TZ: Africa/Nairobi
       PORT: 3002
