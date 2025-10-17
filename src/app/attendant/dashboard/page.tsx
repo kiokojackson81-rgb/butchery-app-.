@@ -575,15 +575,15 @@ export default function AttendantDashboardPage() {
     });
 
     let closeCount = 1;
+    let rotated = false;
     try {
-      const res = await postJSON<{ ok: boolean; closeCount?: number }>("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot });
+      const res = await postJSON<{ ok: boolean; closeCount?: number; rotated?: boolean }>("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot });
       closeCount = Number(res?.closeCount || 1);
+      rotated = !!res?.rotated;
     } catch (e: any) {
+      // We no longer forbid third+ submissions; surface other errors only
       const msg = typeof e?.message === 'string' ? e.message : '';
-      if (/Max closes reached/i.test(msg)) {
-        alert("You've already started two periods today. You cannot close more than 2 periods in the same day.");
-        return; // abort rotation/UI changes
-      }
+      if (msg) { alert(msg); return; }
     }
 
     // Fire low-stock notifications (non-blocking)
@@ -600,7 +600,7 @@ export default function AttendantDashboardPage() {
 
   setSubmitted(true);
   setTab("summary");
-  if (closeCount >= 2) {
+  if (rotated && closeCount >= 2) {
     // End-of-day rotation: show previous and advance stock to tomorrow
     setSummaryMode("previous");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
@@ -620,7 +620,7 @@ export default function AttendantDashboardPage() {
     // Advance stock UI only if this was the second close for the day
     setRows([]);
     setLocked({});
-    if (closeCount >= 2) {
+    if (rotated && closeCount >= 2) {
       const tomorrow = nextDate(dateStr);
       setStockDate(tomorrow);
       try {
@@ -628,7 +628,7 @@ export default function AttendantDashboardPage() {
         setOpeningRowsRaw(r1.rows || []);
       } catch { setOpeningRowsRaw([]); }
     } else {
-      // Stay on same day; rehydrate opening-effective (unchanged) if needed
+      // Either midday rotation (first close) or third+ submission: stay on same day
       try {
         const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
         setOpeningRowsRaw(r1.rows || []);

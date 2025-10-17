@@ -17,13 +17,13 @@ export async function POST(req: Request) {
   const date = dateISOInTZ(new Date(), tz);
   const tomorrow = addDaysISO(date, 1, tz);
 
-  // Enforce max 2 closes per calendar day per outlet
+  // Allow third+ submissions without rotation. We only rotate on first (→ today) and second (→ tomorrow).
   const currentCount = await getCloseCount(outlet, date).catch(() => 0);
-  if (currentCount >= 2) {
-    return NextResponse.json({ ok: false, error: `Max closes reached for ${outlet} on ${date}.` }, { status: 409 });
+  let nextCount = currentCount;
+  let rotated = false;
+  if (currentCount < 2) {
+    nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
   }
-
-  const nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
 
   await prisma.$transaction(async (tx) => {
     // Seed tomorrow's opening rows using: next = max(0, yesterdayClosing + todaySupply - todayClosing - todayWaste)
@@ -90,19 +90,27 @@ export async function POST(req: Request) {
         try {
           await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } });
         } catch {}
+        rotated = true;
       } else if (nextCount >= 2) {
-        await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
-        const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
-        for (const key of keys) {
-          const base = Number(prevOpenByItem[key] || 0);
-          const add = Number(supplyByItem[key] || 0);
-          const close = Number((closingByItem[key]?.closingQty) || 0);
-          const waste = Number((closingByItem[key]?.wasteQty) || 0);
-          const nextQty = Math.max(0, base + add - close - waste);
-          if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
-        }
-        if (dataTomorrow.length > 0) {
-          await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow });
+        if (currentCount === 1) {
+          // This call bumped from 1 → 2: seed tomorrow and mark rotated
+          await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
+          const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+          for (const key of keys) {
+            const base = Number(prevOpenByItem[key] || 0);
+            const add = Number(supplyByItem[key] || 0);
+            const close = Number((closingByItem[key]?.closingQty) || 0);
+            const waste = Number((closingByItem[key]?.wasteQty) || 0);
+            const nextQty = Math.max(0, base + add - close - waste);
+            if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
+          }
+          if (dataTomorrow.length > 0) {
+            await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow });
+          }
+          rotated = true;
+        } else {
+          // Third+ submission in same day: no rotation.
+          rotated = false;
         }
       }
     } catch {}
@@ -125,5 +133,5 @@ export async function POST(req: Request) {
   });
 
   // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count.
-  return NextResponse.json({ ok: true, closeCount: nextCount });
+  return NextResponse.json({ ok: true, closeCount: nextCount, rotated });
 }

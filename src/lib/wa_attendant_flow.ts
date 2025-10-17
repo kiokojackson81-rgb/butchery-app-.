@@ -1940,16 +1940,12 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     ];
     await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
     // Update close count and seed tomorrow's opening on second close;
-    // If this is a third attempt, notify and skip bumping.
+    // Third+ submissions: allow save but do not rotate/bump.
     try {
       const count = await getCloseCount(s.outlet, cur.date).catch(() => 0);
       if (count >= 2) {
-        await sendText(
-          phone,
-          "Note: You’ve already closed twice today. A third close won't start a new period.",
-          "AI_DISPATCH_TEXT",
-          { gpt_sent: true }
-        );
+        // Don't bump; just inform that no new period will start
+        await sendText(phone, "Additional submissions today are saved, but won't start a new period.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       } else {
         await bumpCloseCountAndMaybeSeed(s.outlet, cur.date);
       }
@@ -2014,16 +2010,11 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     try { await sendDayCloseNotifications({ date: cur.date, outletName: s.outlet, attendantCode: s.code || undefined }); } catch {}
     try { await startNewActivePeriod(s.outlet); } catch {}
     await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
-    // Update close count and seed on 2nd close; warn if already at 2
+    // Update close count and seed on 2nd close; third+ submits won't rotate
     try {
       const count = await getCloseCount(s.outlet, cur.date).catch(() => 0);
       if (count >= 2) {
-        await sendText(
-          phone,
-          "Note: You’ve already closed twice today. A third close won't start a new period.",
-          "AI_DISPATCH_TEXT",
-          { gpt_sent: true }
-        );
+        await sendText(phone, "Additional submissions today are saved, but won't start a new period.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       } else {
         await bumpCloseCountAndMaybeSeed(s.outlet, cur.date);
       }
