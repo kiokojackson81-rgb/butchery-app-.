@@ -795,6 +795,14 @@ export default function AdminPage() {
     setPricebook(prev => { const next = { ...prev }; delete next[outletName]; return next; });
   };
 
+  // Pricing search/filter (applies to both global and outlet views)
+  const [pricingQuery, setPricingQuery] = useState<string>("");
+  const filteredProducts = useMemo(() => {
+    const q = (pricingQuery || "").trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(p => p.name.toLowerCase().includes(q) || p.key.toLowerCase().includes(q));
+  }, [products, pricingQuery]);
+
   /** ----- Reports helpers (read-only) ----- */
   type RangeMode = "day" | "week";
   const [repDate, setRepDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -1358,6 +1366,12 @@ export default function AdminPage() {
               <span className="text-xs text-gray-400">Manage global products and per-outlet overrides</span>
             </div>
             <div className="flex items-center gap-2">
+              <input
+                className="input-mobile border rounded-xl p-2 text-sm w-56"
+                placeholder="Search products…"
+                value={pricingQuery}
+                onChange={(e)=>setPricingQuery(e.target.value)}
+              />
               <button
                 className={`btn-mobile border rounded-xl px-3 py-1.5 text-sm ${pricingView === 'global' ? 'bg-black text-white' : ''}`}
                 onClick={()=>{ setPricingView('global'); try { const url = new URL(window.location.href); url.searchParams.set('tab','pricing'); url.searchParams.set('pricing','global'); history.replaceState(null,'',url.toString()); } catch {} }}
@@ -1394,10 +1408,10 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {products.length === 0 && (
+                    {filteredProducts.length === 0 && (
                       <tr><td className="py-3 text-gray-500" colSpan={6}>No products yet.</td></tr>
                     )}
-                    {products.map(p => (
+                    {filteredProducts.map(p => (
                       <tr key={p.id} className="border-b">
                         <td className="py-2">
                           <input className="input-mobile border rounded-xl p-2 w-44" value={p.key} onChange={e => updateProduct(p.id, { key: e.target.value })} placeholder="unique key (e.g., beef)"/>
@@ -1463,14 +1477,22 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {products.length === 0 && (
+                        {filteredProducts.length === 0 && (
                           <tr><td className="py-3 text-gray-500" colSpan={3}>No products defined.</td></tr>
                         )}
-                        {products.map(p => {
+                        {filteredProducts.map(p => {
                           const row = getPBRow(pbOutlet, p.key);
+                          const isOverride = row.sellPrice !== (p.sellPrice || 0) || row.active !== (p.active || false);
                           return (
                             <tr key={`pb-${p.id}`} className="border-b">
-                              <td className="py-2">{p.name} <span className="text-xs text-gray-500">({p.key})</span></td>
+                              <td className="py-2">
+                                {p.name} <span className="text-xs text-gray-500">({p.key})</span>
+                                {isOverride && (
+                                  <span className="ml-2 inline-flex items-center text-[10px] px-2 py-0.5 rounded-full border text-gray-600" title="Differs from global">
+                                    overridden
+                                  </span>
+                                )}
+                              </td>
                               <td>
                                 <input className="input-mobile border rounded-xl p-2 w-36" type="number" min={0} step={1} value={row.sellPrice} onChange={e=>setPBRow(pbOutlet, p.key, { sellPrice: n(e.target.value) })} />
                               </td>
