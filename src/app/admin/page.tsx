@@ -1742,6 +1742,9 @@ function QuickAdminTools() {
   const [loadingLists, setLoadingLists] = React.useState<boolean>(false);
   const [wipeModal, setWipeModal] = React.useState<null | { type: 'outlet' | 'attendant'; target: string }>(null);
   const [wipeAck, setWipeAck] = React.useState<string>("");
+  const [histTab, setHistTab] = React.useState<'none'|'history'>('none');
+  const [inactive, setInactive] = React.useState<{ outlets: any[]; products: any[]; people: any[] }|null>(null);
+  const [wipes, setWipes] = React.useState<any[]|null>(null);
 
   // Load dropdown lists for outlets and person codes
   React.useEffect(() => {
@@ -1764,6 +1767,20 @@ function QuickAdminTools() {
     loadLists();
     return () => { cancelled = true; };
   }, []);
+
+  const loadHistory = async () => {
+    try {
+      const [ri, rw] = await Promise.all([
+        fetch('/api/admin/history/inactive', { cache: 'no-store' }),
+        fetch('/api/admin/history/wipes?limit=100', { cache: 'no-store' })
+      ]);
+      const ji = await ri.json().catch(()=>({ ok:false }));
+      const jw = await rw.json().catch(()=>({ ok:false }));
+      if (ji?.ok) setInactive({ outlets: ji.outlets || [], products: ji.products || [], people: ji.people || [] });
+      if (jw?.ok) setWipes(jw.events || []);
+      setHistTab('history');
+    } catch {}
+  };
 
   const clearDayData = async () => {
     if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
@@ -1897,6 +1914,7 @@ function QuickAdminTools() {
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={startNewPeriod} disabled={busy}>Start New Period Now</button>
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={wipeInactiveOutlet} disabled={busy}>Wipe Inactive Outlet</button>
+        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={loadHistory} disabled={busy}>View History</button>
       </div>
       <div className="grid sm:grid-cols-3 gap-3">
         <label className="text-sm">
@@ -2034,6 +2052,70 @@ function QuickAdminTools() {
               >
                 Proceed & Wipe
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {histTab === 'history' && (
+        <div className="rounded-2xl border p-3 mt-3">
+          <h4 className="font-semibold mb-3">History</h4>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <h5 className="font-medium mb-2">Inactive Records</h5>
+              <div className="text-xs text-gray-700 space-y-2">
+                <div>
+                  <div className="text-gray-500">Outlets</div>
+                  <ul className="list-disc pl-4">
+                    {(inactive?.outlets || []).map(o => <li key={o.id}><span className="font-mono">{o.name}</span></li>)}
+                    {(inactive?.outlets || []).length === 0 && <li className="text-gray-400">none</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-gray-500">Products</div>
+                  <ul className="list-disc pl-4">
+                    {(inactive?.products || []).map(p => <li key={p.id}><span className="font-mono">{p.key}</span> — {p.name}</li>)}
+                    {(inactive?.products || []).length === 0 && <li className="text-gray-400">none</li>}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-gray-500">People (codes)</div>
+                  <ul className="list-disc pl-4">
+                    {(inactive?.people || []).map(pc => <li key={pc.id}><span className="font-mono">{pc.code}</span> [{pc.role}] {pc.name || ''}</li>)}
+                    {(inactive?.people || []).length === 0 && <li className="text-gray-400">none</li>}
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div>
+              <h5 className="font-medium mb-2">Wipe Events</h5>
+              <div className="text-xs text-gray-700">
+                <div className="max-h-64 overflow-auto border rounded-xl">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left border-b">
+                        <th className="py-2">At</th>
+                        <th>Type</th>
+                        <th>Target</th>
+                        <th>Counts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(wipes || []).map((w, i) => (
+                        <tr key={i} className="border-b">
+                          <td className="py-2 whitespace-nowrap">{new Date(w.at).toLocaleString()}</td>
+                          <td>{w.type}</td>
+                          <td className="font-mono">{w.target}</td>
+                          <td><code>{JSON.stringify(w.counts)}</code></td>
+                        </tr>
+                      ))}
+                      {(!wipes || wipes.length === 0) && (
+                        <tr><td className="py-2 text-gray-400" colSpan={4}>none</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>

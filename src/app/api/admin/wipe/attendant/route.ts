@@ -45,6 +45,14 @@ export async function POST(req: Request) {
     // Deactivate the person code to be safe (idempotent)
     try { await (prisma as any).personCode.updateMany({ where: { code: { equals: loginCode, mode: 'insensitive' } }, data: { active: false } }); } catch {}
 
+    // Log wipe event for audit/history
+    try {
+      const key = `wipe_event:${Date.now()}:attendant:${loginCode}`;
+      await (prisma as any).setting.create({
+        data: { key, value: { type: 'attendant', target: loginCode, at: new Date().toISOString(), onlyIfInactive, counts: results } },
+      });
+    } catch {}
+
     return NextResponse.json({ ok: true, code: loginCode, deleted: results });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'server' }, { status: 500 });

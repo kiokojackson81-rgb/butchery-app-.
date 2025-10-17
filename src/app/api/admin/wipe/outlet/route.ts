@@ -51,7 +51,15 @@ export async function POST(req: Request) {
     try { await (prisma as any).outlet.update({ where: { id: outlet.id }, data: { active: false } }); } catch {}
     try { await (prisma as any).attendant.updateMany({ where: { outletId: outlet.id }, data: { outletId: null } }); } catch {}
 
-    return NextResponse.json({ ok: true, outletId: outlet.id, outletName: outletNameKey, deleted: results });
+        // Log wipe event for audit/history
+        try {
+          const key = `wipe_event:${Date.now()}:outlet:${outletNameKey}`;
+          await (prisma as any).setting.create({
+            data: { key, value: { type: 'outlet', target: outletNameKey, at: new Date().toISOString(), onlyIfInactive, counts: results } },
+          });
+        } catch {}
+
+        return NextResponse.json({ ok: true, outletId: outlet.id, outletName: outletNameKey, deleted: results });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'server' }, { status: 500 });
   }
