@@ -509,7 +509,16 @@ export default function AdminPage() {
     try {
       const r = await pushAssignmentsToDB(scope);
       try { await refreshScopeFromServer(); } catch {}
-      alert(`Assignments saved to server ✅ (rows: ${r.count})`);
+      const details = (r as any)?.results as Array<{ code: string; changed: boolean; notify?: { sent: boolean; reason?: string } }> | undefined;
+      if (Array.isArray(details) && details.length > 0) {
+        const sent = details.filter(d => d.notify?.sent).length;
+        const skippedNoPhone = details.filter(d => d.notify?.reason === 'no-phone').length;
+        const noChange = details.filter(d => d.notify?.reason === 'no-change').length;
+        const other = details.length - sent - skippedNoPhone - noChange;
+        alert(`Assignments saved ✅ (rows: ${r.count})\nNotifications — sent: ${sent}, no-phone: ${skippedNoPhone}, no-change: ${noChange}, other: ${other}`);
+      } else {
+        alert(`Assignments saved to server ✅ (rows: ${r.count})`);
+      }
     } catch (e: any) {
       const msg = e?.message || String(e) || 'Saved locally, but failed to sync assignments to server.';
       alert(msg);

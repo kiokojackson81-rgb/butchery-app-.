@@ -112,21 +112,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "product_conflict", conflicts });
     }
 
-    // 5) Apply changes
+    // 5) Apply changes and collect notification outcomes
     let processed = 0;
+    const results: Array<{ code: string; changed: boolean; notify?: { sent: boolean; reason?: string } }> = [];
     for (const [code, entry] of Object.entries(incoming)) {
       try {
         const { canonicalCode, before, after, changed } = await upsertAssignmentForCode(code, entry.outlet, entry.productKeys);
         processed += 1;
-        if (changed) {
-          await notifyAttendantAssignmentChange(canonicalCode, { before, after });
+        let notify: { sent: boolean; reason?: string } | undefined;
+        try {
+          notify = changed ? await notifyAttendantAssignmentChange(canonicalCode, { before, after }) : { sent: false, reason: "no-change" };
+        } catch (e) {
+          notify = { sent: false, reason: "notify-error" };
         }
+        results.push({ code: canonicalCode, changed, notify });
       } catch (err) {
         console.error("save scope entry failed", code, err);
+        results.push({ code, changed: false, notify: { sent: false, reason: "error" } });
       }
     }
 
-    return NextResponse.json({ ok: true, count: processed });
+    return NextResponse.json({ ok: true, count: processed, results });
   } catch (e) {
     console.error("save scope error", e);
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
