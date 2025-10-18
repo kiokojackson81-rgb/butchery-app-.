@@ -3,8 +3,8 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
 const COOKIE_NAME = "bk_sess";
-// Short TTL with sliding renewal
-const SESSION_TTL_SECONDS = 10 * 60; // 10 minutes
+// Session TTL with sliding renewal (~24h as per project docs)
+const SESSION_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 export async function createSession(attendantId: string, outletCode?: string) {
   const token = crypto.randomBytes(32).toString("hex");

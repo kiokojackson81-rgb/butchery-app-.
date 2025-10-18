@@ -30,5 +30,5 @@ export async function GET() {
   if (role) {
     return NextResponse.json({ ok: true, role: role.role, code: role.code, outlet: role.outlet ?? null });
   }
-  return NextResponse.json({ ok: false }, { status: 401 });
+  return NextResponse.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
 }

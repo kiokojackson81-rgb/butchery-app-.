@@ -2,8 +2,8 @@ import { cookies } from "next/headers";
 import crypto from "crypto";
 
 const ROLE_COOKIE = "bk_role";
-// Short TTL with sliding renewal handled in getRoleSession
-const DEFAULT_TTL_SECONDS = 10 * 60; // 10 minutes
+// TTL with sliding renewal handled in getRoleSession (~24h)
+const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 type Role = "attendant" | "supervisor" | "supplier";
 export type RolePayload = {
