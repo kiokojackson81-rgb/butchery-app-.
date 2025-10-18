@@ -218,11 +218,38 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
             await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
           } catch {}
           await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } }).catch(() => {});
-          const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
-          for (const r of todaysClosings || []) {
-            const key = String((r as any).itemKey);
-            const qty = Math.max(0, Number((r as any).closingQty || 0));
-            if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty });
+          // Resolve units for products
+          let unitByKey: Record<string, string> = {};
+          try {
+            const prods = await (tx as any).product.findMany({ select: { key: true, unit: true } }).catch(() => []);
+            for (const p of prods || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
+          } catch {}
+          // If there are closing rows, carry forward CLOSING; otherwise compute prevClosing + todaySupply
+          const hasClosings = (todaysClosings?.length || 0) > 0;
+          const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
+          if (hasClosings) {
+            for (const r of todaysClosings || []) {
+              const key = String((r as any).itemKey);
+              const qty = Math.max(0, Number((r as any).closingQty || 0));
+              if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty, unit: unitByKey[key] || "kg" });
+            }
+          } else {
+            // Compute prevClosing + todaySupply
+            const d0 = new Date(date + "T00:00:00.000Z"); d0.setUTCDate(d0.getUTCDate() - 1);
+            const y = d0.toISOString().slice(0,10);
+            const [prevClosings, todaySupplyRows] = await Promise.all([
+              (tx as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }).catch(() => []),
+              (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }).catch(() => []),
+            ]);
+            const prevBy: Record<string, number> = {};
+            for (const r of prevClosings || []) { const k = String((r as any).itemKey); const q = Number((r as any).closingQty || 0); if (Number.isFinite(q)) prevBy[k] = (prevBy[k]||0)+q; }
+            const supBy: Record<string, number> = {};
+            for (const r of todaySupplyRows || []) { const k = String((r as any).itemKey); const q = Number((r as any).qty || 0); if (Number.isFinite(q)) supBy[k] = (supBy[k]||0)+q; }
+            const keys = new Set<string>([...Object.keys(prevBy), ...Object.keys(supBy)]);
+            for (const k of keys) {
+              const qty = Math.max(0, Number((prevBy[k] || 0) + (supBy[k] || 0)));
+              if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: k, qty, unit: unitByKey[k] || "kg" });
+            }
           }
           if (dataToday.length > 0) {
             await (tx as any).supplyOpeningRow.createMany({ data: dataToday }).catch(() => {});
@@ -271,13 +298,22 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
     }
     // Overwrite tomorrow's opening rows
     try { await (prisma as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } }); } catch {}
-    const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+    // Resolve units once for tomorrow seeding
+    let unitByKey: Record<string, string> = {};
+    try {
+      const prods = await (prisma as any).product.findMany({ select: { key: true, unit: true } }).catch(() => []);
+      for (const p of prods || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
+    } catch {}
+    const data: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
     const keys = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem), ...Object.keys(closingByItem)]);
+    const hasClosings = Object.keys(closingByItem).length > 0;
     for (const key of keys) {
-      // New rule: tomorrow's opening is exactly today's CLOSING
-      const close = Number((closingByItem[key]?.closingQty) || 0);
-      const nextQty = Math.max(0, close);
-      if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
+      // If closing exists today, carry forward closing; else use prevClosing + todaySupply
+      const baseQty = hasClosings
+        ? Number((closingByItem[key]?.closingQty) || 0)
+        : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+      const nextQty = Math.max(0, baseQty);
+      if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
     }
     if (data.length > 0) {
       try { await (prisma as any).supplyOpeningRow.createMany({ data }); } catch {}

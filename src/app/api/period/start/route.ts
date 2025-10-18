@@ -30,11 +30,12 @@ export async function POST(req: Request) {
     try {
       // Build prevOpen from yesterday's closing
   const y = addDaysISO(date, -1, tz);
-      const [prevClosings, todaySupplyRows, todaysClosings, todaysExpenses] = await Promise.all([
+      const [prevClosings, todaySupplyRows, todaysClosings, todaysExpenses, productRows] = await Promise.all([
         (tx as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
         (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
         (tx as any).attendantClosing.findMany({ where: { date, outletName: outlet } }),
         (tx as any).attendantExpense.findMany({ where: { date, outletName: outlet } }),
+        (tx as any).product.findMany({ select: { key: true, unit: true } }),
       ]);
 
       const prevOpenByItem: Record<string, number> = {};
@@ -72,6 +73,8 @@ export async function POST(req: Request) {
         ...Object.keys(closingByItem),
       ]);
       if (nextCount === 1) {
+        const unitByKey: Record<string, string> = {};
+        for (const p of productRows || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
         // Snapshot this in-day close (period reset) before we clear rows, for audit/tracking
         try {
           const snapKey = `snapshot:closing:${date}:${outlet}:1`;
@@ -86,13 +89,18 @@ export async function POST(req: Request) {
           } as any;
           await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
         } catch {}
+        // Reset today's opening rows to the new base.
+        // If there are closing rows today, carry forward CLOSING.
+        // If there are NO closing rows today, use prevClosing + todaySupply (zero + supply when prev was zero).
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } });
-        const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+        const hasClosings = (todaysClosings?.length || 0) > 0;
+        const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
         for (const key of keys) {
-          // New rule: carry forward today's CLOSING as the new opening for the next period (same day)
-          const close = Number((closingByItem[key]?.closingQty) || 0);
-          const nextQty = Math.max(0, close);
-          if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty });
+          const baseQty = hasClosings
+            ? Number((closingByItem[key]?.closingQty) || 0)
+            : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+          const nextQty = Math.max(0, baseQty);
+          if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
         }
         if (dataToday.length > 0) {
           await (tx as any).supplyOpeningRow.createMany({ data: dataToday });
@@ -111,14 +119,20 @@ export async function POST(req: Request) {
         rotated = true;
       } else if (nextCount >= 2) {
         if (currentCount === 1) {
+          const unitByKey: Record<string, string> = {};
+          for (const p of productRows || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
           // This call bumped from 1 → 2: seed tomorrow and mark rotated
           await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
-          const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+          const hasClosings = (todaysClosings?.length || 0) > 0;
+          const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
           for (const key of keys) {
-            // Carry forward only today's CLOSING to tomorrow's opening
-            const close = Number((closingByItem[key]?.closingQty) || 0);
-            const nextQty = Math.max(0, close);
-            if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
+            // If there are closing rows today, carry forward CLOSING.
+            // If not, seed tomorrow from prevClosing + todaySupply (zero + supply when prev was zero).
+            const baseQty = hasClosings
+              ? Number((closingByItem[key]?.closingQty) || 0)
+              : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+            const nextQty = Math.max(0, baseQty);
+            if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
           }
           if (dataTomorrow.length > 0) {
             await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow });
