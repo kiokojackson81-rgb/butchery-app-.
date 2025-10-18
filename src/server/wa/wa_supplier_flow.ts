@@ -294,33 +294,16 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
-    // If exists, prompt Add vs Replace
+    // If exists, automatically ADD to current opening; otherwise create
     const existed = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
     if (existed) {
-      await sendText(gp, `You've already submitted ${productKey} today for ${outlet}. Add to existing or Replace?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-      await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c } });
-      return sendInteractive({
-        messaging_product: "whatsapp",
-        to: gp,
-        type: "interactive",
-        interactive: {
-          type: "button",
-          body: { text: `Existing ${productKey}: ${existed.qty}${existed.unit}. Pick action:` },
-          action: {
-            buttons: [
-              { type: "reply", reply: { id: "SPL_SAVE_ADD", title: "Add" } },
-              { type: "reply", reply: { id: "SPL_SAVE_REPLACE", title: "Replace" } },
-              { type: "reply", reply: { id: "SPL_BACK", title: "Back" } },
-            ],
-          },
-        },
-      } as any, "AI_DISPATCH_INTERACTIVE");
+      await (prisma as any).supplyOpeningRow.update({
+        where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
+        data: { qty: { increment: qty }, buyPrice, unit },
+      });
+    } else {
+      await (prisma as any).supplyOpeningRow.create({ data: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit } });
     }
-    await (prisma as any).supplyOpeningRow.upsert({
-      where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
-      update: { qty, buyPrice, unit },
-      create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
-    });
     try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
     // Resolve supplier identity (name) from session code or phone mapping and notify attendant
     let supplierName: string | undefined = undefined;
@@ -356,13 +339,22 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
     const existing = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
-    const existedQty = Number(existing?.qty || 0);
-    const totalQty = replyId === "SPL_SAVE_ADD" ? existedQty + qty : qty;
-    await (prisma as any).supplyOpeningRow.upsert({
-      where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
-      update: { qty: totalQty, buyPrice, unit },
-      create: { date: c.date, outletName: outlet, itemKey: productKey, qty: totalQty, buyPrice, unit },
-    });
+    if (replyId === "SPL_SAVE_ADD") {
+      if (existing) {
+        await (prisma as any).supplyOpeningRow.update({
+          where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
+          data: { qty: { increment: qty }, buyPrice, unit },
+        });
+      } else {
+        await (prisma as any).supplyOpeningRow.create({ data: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit } });
+      }
+    } else { // SPL_SAVE_REPLACE
+      await (prisma as any).supplyOpeningRow.upsert({
+        where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
+        update: { qty, buyPrice, unit },
+        create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
+      });
+    }
     try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
     // Resolve supplier identity (name) and notify attendant on update/add
     let supplierName: string | undefined = undefined;
@@ -384,7 +376,11 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     // Auto-notify after update/add aggregate
     try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
-  await sendTextSafe(gp, `Saved: ${productKey} ${totalQty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    if (replyId === "SPL_SAVE_ADD") {
+      await sendTextSafe(gp, `Added: ${productKey} +${qty}${unit} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } else {
+      await sendTextSafe(gp, `Replaced: ${productKey} ${qty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
   }
