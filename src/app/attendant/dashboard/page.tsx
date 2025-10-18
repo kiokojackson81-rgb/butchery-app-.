@@ -462,6 +462,27 @@ export default function AttendantDashboardPage() {
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet, summaryMode, dateStr]);
 
+  // Background refresh ticker so KPIs update even when not on Summary (e.g., verified deposits processed externally)
+  useEffect(() => {
+    if (!outlet) return;
+    let cancelled = false;
+    function start() {
+      const id = setInterval(async () => {
+        try {
+          if (cancelled) return;
+          const dateArg = summaryMode === 'previous' ? prevDate(dateStr) : undefined;
+          // Avoid duplicating the tighter 10s poll when Summary tab is open
+          if (tab !== 'summary') {
+            await refreshPeriodAndHeader(outlet as string, dateArg);
+          }
+        } catch {}
+      }, 30000);
+      return id;
+    }
+    const timer = start();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [outlet, tab, summaryMode, dateStr]);
+
   // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
   useEffect(() => {
     if (!outlet) return;
