@@ -91,14 +91,14 @@ export async function POST(req: Request) {
         } catch {}
         // Reset today's opening rows to the new base.
         // If there are closing rows today, carry forward CLOSING.
-        // If there are NO closing rows today, use prevClosing + todaySupply (zero + supply when prev was zero).
+  // If there are NO closing rows today, use only prevClosing (supply resets for the new period).
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } });
         const hasClosings = (todaysClosings?.length || 0) > 0;
         const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
         for (const key of keys) {
           const baseQty = hasClosings
             ? Number((closingByItem[key]?.closingQty) || 0)
-            : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+            : Number((prevOpenByItem[key] || 0));
           const nextQty = Math.max(0, baseQty);
           if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
         }
@@ -127,10 +127,10 @@ export async function POST(req: Request) {
           const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
           for (const key of keys) {
             // If there are closing rows today, carry forward CLOSING.
-            // If not, seed tomorrow from prevClosing + todaySupply (zero + supply when prev was zero).
+            // If not, seed tomorrow from prevClosing only (supply resets for the new period).
             const baseQty = hasClosings
               ? Number((closingByItem[key]?.closingQty) || 0)
-              : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+              : Number((prevOpenByItem[key] || 0));
             const nextQty = Math.max(0, baseQty);
             if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
           }

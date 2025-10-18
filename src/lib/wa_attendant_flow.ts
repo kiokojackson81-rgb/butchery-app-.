@@ -224,7 +224,7 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
             const prods = await (tx as any).product.findMany({ select: { key: true, unit: true } }).catch(() => []);
             for (const p of prods || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
           } catch {}
-          // If there are closing rows, carry forward CLOSING; otherwise compute prevClosing + todaySupply
+          // If there are closing rows, carry forward CLOSING; otherwise use previous closing only (supply resets)
           const hasClosings = (todaysClosings?.length || 0) > 0;
           const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
           if (hasClosings) {
@@ -234,20 +234,17 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
               if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty, unit: unitByKey[key] || "kg" });
             }
           } else {
-            // Compute prevClosing + todaySupply
+            // Use previous closing only
             const d0 = new Date(date + "T00:00:00.000Z"); d0.setUTCDate(d0.getUTCDate() - 1);
             const y = d0.toISOString().slice(0,10);
-            const [prevClosings, todaySupplyRows] = await Promise.all([
+            const [prevClosings] = await Promise.all([
               (tx as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }).catch(() => []),
-              (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }).catch(() => []),
             ]);
             const prevBy: Record<string, number> = {};
             for (const r of prevClosings || []) { const k = String((r as any).itemKey); const q = Number((r as any).closingQty || 0); if (Number.isFinite(q)) prevBy[k] = (prevBy[k]||0)+q; }
-            const supBy: Record<string, number> = {};
-            for (const r of todaySupplyRows || []) { const k = String((r as any).itemKey); const q = Number((r as any).qty || 0); if (Number.isFinite(q)) supBy[k] = (supBy[k]||0)+q; }
-            const keys = new Set<string>([...Object.keys(prevBy), ...Object.keys(supBy)]);
+            const keys = new Set<string>([...Object.keys(prevBy)]);
             for (const k of keys) {
-              const qty = Math.max(0, Number((prevBy[k] || 0) + (supBy[k] || 0)));
+              const qty = Math.max(0, Number((prevBy[k] || 0)));
               if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: k, qty, unit: unitByKey[k] || "kg" });
             }
           }
@@ -308,10 +305,10 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
     const keys = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem), ...Object.keys(closingByItem)]);
     const hasClosings = Object.keys(closingByItem).length > 0;
     for (const key of keys) {
-      // If closing exists today, carry forward closing; else use prevClosing + todaySupply
+      // If closing exists today, carry forward closing; else use prevClosing only (supply resets)
       const baseQty = hasClosings
         ? Number((closingByItem[key]?.closingQty) || 0)
-        : Number((prevOpenByItem[key] || 0) + (supplyByItem[key] || 0));
+        : Number((prevOpenByItem[key] || 0));
       const nextQty = Math.max(0, baseQty);
       if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
     }
