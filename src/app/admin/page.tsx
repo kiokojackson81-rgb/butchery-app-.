@@ -1664,6 +1664,13 @@ export default function AdminPage() {
             <p className="text-xs text-gray-600 mt-2">Stores a PhoneMapping with role="admin" and code="ADMIN".</p>
           </div>
 
+          {/* Clear Outlet Data (new) */}
+          <div className="rounded-xl border p-3 mt-4">
+            <h3 className="font-medium mb-2">Clear Outlet Data</h3>
+            <p className="text-xs text-gray-600 mb-3">Use this to clear an outlet's day(s): opening, closings, expenses, deposits, till, and related locks/snapshots. "Everything" clears all history for that outlet.</p>
+            <ClearOutletData />
+          </div>
+
           {/* Quick Admin Tools */}
           <div className="rounded-xl border p-3 mt-4">
             <h3 className="font-medium mb-2">Quick Admin Tools</h3>
@@ -1791,6 +1798,114 @@ function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, 
 // Lazy client-only import for the embedded Performance tab
 const EmbeddedPerformance = dynamic(() => import("@/components/performance/PerformanceView"), { ssr: false });
 
+function ClearOutletData() {
+  const [outlet, setOutlet] = React.useState<string>("");
+  const [scope, setScope] = React.useState<"today"|"yesterday"|"date"|"everything">("today");
+  const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
+  const [preventCarryForward, setPreventCarryForward] = React.useState<boolean>(true);
+  const [resetActivePeriod, setResetActivePeriod] = React.useState<boolean>(true);
+  const [busy, setBusy] = React.useState<boolean>(false);
+  const [msg, setMsg] = React.useState<string>("");
+  const [outletOptions, setOutletOptions] = React.useState<Array<{ id: string; name: string; active: boolean }>>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadOutlets() {
+      try {
+        const ro = await fetch('/api/admin/list/outlets', { cache: 'no-store' });
+        const jo = await ro.json().catch(()=>({ ok:false }));
+        if (!cancelled && jo?.ok && Array.isArray(jo.rows)) {
+          setOutletOptions(jo.rows.map((r: any)=>({ id: r.id, name: r.name, active: !!r.active })));
+        }
+      } catch {}
+    }
+    loadOutlets();
+    return () => { cancelled = true; };
+  }, []);
+
+  const canSubmit = outlet && (scope !== 'date' || !!date);
+
+  const run = async () => {
+    if (!canSubmit) { setMsg('Pick outlet and scope/date'); return; }
+    const warn = scope === 'everything'
+      ? `This will delete ALL history for ${outlet}. Continue?`
+      : scope === 'today'
+        ? `Clear TODAY for ${outlet}? This deletes opening/closings/expenses/deposits/till. Prevent carry-forward: ${preventCarryForward ? 'ON' : 'OFF'}.`
+        : scope === 'yesterday'
+          ? `Clear YESTERDAY for ${outlet}?`
+          : `Clear ${date} for ${outlet}?`;
+    if (!confirm(warn)) return;
+    setBusy(true); setMsg("");
+    try {
+      const body: any = { outletName: outlet, scope, preventCarryForward, resetActivePeriod };
+      if (scope === 'date') body.date = date;
+      const r = await fetch('/api/admin/clear/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', body: JSON.stringify(body) });
+      const j = await r.json().catch(()=>({ ok:false }));
+      if (!j?.ok) throw new Error(j?.error || 'Failed');
+      setMsg(`Deleted: ${JSON.stringify(j.deleted)}`);
+    } catch (e:any) {
+      setMsg(e?.message || 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">Outlet</div>
+          {outletOptions.length > 0 ? (
+            <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+              <option value="">Pick outlet…</option>
+              {outletOptions.map(o => (
+                <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="input-mobile border rounded-xl p-2 w-full" placeholder="e.g., Bright" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          )}
+        </label>
+        <label className="text-sm">
+          <div className="text-gray-600 mb-1">Scope</div>
+          <select className="input-mobile border rounded-xl p-2 w-full" value={scope} onChange={e=>setScope(e.target.value as any)}>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="date">Specific date…</option>
+            <option value="everything">Everything (ALL history)</option>
+          </select>
+        </label>
+        {scope === 'date' && (
+          <label className="text-sm">
+            <div className="text-gray-600 mb-1">Date</div>
+            <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
+          </label>
+        )}
+      </div>
+
+      {scope !== 'everything' && (
+        <div className="flex items-center gap-4">
+          <label className="text-sm inline-flex items-center gap-2">
+            <input type="checkbox" className="scale-110" checked={preventCarryForward} onChange={e=>setPreventCarryForward(e.target.checked)} />
+            <span>Prevent carry-forward (also clear previous day closings)</span>
+          </label>
+          <label className="text-sm inline-flex items-center gap-2">
+            <input type="checkbox" className="scale-110" checked={resetActivePeriod} onChange={e=>setResetActivePeriod(e.target.checked)} />
+            <span>Reset Active Period</span>
+          </label>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={run} disabled={busy || !canSubmit}>
+          {busy ? 'Clearing…' : 'Run Clear'}
+        </button>
+        {msg && <div className="text-xs text-gray-600">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 function QuickAdminTools() {
   const [outlet, setOutlet] = React.useState<string>("");
   const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
@@ -1871,21 +1986,6 @@ function QuickAdminTools() {
       const j = await r.json().catch(()=>({ ok:false }));
       if (!j?.ok) throw new Error(j?.error || 'Failed');
       setMsg(`Cleared: ${JSON.stringify(j.deleted)}`);
-    } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
-  };
-
-  const startNewPeriod = async () => {
-    if (!outlet) { setMsg("Pick outlet"); return; }
-    if (!confirm(`Start a new trading period now for ${outlet}?`)) return;
-    setBusy(true); setMsg("");
-    try {
-      const r = await fetch(`/api/admin/period/start-force` , {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
-        body: JSON.stringify({ outlet })
-      });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || 'Failed');
-      setMsg(`New period started for ${j.outlet} (${j.date})`);
     } catch (e: any) { setMsg(e?.message || 'Failed'); } finally { setBusy(false); }
   };
 
@@ -1989,7 +2089,6 @@ function QuickAdminTools() {
       </div>
       <div className="flex items-center gap-2">
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={clearDayData} disabled={busy}>Clear Day (outlet+date)</button>
-        <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={startNewPeriod} disabled={busy}>Start New Period Now</button>
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={wipeInactiveOutlet} disabled={busy}>Wipe Inactive Outlet</button>
         <button className="btn-mobile border rounded-xl px-3 py-2 text-sm disabled:opacity-50" onClick={loadHistory} disabled={busy}>View History</button>
       </div>
