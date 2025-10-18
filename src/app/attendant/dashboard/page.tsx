@@ -926,10 +926,9 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
-      // If viewing Current and there is no active period AND no saved activity, avoid premature estimates
-      const noActive = !periodStartAt;
+      // If viewing Current and there is no submitted activity yet, force zeros to avoid premature totals
       const hasAnyActivity = (savedClosingTodayCount > 0) || (depositsFromServer.length > 0) || (expenses.some(e => e.saved)) || (toNum(countedTill) > 0);
-      if (!summaryDate && noActive && !hasAnyActivity) {
+      if (!summaryDate && !hasAnyActivity) {
         setKpi({
           weightSales: 0,
           expenses: 0,
@@ -948,6 +947,20 @@ export default function AttendantDashboardPage() {
         url
       );
       if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
+      // For Current view, if still no activity by the time header resolves (race), keep zeros
+      if (!summaryDate && !hasAnyActivity) {
+        setKpi({
+          weightSales: 0,
+          expenses: 0,
+          todayTotalSales: 0,
+          tillSalesNet: 0,
+          tillSalesGross: 0,
+          verifiedDeposits: 0,
+          amountToDeposit: 0,
+          carryoverPrev: 0,
+        });
+        return;
+      }
       setKpi({
         weightSales: Number(h.totals.weightSales ?? 0),
         expenses: Number(h.totals.expenses ?? 0),
@@ -1550,6 +1563,13 @@ export default function AttendantDashboardPage() {
       {/* ===== SUMMARY ===== */}
       {tab === "summary" && (
         <section className="rounded-2xl border p-4">
+          {summaryMode === 'current' && savedClosingTodayCount === 0 && depositsFromServer.length === 0 && !expenses.some(e=>e.saved) && toNum(countedTill) === 0 && (
+            <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-yellow-50 border-yellow-200 text-yellow-700 w-full">
+              <div>
+                Current shows zeros until the first submission (closing, waste, expense, deposit, or till count).
+              </div>
+            </div>
+          )}
           {showRotationBanner && summaryMode === 'previous' && (
             <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-blue-50 border-blue-200 text-blue-800 w-full">
               <div>
