@@ -70,6 +70,33 @@ export async function POST(req: Request) {
         if (!Number.isFinite(q)) continue; openEffMap.set(k, (openEffMap.get(k) || 0) + q);
       }
     } catch {}
+    // Pre-validate all items and build violations list (do not write if any invalid)
+    type Violation = {
+      itemKey: string;
+      closingQty: number;
+      wasteQty: number;
+      openEff: number;
+      maxClosing: number;
+      message: string;
+    };
+    const violations: Violation[] = [];
+    for (const itemKey of keys) {
+      const rawClosing = Number((safeClosing as any)?.[itemKey] ?? 0);
+      const rawWaste = Number((safeWaste as any)?.[itemKey] ?? 0);
+      const closingQty = Number.isFinite(rawClosing) ? Math.max(0, rawClosing) : 0;
+      const wasteQty = Number.isFinite(rawWaste) ? Math.max(0, rawWaste) : 0;
+      const openEff = Number(openEffMap.get(String(itemKey).toLowerCase()) || 0);
+      const maxClosing = Math.max(0, openEff - wasteQty);
+      if (closingQty > maxClosing + 1e-6) {
+        const message = `Invalid closing for ${itemKey}: closing ${closingQty} exceeds available ${maxClosing} (OpeningEff ${openEff} - Waste ${wasteQty}).`;
+        violations.push({ itemKey, closingQty, wasteQty, openEff, maxClosing, message });
+      }
+    }
+    if (violations.length > 0) {
+      // Backward-compatible error: surface the first message and attach structured errors
+      const firstMsg = violations[0]?.message || "validation_failed";
+      return NextResponse.json({ ok: false, error: firstMsg, violations }, { status: 400 });
+    }
 
   await withRetry(() => prisma.$transaction(async (tx: any) => {
       for (const itemKey of keys) {

@@ -94,6 +94,10 @@ export default function AttendantDashboardPage() {
   // Date used for stock rows (opening/closing overlay). Defaults to today's date, moves to next day after rotation.
   const [stockDate, setStockDate] = useState<string>(today());
   const [showRotationBanner, setShowRotationBanner] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittingStock, setSubmittingStock] = useState(false);
+  const [invalidByKey, setInvalidByKey] = useState<Record<ItemKey, string>>({} as any);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -218,6 +222,13 @@ export default function AttendantDashboardPage() {
   }, [outlet]);
 
   /** ===== Products tab: fetch and live refresh ===== */
+  // Auto-dismiss toast after a short delay
+  useEffect(() => {
+    if (!toastMsg) return;
+    const id = setTimeout(() => setToastMsg(null), 5000);
+    return () => clearTimeout(id);
+  }, [toastMsg]);
+
   async function refreshProducts() {
     try {
       setProductsLoading(true);
@@ -285,7 +296,7 @@ export default function AttendantDashboardPage() {
     // Opening rows from DB for the active calendar date (today).
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`);
+  const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(String(outlet))}`);
         setOpeningRowsRaw(r.rows || []);
       } catch { setOpeningRowsRaw([]); }
     })();
@@ -314,7 +325,7 @@ export default function AttendantDashboardPage() {
     (async () => {
       try {
         const prev = prevDate(stockDate);
-        const j = await getJSON<{ ok: boolean; closingMap: Record<string, number> }>(`/api/attendant/closing?date=${encodeURIComponent(prev)}&outlet=${encodeURIComponent(outlet)}`);
+  const j = await getJSON<{ ok: boolean; closingMap: Record<string, number> }>(`/api/attendant/closing?date=${encodeURIComponent(prev)}&outlet=${encodeURIComponent(String(outlet))}`);
         const m: Record<string, number> = {};
         Object.entries(j?.closingMap || {}).forEach(([k, v]) => { m[String(k).toLowerCase()] = Number(v || 0); });
         setPrevClosingLc(m);
@@ -324,7 +335,7 @@ export default function AttendantDashboardPage() {
     // deposits from DB (server source of truth)
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+  const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
         setDepositsFromServer(r.rows || []);
       } catch {
         setDepositsFromServer([]);
@@ -334,7 +345,7 @@ export default function AttendantDashboardPage() {
     // expenses from DB — merge with any unsaved local rows to avoid UI disappearing
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+  const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
         const fromServer = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any, saved: true }));
         setExpenses((prev) => {
           const unsaved = (prev || []).filter((x) => !x.saved);
@@ -352,7 +363,7 @@ export default function AttendantDashboardPage() {
     // tillcount from DB (optional)
     (async () => {
       try {
-        const r = await getJSON<{ ok: boolean; counted: number }>(`/api/tillcount?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+  const r = await getJSON<{ ok: boolean; counted: number }>(`/api/tillcount?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
         setCountedTill(typeof r.counted === "number" ? r.counted : "");
       } catch { setCountedTill(""); }
     })();
@@ -378,6 +389,75 @@ export default function AttendantDashboardPage() {
     refreshTill(outlet).catch(()=>{});
     setSubmitted(false);
   }, [dateStr, outlet, catalog, stockDate]);
+
+  // Auto-refresh Deposits when deposits tab is active
+  useEffect(() => {
+    if (!outlet || tab !== "deposits") return;
+    let cancelled = false;
+    const outletName = outlet as string;
+    async function pullDeposits() {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outletName)}`);
+        if (cancelled) return;
+        setDepositsFromServer(r.rows || []);
+      } catch {}
+    }
+    pullDeposits();
+    const id = setInterval(pullDeposits, 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tab, outlet, dateStr]);
+
+  // Auto-refresh Expenses when expenses tab is active
+  useEffect(() => {
+    if (!outlet || tab !== "expenses") return;
+    let cancelled = false;
+    const outletName = outlet as string;
+    async function pullExpenses() {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ name: string; amount: number }> }>(`/api/expenses?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outletName)}`);
+        if (cancelled) return;
+        const fromServer = (r.rows || []).map((e) => ({ id: id(), name: e.name, amount: e.amount as any, saved: true }));
+        setExpenses((prev) => {
+          const unsaved = (prev || []).filter((x) => !x.saved);
+          const key = (o: { name: string; amount: any }) => `${(o.name || '').trim().toLowerCase()}|${Number(o.amount) || 0}`;
+          const seen = new Set(fromServer.map(key));
+          const mergedUnsaved = unsaved.filter((u) => !seen.has(key(u as any)));
+          return [...fromServer, ...mergedUnsaved];
+        });
+      } catch {}
+    }
+    pullExpenses();
+    const tid = setInterval(pullExpenses, 7000);
+    return () => { cancelled = true; clearInterval(tid); };
+  }, [tab, outlet, dateStr]);
+
+  // Auto-refresh Till payments when Till tab is active
+  useEffect(() => {
+    if (!outlet || tab !== "till") return;
+    let cancelled = false;
+    async function tick() {
+      try { if (!cancelled) await refreshTill(outlet as string); } catch {}
+    }
+    tick();
+    const id = setInterval(tick, 7000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tab, outlet]);
+
+  // Auto-refresh Summary KPIs when Summary tab is active
+  useEffect(() => {
+    if (!outlet || tab !== "summary") return;
+    let cancelled = false;
+    async function tick() {
+      try {
+        if (cancelled) return;
+        const dateArg = summaryMode === 'previous' ? prevDate(dateStr) : undefined;
+        await refreshPeriodAndHeader(outlet as string, dateArg);
+      } catch {}
+    }
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tab, outlet, summaryMode, dateStr]);
 
   // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
   useEffect(() => {
@@ -438,8 +518,9 @@ export default function AttendantDashboardPage() {
     if (!outlet || rows.length === 0) return;
     (async () => {
       try {
+        const outletName = outlet as string;
         const j = await getJSON<{ ok: boolean; closingMap: Record<string, number>; wasteMap: Record<string, number> }>(
-          `/api/attendant/closing?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outlet)}`
+          `/api/attendant/closing?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(outletName)}`
         );
         const c = j?.closingMap || {};
         const w = j?.wasteMap || {};
@@ -459,6 +540,64 @@ export default function AttendantDashboardPage() {
       } catch {}
     })();
   }, [rows.length, outlet, stockDate]);
+
+  // Auto-refresh saved closings on Stock tab so deletions/updates reflect without reload
+  useEffect(() => {
+    if (!outlet || tab !== "stock" || rows.length === 0) return;
+    let cancelled = false;
+    async function pollOnce() {
+      try {
+        const j = await getJSON<{ ok: boolean; closingMap: Record<string, number>; wasteMap: Record<string, number> }>(
+          `/api/attendant/closing?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(String(outlet))}`
+        );
+        if (!j || j.ok !== true) return;
+        if (cancelled) return;
+        const c = j?.closingMap || {};
+        const w = j?.wasteMap || {};
+        const cLc: Record<string, number> = {};
+        const wLc: Record<string, number> = {};
+        Object.keys(c).forEach((k) => { cLc[String(k).toLowerCase()] = Number(c[k] || 0); });
+        Object.keys(w).forEach((k) => { wLc[String(k).toLowerCase()] = Number(w[k] || 0); });
+
+        setRows((prev) => {
+          const next = prev.map((r) => {
+            const lc = String(r.key).toLowerCase();
+            const has = Object.prototype.hasOwnProperty.call(cLc, lc) || Object.prototype.hasOwnProperty.call(wLc, lc);
+            if (has) {
+              // Only overlay if row is already locked OR there is no unsaved input
+              const isLocked = !!locked[r.key];
+              const hasUnsaved = !isLocked && (toNum(r.closing) > 0 || toNum(r.waste) > 0);
+              if (isLocked || !hasUnsaved) {
+                return { ...r, closing: Number(cLc[lc] ?? r.closing ?? 0), waste: Number(wLc[lc] ?? r.waste ?? 0) };
+              }
+              return r;
+            } else {
+              // If server no longer has this row and it was locked before, clear it
+              if (locked[r.key]) {
+                return { ...r, closing: "", waste: "" };
+              }
+              return r;
+            }
+          });
+          return next;
+        });
+
+        setLocked((prevLocked) => {
+          const next: Record<string, boolean> = { ...prevLocked };
+          for (const r of rows) {
+            const lc = String(r.key).toLowerCase();
+            const has = Object.prototype.hasOwnProperty.call(cLc, lc) || Object.prototype.hasOwnProperty.call(wLc, lc);
+            if (has) next[r.key] = true; else delete next[r.key];
+          }
+          return next;
+        });
+      } catch {}
+    }
+    // initial tick and interval
+    pollOnce();
+    const id = setInterval(pollOnce, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tab, outlet, stockDate, rows.length, locked]);
 
 
   /** ===== Client-side expected totals (unchanged) ===== */
@@ -483,10 +622,14 @@ export default function AttendantDashboardPage() {
   }, [rows, depositsFromServer, expenses, countedTill, catalog]);
 
   /** ===== Handlers ===== */
-  const setClosing = (key: ItemKey, v: number | string | "") =>
+  const setClosing = (key: ItemKey, v: number | string | "") => {
     setRows(prev => prev.map(r => r.key === key ? { ...r, closing: v } : r));
-  const setWaste   = (key: ItemKey, v: number | string | "") =>
+    setInvalidByKey(prev => { const n = { ...prev }; delete (n as any)[key]; return n; });
+  };
+  const setWaste   = (key: ItemKey, v: number | string | "") => {
     setRows(prev => prev.map(r => r.key === key ? { ...r, waste: v } : r));
+    setInvalidByKey(prev => { const n = { ...prev }; delete (n as any)[key]; return n; });
+  };
 
   // deposits
   const addDeposit = () => setDeposits(prev => [...prev, { id: id(), code: "", amount: "", note: "" }]);
@@ -531,9 +674,11 @@ export default function AttendantDashboardPage() {
 
   const submitStock = async () => {
     if (!outlet) return;
+    setSubmitError(null);
+    setSubmittingStock(true);
 
-    const closingMap: Record<string, number> = {};
-    const wasteMap: Record<string, number> = {};
+  const closingMap: Record<string, number> = {};
+  const wasteMap: Record<string, number> = {};
     rows.forEach(r => { closingMap[r.key] = toNum(r.closing); wasteMap[r.key] = toNum(r.waste); });
 
     // Pre-submit checks: warn if any item with opening > 0 has no closing entered (assumed 0),
@@ -558,10 +703,31 @@ export default function AttendantDashboardPage() {
 
     // Persist remaining unsaved rows in one shot for convenience
     try {
-      await postJSON("/api/attendant/closing", { outlet, date: dateStr, closingMap, wasteMap });
+      await postJSON("/api/attendant/closing", { outlet, date: stockDate, closingMap, wasteMap });
     } catch (e: any) {
-      const msg = typeof e?.message === "string" ? e.message : "Failed to submit stock";
+      const raw = typeof e?.message === "string" ? e.message : "Failed to submit stock";
+      let msg = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          const v = Array.isArray(parsed.violations) ? parsed.violations : [];
+          if (v.length > 0) {
+            const map: Record<ItemKey, string> = {} as any;
+            for (const it of v) {
+              const k = String(it?.itemKey || '').toLowerCase();
+              const r = rows.find(x => String(x.key).toLowerCase() === k);
+              if (r) map[r.key] = String(it?.message || parsed.error || 'Invalid closing');
+            }
+            if (Object.keys(map).length > 0) setInvalidByKey(map);
+            msg = String(parsed.error || msg || 'Validation failed');
+          }
+        }
+      } catch {}
       alert(msg);
+      setSubmitError(msg || "Submission failed");
+      setSubmittingStock(false);
+      // Do not proceed to period rotation or summary when stock submission fails
+      return;
     }
 
     // snapshot for next period
@@ -576,14 +742,28 @@ export default function AttendantDashboardPage() {
 
     let closeCount = 1;
     let rotated = false;
+    let rotatedDate: string | undefined;
+    let rotatedTomorrow: string | undefined;
+    let rotatedPhase: "none" | "first" | "second" = "none";
+    let seededTodayCount = 0;
+    let seededTomorrowCount = 0;
+    let seededTodayKeys: string[] = [];
+    let seededTomorrowKeys: string[] = [];
     try {
-      const res = await postJSON<{ ok: boolean; closeCount?: number; rotated?: boolean }>("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot });
+      const res = await postJSON<{ ok: boolean; date?: string; tomorrow?: string; closeCount?: number; rotated?: boolean; details?: { phase?: string; seededTodayCount?: number; seededTomorrowCount?: number; seededTodayKeys?: string[]; seededTomorrowKeys?: string[] } }>("/api/period/start", { outlet, openingSnapshot, pricebookSnapshot });
       closeCount = Number(res?.closeCount || 1);
       rotated = !!res?.rotated;
+      rotatedDate = typeof res?.date === 'string' ? res.date : undefined;
+      rotatedTomorrow = typeof res?.tomorrow === 'string' ? res.tomorrow : undefined;
+      rotatedPhase = (res?.details?.phase === 'first' || res?.details?.phase === 'second') ? (res.details.phase as any) : 'none';
+      seededTodayCount = Number(res?.details?.seededTodayCount || 0);
+      seededTomorrowCount = Number(res?.details?.seededTomorrowCount || 0);
+      seededTodayKeys = Array.isArray(res?.details?.seededTodayKeys) ? (res!.details!.seededTodayKeys as any) : [];
+      seededTomorrowKeys = Array.isArray(res?.details?.seededTomorrowKeys) ? (res!.details!.seededTomorrowKeys as any) : [];
     } catch (e: any) {
       // We no longer forbid third+ submissions; surface other errors only
       const msg = typeof e?.message === 'string' ? e.message : '';
-      if (msg) { alert(msg); return; }
+      if (msg) { alert(msg); setSubmitError(msg); setSubmittingStock(false); return; }
     }
 
     // Fire low-stock notifications (non-blocking)
@@ -605,39 +785,77 @@ export default function AttendantDashboardPage() {
     setSummaryMode("previous");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
     try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
-    await refreshPeriodAndHeader(outlet, prevDate(dateStr));
+    // Show the closed day's results in Summary (use server-provided date if available)
+    await refreshPeriodAndHeader(outlet, rotatedDate || dateStr);
+    // Show confirmation toast
+    if (seededTomorrowCount > 0) setToastMsg(`Seeded tomorrow's opening for ${seededTomorrowCount} item(s).`);
   } else {
     // Midday period switch: stay on current day; keep Summary on current
     setSummaryMode("current");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'current'); } catch {}
     await refreshPeriodAndHeader(outlet, undefined);
+    if (rotated && seededTodayCount > 0) setToastMsg(`Reset today's opening for ${seededTodayCount} item(s).`);
   }
     // refresh closing/waste reads from DB for consistency
-    try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`); } catch {}
+  try { await getJSON(`/api/attendant/closing?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`); } catch {}
     // Clear input buffers for deposits and expenses for the new period
     setDeposits([]);
     setExpenses([]);
-    // Advance stock UI only if this was the second close for the day
+  // Advance stock UI only if this was the second close for the day
     setRows([]);
     setLocked({});
+  setInvalidByKey({} as any);
     if (rotated && closeCount >= 2) {
-      const tomorrow = nextDate(dateStr);
+      const tomorrow = rotatedTomorrow || nextDate(dateStr);
       setStockDate(tomorrow);
       try {
-        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(tomorrow)}&outlet=${encodeURIComponent(outlet)}`);
-        setOpeningRowsRaw(r1.rows || []);
+        if ((seededTomorrowCount > 0 || rotatedPhase === 'second') && seededTomorrowKeys.length > 0) {
+          // Locally apply new opening rows from our submitted closings for the seeded keys
+          const nextRows = (seededTomorrowKeys as string[])
+            .map((k) => {
+              const key = k as ItemKey;
+              const qty = Number((closingMap as any)[key] ?? 0);
+              if (!Number.isFinite(qty) || qty <= 0) return null;
+              return { itemKey: key, qty } as { itemKey: ItemKey; qty: number };
+            })
+            .filter(Boolean) as Array<{ itemKey: ItemKey; qty: number }>;
+          if (nextRows.length > 0) {
+            setOpeningRowsRaw(nextRows);
+          } else {
+            const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(tomorrow)}&outlet=${encodeURIComponent(String(outlet))}`);
+            setOpeningRowsRaw(r1.rows || []);
+          }
+        }
       } catch { setOpeningRowsRaw([]); }
     } else {
       // Either midday rotation (first close) or third+ submission: stay on same day
       try {
-        const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
-        setOpeningRowsRaw(r1.rows || []);
+        if ((seededTodayCount > 0 || rotatedPhase === 'first') && seededTodayKeys.length > 0) {
+          const nextRows = (seededTodayKeys as string[])
+            .map((k) => {
+              const key = k as ItemKey;
+              const qty = Number((closingMap as any)[key] ?? 0);
+              if (!Number.isFinite(qty) || qty <= 0) return null;
+              return { itemKey: key, qty } as { itemKey: ItemKey; qty: number };
+            })
+            .filter(Boolean) as Array<{ itemKey: ItemKey; qty: number }>;
+          if (nextRows.length > 0) {
+            setOpeningRowsRaw(nextRows);
+          } else {
+            const r1 = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
+            setOpeningRowsRaw(r1.rows || []);
+          }
+        }
       } catch { setOpeningRowsRaw([]); }
     }
     try {
-      const r2 = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
-      setSupplyHistory((r2 as any).rows || []);
-    } catch { setSupplyHistory([]); }
+      // Refresh supply/history only if rotation happened
+      if (rotated) {
+        const r2 = await getJSON<{ ok: boolean; rows: Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }> }>(`/api/supply/history?days=7&sort=date_desc`);
+        setSupplyHistory((r2 as any).rows || []);
+      }
+    } catch { if (rotated) setSupplyHistory([]); }
+    setSubmittingStock(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -657,7 +875,7 @@ export default function AttendantDashboardPage() {
     await refreshPeriodAndHeader(outlet);
     // refresh from DB and clear input
     try {
-      const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(outlet)}`);
+  const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: "VALID"|"PENDING"|"INVALID"; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
       setDepositsFromServer(r.rows || []);
     } catch {}
     setDeposits([]);
@@ -765,6 +983,12 @@ export default function AttendantDashboardPage() {
 
   return (
     <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
+      {toastMsg && (
+        <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-green-50 border-green-200 text-green-800 w-full">
+          <div>{toastMsg}</div>
+          <button className="ml-auto text-xs underline decoration-dotted" onClick={() => setToastMsg(null)}>Dismiss</button>
+        </div>
+      )}
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
@@ -904,7 +1128,7 @@ export default function AttendantDashboardPage() {
                     <tr><td className="py-2 text-gray-500" colSpan={7}>No opening stock found from Supplier for this outlet/day.</td></tr>
                   )}
                   {rows.map(r => (
-                    <tr key={r.key} className="border-b">
+                    <tr key={r.key} className={"border-b " + (invalidByKey[r.key] ? "bg-red-50/40" : "") }>
                       <td className="py-2">{r.name}</td>
                       <td>
                         <div>{fmt(r.opening)} {r.unit}</div>
@@ -929,7 +1153,7 @@ export default function AttendantDashboardPage() {
                       </td>
                       <td>
                         <input
-                          className="input-mobile border rounded-xl p-2 w-28"
+                          className={"input-mobile border rounded-xl p-2 w-28 " + (invalidByKey[r.key] ? "border-red-400" : "")}
                           type="number"
                           min={0}
                           step={r.unit === "kg" ? 0.01 : 1}
@@ -938,6 +1162,9 @@ export default function AttendantDashboardPage() {
                           placeholder={`0 ${r.unit}`}
                           disabled={!!locked[r.key]}
                         />
+                        {invalidByKey[r.key] && (
+                          <div className="text-[11px] text-red-700 mt-1">{invalidByKey[r.key]}</div>
+                        )}
                       </td>
                       <td>
                         <div className="flex items-center gap-2">
@@ -990,9 +1217,20 @@ export default function AttendantDashboardPage() {
 
           {/* Submit button after stock table (mobile sticky bar for reach). Always active so attendants can finalize at different times. */}
           <div className="mb-8">
+            {submitError && (
+              <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-red-50 border-red-300 text-red-700 w-full">
+                <div>
+                  {submitError}
+                </div>
+                <button
+                  className="ml-auto text-xs underline decoration-dotted"
+                  onClick={()=>setSubmitError(null)}
+                >Dismiss</button>
+              </div>
+            )}
             <div className="hidden sm:block">
-              <button onClick={submitStock} className="px-4 py-2 rounded-2xl bg-black text-white">
-                Submit & Start New Period
+              <button onClick={submitStock} disabled={submittingStock} className="px-4 py-2 rounded-2xl bg-black text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                {submittingStock ? "Submitting…" : "Submit & Start New Period"}
               </button>
               {submitted && (
                 <span className="ml-3 text-green-700 text-sm align-middle">Submitted. New trading period started.</span>
@@ -1001,8 +1239,8 @@ export default function AttendantDashboardPage() {
             <div className="sm:hidden sticky-save-bottom">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm text-white/80">Stock ready?</span>
-                <button onClick={submitStock} className="px-4 py-2 rounded-xl bg-white text-black font-semibold">
-                  Submit & Start
+                <button onClick={submitStock} disabled={submittingStock} className="px-4 py-2 rounded-xl bg-white text-black font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                  {submittingStock ? "Submitting…" : "Submit & Start"}
                 </button>
               </div>
             </div>

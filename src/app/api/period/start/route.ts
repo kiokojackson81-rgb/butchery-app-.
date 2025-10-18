@@ -20,13 +20,22 @@ export async function POST(req: Request) {
 
     // Allow third+ submissions without rotation. We only rotate on first (→ today) and second (→ tomorrow).
     const currentCount = await getCloseCount(outlet, date).catch(() => 0);
-    let nextCount = currentCount;
-    let rotated = false;
+  let nextCount = currentCount;
+  let rotated = false;
+  // Extra diagnostics to help clients auto-refresh without reload
+  let clearedClosingsCount = 0;
+  let clearedExpensesCount = 0;
+  let seededTodayCount = 0;
+  let seededTomorrowCount = 0;
+  let seededTodayKeys: string[] = [];
+  let seededTomorrowKeys: string[] = [];
+  let phase: "none" | "first" | "second" = "none";
+  let pricebookUpserts = 0;
     if (currentCount < 2) {
       nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
     }
 
-    await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
       // Rotation rules (supply resets across periods):
       // - First close (mid-day): reset TODAY's opening rows equal to today's CLOSING if any; otherwise use only previous day's CLOSING.
       //   Clear today's closings and expenses. Snapshot this reset for audit.
@@ -108,19 +117,24 @@ export async function POST(req: Request) {
         }
         if (dataToday.length > 0) {
           await (tx as any).supplyOpeningRow.createMany({ data: dataToday });
+          seededTodayCount = dataToday.length;
+          seededTodayKeys = dataToday.map((r) => r.itemKey);
         }
         // Important: start a clean in-day period by clearing any saved closings for today.
         // We already used today's closings above to compute the new base; now wipe them so the
         // dashboard won't re-overlay/lock rows as "Submitted" after reload.
         try {
-          await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } });
+          const res = await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } });
+          clearedClosingsCount = Number((res as any)?.count || 0);
         } catch {}
 
         // Reset expenses for the new in-day period (do not carry forward)
         try {
-          await (tx as any).attendantExpense.deleteMany({ where: { date, outletName: outlet } });
+          const res = await (tx as any).attendantExpense.deleteMany({ where: { date, outletName: outlet } });
+          clearedExpensesCount = Number((res as any)?.count || 0);
         } catch {}
         rotated = true;
+        phase = "first";
       } else if (nextCount >= 2) {
         if (currentCount === 1) {
           const unitByKey: Record<string, string> = {};
@@ -140,11 +154,15 @@ export async function POST(req: Request) {
           }
           if (dataTomorrow.length > 0) {
             await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow });
+            seededTomorrowCount = dataTomorrow.length;
+            seededTomorrowKeys = dataTomorrow.map((r) => r.itemKey);
           }
           rotated = true;
+          phase = "second";
         } else {
           // Third+ submission in same day: no rotation.
           rotated = false;
+          phase = "none";
         }
       }
       } catch {}
@@ -156,6 +174,7 @@ export async function POST(req: Request) {
           create: { outletName: outlet, productKey: itemKey, sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
           update: { sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
         });
+        pricebookUpserts++;
       }
 
       // Active period
@@ -166,8 +185,24 @@ export async function POST(req: Request) {
       });
     });
 
-    // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count.
-    return NextResponse.json({ ok: true, closeCount: nextCount, rotated });
+    // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count plus details.
+    return NextResponse.json({
+      ok: true,
+      date,
+      tomorrow,
+      closeCount: nextCount,
+      rotated,
+      details: {
+        seededTodayCount,
+        seededTomorrowCount,
+        clearedClosingsCount,
+        clearedExpensesCount,
+        seededTodayKeys,
+        seededTomorrowKeys,
+        phase,
+        pricebookUpserts,
+      },
+    });
   } catch (err: any) {
     const msg = typeof err?.message === "string" ? err.message : "period/start failed";
     return NextResponse.json({ ok: false, error: msg });
