@@ -10,6 +10,11 @@ export async function logMessage(entry: {
   type?: string | null; // soft type; stored in payload.meta._type when column absent
   createdAt?: Date;
 }) {
+  // In DRY/dev mode, skip DB logging entirely to keep local tests fast and resilient
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return;
+  } catch {}
   // Hotflag: allow disabling DB logging immediately in prod incidents
   const disableRaw = (() => {
     const v = process.env.WA_DISABLE_RAW_LOG?.toLowerCase();

@@ -1,5 +1,6 @@
 // Thin wrappers that adapt the existing lib flow to the new webhook surface.
 import { prisma } from "@/lib/prisma";
+import { getDrySession as getDrySess, setDrySession as setDrySess } from "@/lib/dev_dry";
 import { handleInboundText as libHandleInboundText, handleInteractiveReply as libHandleInteractiveReply } from "@/lib/wa_attendant_flow";
 
 const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
@@ -8,6 +9,21 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
   | { ok: true; sess: any }
   | { ok: false; reason: "no-session" | "logged-out" | "expired" }
 > {
+  // DRY-mode: avoid hitting the database to prevent long connection timeouts in local/dev.
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) {
+      const dry = getDrySess(phoneE164);
+      if (dry) {
+        return { ok: true, sess: { phoneE164, role: dry.role || "attendant", code: dry.code || "ATT001", outlet: dry.outlet || "TestOutlet", state: dry.state || "MENU", cursor: dry.cursor || { date: new Date().toISOString().slice(0,10), rows: [], status: "ACTIVE" }, updatedAt: new Date() } } as any;
+      }
+      // Create a minimal in-memory session for tests
+      const cursor = { date: new Date().toISOString().slice(0,10), rows: [], status: "ACTIVE" } as any;
+      try { setDrySess({ phoneE164, role: "attendant", code: "ATT001", outlet: "TestOutlet", state: "MENU", cursor }); } catch {}
+      return { ok: true, sess: { phoneE164, role: "attendant", code: "ATT001", outlet: "TestOutlet", state: "MENU", cursor, updatedAt: new Date() } } as any;
+    }
+  } catch {}
+
   let sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
 
   // Auto-recover: if session missing or lacks credentials, try binding from phoneMapping

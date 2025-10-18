@@ -6,27 +6,31 @@ import { prisma } from "@/lib/prisma";
 import { getCloseCount, incrementCloseCount, APP_TZ, addDaysISO, dateISOInTZ } from "@/server/trading_period";
 
 export async function POST(req: Request) {
-  const { outlet, openingSnapshot, pricebookSnapshot } = (await req.json()) as {
-    outlet: string;
-    openingSnapshot: Record<string, number>;
-    pricebookSnapshot: Record<string, { sellPrice: number; active: boolean }>;
-  };
-  if (!outlet) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
+  try {
+    const { outlet, openingSnapshot, pricebookSnapshot } = (await req.json()) as {
+      outlet: string;
+      openingSnapshot: Record<string, number>;
+      pricebookSnapshot: Record<string, { sellPrice: number; active: boolean }>;
+    };
+    if (!outlet) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
 
-  const tz = APP_TZ;
-  const date = dateISOInTZ(new Date(), tz);
-  const tomorrow = addDaysISO(date, 1, tz);
+    const tz = APP_TZ;
+    const date = dateISOInTZ(new Date(), tz);
+    const tomorrow = addDaysISO(date, 1, tz);
 
-  // Allow third+ submissions without rotation. We only rotate on first (→ today) and second (→ tomorrow).
-  const currentCount = await getCloseCount(outlet, date).catch(() => 0);
-  let nextCount = currentCount;
-  let rotated = false;
-  if (currentCount < 2) {
-    nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
-  }
+    // Allow third+ submissions without rotation. We only rotate on first (→ today) and second (→ tomorrow).
+    const currentCount = await getCloseCount(outlet, date).catch(() => 0);
+    let nextCount = currentCount;
+    let rotated = false;
+    if (currentCount < 2) {
+      nextCount = await incrementCloseCount(outlet, date).catch(() => currentCount + 1);
+    }
 
-  await prisma.$transaction(async (tx) => {
-    // Seed tomorrow's opening rows using: next = max(0, yesterdayClosing + todaySupply - todayClosing - todayWaste)
+    await prisma.$transaction(async (tx) => {
+      // Rotation rules (supply resets across periods):
+      // - First close (mid-day): reset TODAY's opening rows equal to today's CLOSING if any; otherwise use only previous day's CLOSING.
+      //   Clear today's closings and expenses. Snapshot this reset for audit.
+      // - Second close (EOD): seed TOMORROW's opening rows equal to today's CLOSING if any; otherwise use only previous day's CLOSING.
     try {
       // Build prevOpen from yesterday's closing
   const y = addDaysISO(date, -1, tz);
@@ -64,9 +68,9 @@ export async function POST(req: Request) {
       }
 
       // Period rotation behavior:
-      // - After first close of the day (nextCount === 1): reset TODAY's opening rows to the new base (prev + supply - close - waste).
-      //   This starts a new period on the same calendar day with supply effectively zeroed relative to the new base.
-      // - After second close (nextCount >= 2): seed TOMORROW's opening rows for the next day.
+      // - After first close of the day (nextCount === 1): set TODAY's opening rows = today's closing if present, else previous closing only.
+      //   Expenses are cleared; this starts a new in-day period with supply reset relative to the new base.
+      // - After second close (nextCount >= 2): seed TOMORROW's opening rows similarly (today's closing if present, else previous closing only).
       const keys = new Set<string>([
         ...Object.keys(prevOpenByItem),
         ...Object.keys(supplyByItem),
@@ -91,7 +95,7 @@ export async function POST(req: Request) {
         } catch {}
         // Reset today's opening rows to the new base.
         // If there are closing rows today, carry forward CLOSING.
-  // If there are NO closing rows today, use only prevClosing (supply resets for the new period).
+        // If there are NO closing rows today, use only prevClosing (supply resets for the new period).
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } });
         const hasClosings = (todaysClosings?.length || 0) > 0;
         const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
@@ -143,25 +147,29 @@ export async function POST(req: Request) {
           rotated = false;
         }
       }
-    } catch {}
+      } catch {}
 
-    // Upsert pricebook snapshot
-    for (const [itemKey, row] of Object.entries(pricebookSnapshot || {})) {
-      await tx.pricebookRow.upsert({
-        where: { outletName_productKey: { outletName: outlet, productKey: itemKey } },
-        create: { outletName: outlet, productKey: itemKey, sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
-        update: { sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
+      // Upsert pricebook snapshot
+      for (const [itemKey, row] of Object.entries(pricebookSnapshot || {})) {
+        await tx.pricebookRow.upsert({
+          where: { outletName_productKey: { outletName: outlet, productKey: itemKey } },
+          create: { outletName: outlet, productKey: itemKey, sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
+          update: { sellPrice: Number((row as any).sellPrice || 0), active: !!(row as any).active },
+        });
+      }
+
+      // Active period
+      await tx.activePeriod.upsert({
+        where: { outletName: outlet },
+        create: { outletName: outlet, periodStartAt: new Date() },
+        update: { periodStartAt: new Date() },
       });
-    }
-
-    // Active period
-    await tx.activePeriod.upsert({
-      where: { outletName: outlet },
-      create: { outletName: outlet, periodStartAt: new Date() },
-      update: { periodStartAt: new Date() },
     });
-  });
 
-  // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count.
-  return NextResponse.json({ ok: true, closeCount: nextCount, rotated });
+    // No calendar-day locking: multiple periods allowed per day (max 2). Return current close count.
+    return NextResponse.json({ ok: true, closeCount: nextCount, rotated });
+  } catch (err: any) {
+    const msg = typeof err?.message === "string" ? err.message : "period/start failed";
+    return NextResponse.json({ ok: false, error: msg });
+  }
 }

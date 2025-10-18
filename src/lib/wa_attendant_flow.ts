@@ -19,6 +19,7 @@ import { upsertAndNotifySupervisorCommission } from "@/server/commission";
 import { sendDayCloseNotifications } from "@/server/notifications/day_close";
 import { computeDayTotals } from "@/server/finance";
 import { addDeposit, parseMpesaText } from "@/server/deposits";
+import { listDryDeposits } from "@/lib/dev_dry";
 import { getAssignedProducts } from "@/server/products";
 import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
@@ -1033,11 +1034,17 @@ export async function handleInboundText(phone: string, text: string) {
   await sendText(phone, "Login first (send your code).", "AI_DISPATCH_TEXT", { gpt_sent: true });
       return;
     }
-    const rows = await (prisma as any).attendantDeposit.findMany({
-      where: { outletName: s.outlet, date: cur.date },
-      take: 10,
-      orderBy: { createdAt: "desc" },
-    });
+    let rows: any[] = [];
+    try {
+      rows = await (prisma as any).attendantDeposit.findMany({
+        where: { outletName: s.outlet, date: cur.date },
+        take: 10,
+        orderBy: { createdAt: "desc" },
+      });
+    } catch {
+      // DRY fallback
+      rows = listDryDeposits(s.outlet, cur.date, 10) as any[];
+    }
     if (!rows.length) {
       await sendText(phone, "No deposits yet today.", "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
@@ -1603,7 +1610,12 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     return true;
   }
   if (id === "MENU_TXNS" || id === "ATD_TXNS") {
-    const rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
+    let rows: any[] = [];
+    try {
+      rows = await (prisma as any).attendantDeposit.findMany({ where: { outletName: s.outlet, date: cur.date }, take: 10, orderBy: { createdAt: "desc" } });
+    } catch {
+      rows = listDryDeposits(s.outlet, cur.date, 10) as any[];
+    }
     if (!rows.length) {
       await sendText(phone, "No till payments recorded yet today.", "AI_DISPATCH_TEXT");
     } else {

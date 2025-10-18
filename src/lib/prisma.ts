@@ -15,10 +15,16 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = base as any;
 
 // Hardening: Some environments may not yet have the `type` column on WaMessageLog,
 // while the Prisma client generated from schema expects it in RETURNING.
-// Install top-level overrides and middleware so all code paths are protected.
+// NOTE: In DRY/dev mode we disable all DB introspection and raw SQL to avoid timeouts.
+// Also, when building the Next.js app (phase-production-build), do not touch the DB.
+
+const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+const SAFE_BUILD = String(process.env.NEXT_PHASE || "").includes("phase-production-build") || String(process.env.WA_BUILD_DRY || "").toLowerCase() === "true";
+const NO_DB = DRY || SAFE_BUILD;
 
 let __hasTypeColumn: boolean | null = null;
 async function detectTypeColumn(): Promise<boolean> {
+  if (NO_DB) return false;
   if (__hasTypeColumn !== null) return __hasTypeColumn;
   try {
     // Use the underlying base client during init to avoid referencing the exported prisma before it's created
@@ -42,7 +48,7 @@ const __original = {
 
 // Override create with raw SQL insert that avoids RETURNING the missing column
 try {
-  (base as any).waMessageLog.create = async (args: any) => {
+  if (!NO_DB) (base as any).waMessageLog.create = async (args: any) => {
     try {
       const data = (args && args.data) || {};
       const id = String(data.id || crypto.randomUUID());
@@ -92,7 +98,7 @@ try {
 
 // Override update for the common case { where: { waMessageId }, data: { status } }
 try {
-  (base as any).waMessageLog.update = async (args: any) => {
+  if (!NO_DB) (base as any).waMessageLog.update = async (args: any) => {
     const where = (args && args.where) || {};
     const data = (args && args.data) || {};
     if (where.waMessageId && typeof data.status !== "undefined") {
@@ -112,7 +118,7 @@ try {
 
 // Middleware safety net: intercept any WaMessageLog create/update and perform raw SQL
 try {
-  (base as any).$use(async (params: any, next: any) => {
+  if (!NO_DB) (base as any).$use(async (params: any, next: any) => {
     if (params?.model === "WaMessageLog" && params?.action === "create") {
       try {
         const data = params.args?.data || {};
@@ -181,12 +187,14 @@ try {
 
 // Synchronous ensure: add the column early to avoid Prisma RETURNING errors in cold paths
 try {
-  const ok = await detectTypeColumn();
-  if (!ok) {
-    await (base as any).$executeRawUnsafe(
-      'ALTER TABLE "public"."WaMessageLog" ADD COLUMN IF NOT EXISTS "type" TEXT'
-    );
-    __hasTypeColumn = true;
+  if (!NO_DB) {
+    const ok = await detectTypeColumn();
+    if (!ok) {
+      await (base as any).$executeRawUnsafe(
+        'ALTER TABLE "public"."WaMessageLog" ADD COLUMN IF NOT EXISTS "type" TEXT'
+      );
+      __hasTypeColumn = true;
+    }
   }
 } catch {}
 
@@ -195,11 +203,12 @@ try {
 export const __prismaTypeStore = { get hasType() { return __hasTypeColumn; } } as const;
 
 // Strong interception via $extends so any usage of prisma.waMessageLog.create/update goes through our raw SQL
-const prismaExtended = (base as any).$extends({
+const prismaExtended = NO_DB ? base : (base as any).$extends({
   query: {
     waMessageLog: {
       async create({ args }: any) {
         try {
+          if (NO_DB) return { ok: true } as any;
           const data = (args && args.data) || {};
           const id = String(data.id || crypto.randomUUID());
           const cols: string[] = [
@@ -257,6 +266,7 @@ const prismaExtended = (base as any).$extends({
         }
       },
       async update({ args }: any) {
+        if (NO_DB) return { count: 0 } as any;
         const where = (args && args.where) || {};
         const data = (args && args.data) || {};
         if (where.waMessageId && typeof data.status !== "undefined") {

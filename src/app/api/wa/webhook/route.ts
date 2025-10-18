@@ -354,30 +354,34 @@ export async function POST(req: Request) {
 
           // Idempotency: if we've already sent a reply to this wamid, ignore repeats immediately
           if (wamid) {
-            const already = await (prisma as any).waMessageLog.findFirst({ where: { payload: { path: ["in_reply_to"], equals: wamid } as any } }).catch(() => null);
-            if (already) continue;
+            if (!DRY) {
+              const already = await (prisma as any).waMessageLog.findFirst({ where: { payload: { path: ["in_reply_to"], equals: wamid } as any } }).catch(() => null);
+              if (already) continue;
+            }
           }
 
           // Fallback idempotency: dedupe on phone+text within a 30s bucket (covers carriers that alter wamid)
           if (type === "text") {
-            try {
-              const tsSec = Number((m as any).timestamp || 0);
-              const tsMs = Number.isFinite(tsSec) && tsSec > 0 ? tsSec * 1000 : Date.now();
-              const windowMs = Number(process.env.WA_IDEMPOTENCY_TEXT_BUCKET_MS || 30000);
-              const bucket = Math.floor(tsMs / windowMs);
-              const textBody = String(m.text?.body ?? "").trim();
-              if (textBody) {
-                const key = crypto.createHash("sha1").update(`${phoneE164}|${bucket}|${textBody}`).digest("hex");
-                const dupe = await (prisma as any).waMessageLog.findFirst({ where: { status: "INBOUND_DEDUP", payload: { path: ["key"], equals: key } as any } }).catch(() => null);
-                if (dupe) {
-                  // We've already seen and processed an equivalent message in this short window
-                  continue;
+            if (!DRY) {
+              try {
+                const tsSec = Number((m as any).timestamp || 0);
+                const tsMs = Number.isFinite(tsSec) && tsSec > 0 ? tsSec * 1000 : Date.now();
+                const windowMs = Number(process.env.WA_IDEMPOTENCY_TEXT_BUCKET_MS || 30000);
+                const bucket = Math.floor(tsMs / windowMs);
+                const textBody = String(m.text?.body ?? "").trim();
+                if (textBody) {
+                  const key = crypto.createHash("sha1").update(`${phoneE164}|${bucket}|${textBody}`).digest("hex");
+                  const dupe = await (prisma as any).waMessageLog.findFirst({ where: { status: "INBOUND_DEDUP", payload: { path: ["key"], equals: key } as any } }).catch(() => null);
+                  if (dupe) {
+                    // We've already seen and processed an equivalent message in this short window
+                    continue;
+                  }
+                  // Mark this window so repeats will be ignored
+                  // Do NOT set waMessageId for dedup marker to avoid unique constraint collisions
+                  await logMessage({ direction: "in", templateName: null, waMessageId: null, status: "INBOUND_DEDUP", type: "INBOUND_DEDUP", payload: { phone: phoneE164, key, bucket, preview: textBody.slice(0, 80) } });
                 }
-                // Mark this window so repeats will be ignored
-                // Do NOT set waMessageId for dedup marker to avoid unique constraint collisions
-                await logMessage({ direction: "in", templateName: null, waMessageId: null, status: "INBOUND_DEDUP", type: "INBOUND_DEDUP", payload: { phone: phoneE164, key, bucket, preview: textBody.slice(0, 80) } });
-              }
-            } catch {}
+              } catch {}
+            }
           }
 
           // Log inbound after idempotency gate

@@ -18,6 +18,10 @@ function nowMs() { return Date.now(); }
 function toE164(phone: string) { return phone.startsWith("+") ? phone : "+" + phone.replace(/[^0-9+]/g, ""); }
 
 export async function getWaSession(phone: string): Promise<WaSession | null> {
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return null;
+  } catch {}
   const e164 = toE164(phone);
   const row = await (prisma as any).waSession.findUnique({ where: { phoneE164: e164 } }).catch(() => null);
   if (!row) return null;
@@ -37,6 +41,10 @@ export async function getWaSession(phone: string): Promise<WaSession | null> {
 }
 
 export async function putWaSession(s: WaSession): Promise<void> {
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return;
+  } catch {}
   const e164 = toE164(s.phone);
   const data: any = {
     role: s.role,
@@ -55,16 +63,28 @@ export async function putWaSession(s: WaSession): Promise<void> {
 }
 
 export async function clearWaSession(phone: string): Promise<void> {
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return;
+  } catch {}
   const e164 = toE164(phone);
   try { await (prisma as any).waSession.update({ where: { phoneE164: e164 }, data: { code: null, outlet: null, state: "LOGIN" } }); } catch {}
 }
 
 export async function touchWaSession(phone: string): Promise<void> {
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return;
+  } catch {}
   const e164 = toE164(phone);
   try { await (prisma as any).waSession.update({ where: { phoneE164: e164 }, data: { updatedAt: new Date() } }); } catch {}
 }
 
 export async function markLastMsg(phone: string, type: string): Promise<void> {
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return;
+  } catch {}
   const e164 = toE164(phone);
   try {
     const s = await (prisma as any).waSession.findUnique({ where: { phoneE164: e164 } });

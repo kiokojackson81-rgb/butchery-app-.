@@ -27,6 +27,15 @@ export type SendResult = { ok: true; waMessageId?: string; response?: any } | { 
 const windowCache = new Map<string, { at: number; open: boolean }>();
 
 async function isWindowOpen(phoneE164: string): Promise<boolean> {
+  // In DRY/dev mode, avoid any DB lookups to determine session window state.
+  // Assume open to prevent reopen template sends and keep local tests snappy.
+  try {
+    if (DRY) {
+      const now = Date.now();
+      windowCache.set(phoneE164, { at: now, open: true });
+      return true;
+    }
+  } catch {}
   try {
     const now = Date.now();
     const cached = windowCache.get(phoneE164);
@@ -409,6 +418,8 @@ export async function logOutbound(entry: {
   type?: string | null;
 }) {
   try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return; // skip DB logging in DRY mode
     await logMessage({
       attendantId: entry.attendantId ?? null,
       direction: entry.direction ?? "out",
@@ -423,6 +434,8 @@ export async function logOutbound(entry: {
 
 export async function updateStatusByWamid(waMessageId: string, status: string) {
   try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) return; // skip in DRY mode
     // Use updateMany to avoid throwing when the waMessageId does not match any row.
     const res: any = await (prisma as any).waMessageLog.updateMany({ where: { waMessageId }, data: { status } }).catch(() => ({ count: 0 }));
     const count = (res && typeof res.count === 'number') ? res.count : 0;

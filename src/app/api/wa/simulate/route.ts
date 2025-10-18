@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { handleAuthenticatedText, handleAuthenticatedInteractive } from "@/server/wa_attendant_flow";
 import { handleSupervisorText, handleSupervisorAction } from "@/server/wa/wa_supervisor_flow";
 import { handleSupplierText, handleSupplierAction } from "@/server/wa/wa_supplier_flow";
+import { getDrySession } from "@/lib/dev_dry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,23 @@ export async function POST(req: Request) {
     const { phoneE164, text, buttonId } = (await req.json()) as { phoneE164: string; text?: string; buttonId?: string };
     if (!phoneE164) return NextResponse.json({ ok: false, error: "phoneE164 required" }, { status: 400 });
 
-    const sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
+    // Prefer in-memory DRY session first to avoid DB latency in local/dev
+    let sess: any = null;
+    const dry = getDrySession(phoneE164);
+    if (dry) {
+      sess = {
+        id: "dry",
+        phoneE164: dry.phoneE164,
+        role: dry.role,
+        code: dry.code || null,
+        outlet: dry.outlet || null,
+        state: dry.state,
+        cursor: dry.cursor || { status: "ACTIVE" },
+      } as any;
+    }
+    if (!sess) {
+      try { sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }); } catch {}
+    }
     if (!sess) return NextResponse.json({ ok: false, error: "no session" }, { status: 404 });
 
     const role = String(sess.role || "attendant");

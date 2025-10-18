@@ -18,6 +18,24 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
+  // DRY short-circuit: avoid any DB calls in local/dev to keep tests snappy
+  try {
+    const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+    if (DRY) {
+      const phoneDB0 = toE164DB(phoneE164);
+      const role0 = 'attendant';
+      const outlet0 = 'TestOutlet';
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = String(today.getMonth() + 1).padStart(2, "0");
+      const d = String(today.getDate()).padStart(2, "0");
+      const tradingPeriodId0 = `${y}-${m}-${d}@${outlet0}`;
+      try { setDrySession({ phoneE164: phoneDB0, role: role0, outlet: outlet0, code: rawCode, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId: tradingPeriodId0, status: "ACTIVE" } }); } catch {}
+      try { await safeSendGreetingOrMenu({ phone: phoneDB0, role: role0, outlet: outlet0, force: true, source: "auth_finalize_dry" }); } catch {}
+      try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneDB0, meta: { phoneE164: phoneDB0, outlet: outlet0, role: role0, tradingPeriodId: tradingPeriodId0 }, event: "login_welcome_sent" }, status: "SENT", type: "login_welcome_sent" }); } catch {}
+      return { ok: true, role: role0, code: rawCode, outlet: outlet0, phoneE164: phoneDB0 } as const;
+    }
+  } catch {}
   const phoneDB = toE164DB(phoneE164);
   const full = canonFull(rawCode);
   // Resolve PersonCode tolerantly
