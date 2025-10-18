@@ -114,7 +114,7 @@ export default function AttendantDashboardPage() {
 
   // Trading period + header KPIs
   const [periodStartAt, setPeriodStartAt] = useState<string | null>(null);
-  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number }>(
+  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number; carryoverPrev: number }>(
     {
       weightSales: 0,
       expenses: 0,
@@ -123,12 +123,15 @@ export default function AttendantDashboardPage() {
       tillSalesGross: 0,
       verifiedDeposits: 0,
       amountToDeposit: 0,
+      carryoverPrev: 0,
     }
   );
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
   const [tillTotal, setTillTotal] = useState(0);
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
+  // Track whether there's any saved activity for today (closings, expenses, deposits, tillcount)
+  const [savedClosingTodayCount, setSavedClosingTodayCount] = useState<number>(0);
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
@@ -537,6 +540,10 @@ export default function AttendantDashboardPage() {
           return has ? { ...r, closing: Number(cLc[lc] ?? r.closing ?? 0), waste: Number(wLc[lc] ?? r.waste ?? 0) } : r;
         }));
         setLocked((p) => ({ ...p, ...toLock }));
+        try {
+          const cnt = Object.keys(cLc).length + Object.keys(wLc).length;
+          setSavedClosingTodayCount(cnt);
+        } catch { setSavedClosingTodayCount(0); }
       } catch {}
     })();
   }, [rows.length, outlet, stockDate]);
@@ -916,6 +923,22 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
+      // If viewing Current and there is no active period AND no saved activity, avoid premature estimates
+      const noActive = !periodStartAt;
+      const hasAnyActivity = (savedClosingTodayCount > 0) || (depositsFromServer.length > 0) || (expenses.some(e => e.saved)) || (toNum(countedTill) > 0);
+      if (!summaryDate && noActive && !hasAnyActivity) {
+        setKpi({
+          weightSales: 0,
+          expenses: 0,
+          todayTotalSales: 0,
+          tillSalesNet: 0,
+          tillSalesGross: 0,
+          verifiedDeposits: 0,
+          amountToDeposit: 0,
+          carryoverPrev: 0,
+        });
+        return;
+      }
       const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
       const url = summaryDate ? `${base}&date=${encodeURIComponent(summaryDate)}` : base;
       const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number } }>(
@@ -930,18 +953,42 @@ export default function AttendantDashboardPage() {
         tillSalesGross: Number(h.totals.todayTillSales ?? 0),
         verifiedDeposits: Number(h.totals.verifiedDeposits ?? 0),
         amountToDeposit: Number(h.totals.amountToDeposit ?? 0),
+        carryoverPrev: Number(h.totals.carryoverPrev ?? 0),
       });
     } catch {
-      const todayTotal = computed.expectedKsh - computed.expensesKsh;
-      setKpi({
-        weightSales: computed.expectedKsh,
-        expenses: computed.expensesKsh,
-        todayTotalSales: todayTotal,
-        tillSalesNet: 0,
-        tillSalesGross: 0,
-        verifiedDeposits: 0,
-        amountToDeposit: todayTotal,
-      });
+      // Conservative fallback:
+      // - If period is active OR we have any saved activity, estimate ONLY from submitted (locked) rows.
+      // - Otherwise, show zeros to avoid inflating sales before submission.
+      const isActive = !!periodStartAt;
+      const hasAnyActivity = (savedClosingTodayCount > 0) || (depositsFromServer.length > 0) || (expenses.some(e => e.saved)) || (toNum(countedTill) > 0);
+      if (isActive || hasAnyActivity) {
+        const expectedFromLocked = rows
+          .filter(r => !!locked[r.key])
+          .reduce((a, r) => a + Math.max(0, r.opening - toNum(r.closing) - toNum(r.waste)) * sellPrice(r.key), 0);
+        const expensesSaved = expenses.filter(e => e.saved).reduce((a, e) => a + toNum(e.amount), 0);
+        const todayTotal = expectedFromLocked - expensesSaved;
+        setKpi({
+          weightSales: expectedFromLocked,
+          expenses: expensesSaved,
+          todayTotalSales: todayTotal,
+          tillSalesNet: 0,
+          tillSalesGross: 0,
+          verifiedDeposits: 0,
+          amountToDeposit: Math.max(0, todayTotal),
+          carryoverPrev: 0,
+        });
+      } else {
+        setKpi({
+          weightSales: 0,
+          expenses: 0,
+          todayTotalSales: 0,
+          tillSalesNet: 0,
+          tillSalesGross: 0,
+          verifiedDeposits: 0,
+          amountToDeposit: 0,
+          carryoverPrev: 0,
+        });
+      }
     }
   }
 
@@ -1551,10 +1598,12 @@ export default function AttendantDashboardPage() {
             />
             <CardKPI
               label="Carryover (Prev)"
-              value={`Ksh ${fmt((kpi as any).carryoverPrev || 0)}`}
+              value={`Ksh ${fmt(kpi.carryoverPrev || 0)}`}
               tooltip={"Outstanding from the previous day not yet deposited. Added to today's deposit requirement."}
             />
-            <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
+            {summaryMode === 'current' && (
+              <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
+            )}
           </div>
 
           {/* ✅ Highlight red ONLY when > 0 */}
