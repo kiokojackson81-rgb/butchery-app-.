@@ -194,7 +194,47 @@ async function isDayLocked(date: string, outlet: string): Promise<boolean> { ret
 async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
   try {
     const next = await incrementCloseCount(outlet, date).catch(() => 1);
-    if (next < 2) return; // Only seed on the second close of the calendar day
+    // On first close of the day: start a new period within the same calendar day by
+    // setting today's opening rows = today's CLOSING, then clearing today's closings and expenses.
+    if (next === 1) {
+      try {
+        await (prisma as any).$transaction(async (tx: any) => {
+          const [todaysClosings, todaysExpenses] = await Promise.all([
+            (tx as any).attendantClosing.findMany({ where: { date, outletName: outlet } }).catch(() => []),
+            (tx as any).attendantExpense.findMany({ where: { date, outletName: outlet } }).catch(() => []),
+          ]);
+          // Snapshot before clearing
+          try {
+            const snapKey = `snapshot:closing:${date}:${outlet}:1`;
+            const snapshot = {
+              type: "period_reset_snapshot",
+              outlet,
+              date,
+              closeIndex: 1,
+              createdAt: new Date().toISOString(),
+              closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
+              expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
+            } as any;
+            await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
+          } catch {}
+          await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } }).catch(() => {});
+          const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
+          for (const r of todaysClosings || []) {
+            const key = String((r as any).itemKey);
+            const qty = Math.max(0, Number((r as any).closingQty || 0));
+            if (qty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty });
+          }
+          if (dataToday.length > 0) {
+            await (tx as any).supplyOpeningRow.createMany({ data: dataToday }).catch(() => {});
+          }
+          // Clear today's closings and expenses to reset for the new in-day period
+          try { await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } }); } catch {}
+          try { await (tx as any).attendantExpense.deleteMany({ where: { date, outletName: outlet } }); } catch {}
+        });
+      } catch {}
+      return;
+    }
+    if (next < 2) return; // defensive, though handled above
     // Compute tomorrow
     const d1 = new Date(date + "T00:00:00.000Z");
     d1.setUTCDate(d1.getUTCDate() + 1);
@@ -234,11 +274,9 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
     const data: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
     const keys = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem), ...Object.keys(closingByItem)]);
     for (const key of keys) {
-      const base = Number(prevOpenByItem[key] || 0);
-      const add = Number(supplyByItem[key] || 0);
+      // New rule: tomorrow's opening is exactly today's CLOSING
       const close = Number((closingByItem[key]?.closingQty) || 0);
-      const waste = Number((closingByItem[key]?.wasteQty) || 0);
-      const nextQty = Math.max(0, base + add - close - waste);
+      const nextQty = Math.max(0, close);
       if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
     }
     if (data.length > 0) {

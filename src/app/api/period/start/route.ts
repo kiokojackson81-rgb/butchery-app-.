@@ -30,10 +30,11 @@ export async function POST(req: Request) {
     try {
       // Build prevOpen from yesterday's closing
   const y = addDaysISO(date, -1, tz);
-      const [prevClosings, todaySupplyRows, todaysClosings] = await Promise.all([
+      const [prevClosings, todaySupplyRows, todaysClosings, todaysExpenses] = await Promise.all([
         (tx as any).attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
         (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
         (tx as any).attendantClosing.findMany({ where: { date, outletName: outlet } }),
+        (tx as any).attendantExpense.findMany({ where: { date, outletName: outlet } }),
       ]);
 
       const prevOpenByItem: Record<string, number> = {};
@@ -71,14 +72,26 @@ export async function POST(req: Request) {
         ...Object.keys(closingByItem),
       ]);
       if (nextCount === 1) {
+        // Snapshot this in-day close (period reset) before we clear rows, for audit/tracking
+        try {
+          const snapKey = `snapshot:closing:${date}:${outlet}:1`;
+          const snapshot = {
+            type: "period_reset_snapshot",
+            outlet,
+            date,
+            closeIndex: 1,
+            createdAt: new Date().toISOString(),
+            closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
+            expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
+          } as any;
+          await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
+        } catch {}
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } });
         const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
         for (const key of keys) {
-          const base = Number(prevOpenByItem[key] || 0);
-          const add = Number(supplyByItem[key] || 0);
+          // New rule: carry forward today's CLOSING as the new opening for the next period (same day)
           const close = Number((closingByItem[key]?.closingQty) || 0);
-          const waste = Number((closingByItem[key]?.wasteQty) || 0);
-          const nextQty = Math.max(0, base + add - close - waste);
+          const nextQty = Math.max(0, close);
           if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty });
         }
         if (dataToday.length > 0) {
@@ -90,6 +103,11 @@ export async function POST(req: Request) {
         try {
           await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } });
         } catch {}
+
+        // Reset expenses for the new in-day period (do not carry forward)
+        try {
+          await (tx as any).attendantExpense.deleteMany({ where: { date, outletName: outlet } });
+        } catch {}
         rotated = true;
       } else if (nextCount >= 2) {
         if (currentCount === 1) {
@@ -97,11 +115,9 @@ export async function POST(req: Request) {
           await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
           const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number }> = [];
           for (const key of keys) {
-            const base = Number(prevOpenByItem[key] || 0);
-            const add = Number(supplyByItem[key] || 0);
+            // Carry forward only today's CLOSING to tomorrow's opening
             const close = Number((closingByItem[key]?.closingQty) || 0);
-            const waste = Number((closingByItem[key]?.wasteQty) || 0);
-            const nextQty = Math.max(0, base + add - close - waste);
+            const nextQty = Math.max(0, close);
             if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty });
           }
           if (dataTomorrow.length > 0) {
