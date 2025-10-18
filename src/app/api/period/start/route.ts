@@ -141,6 +141,21 @@ export async function POST(req: Request) {
         if (currentCount === 1) {
           const unitByKey: Record<string, string> = {};
           for (const p of productRows || []) unitByKey[(p as any).key] = (p as any).unit || "kg";
+          // Snapshot this end-of-day close before seeding tomorrow, for audit/tracking
+          try {
+            const snapKey = `snapshot:closing:${date}:${outlet}:2`;
+            const snapshot = {
+              type: "period_reset_snapshot",
+              outlet,
+              date,
+              closeIndex: 2,
+              createdAt: new Date().toISOString(),
+              openingSnapshot: openingSnapshot || {},
+              closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
+              expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
+            } as any;
+            await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
+          } catch {}
           // This call bumped from 1 → 2: seed tomorrow and mark rotated
           await (tx as any).supplyOpeningRow.deleteMany({ where: { date: tomorrow, outletName: outlet } });
           const hasClosings = (todaysClosings?.length || 0) > 0;
