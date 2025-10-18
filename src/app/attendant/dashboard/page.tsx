@@ -610,10 +610,12 @@ export default function AttendantDashboardPage() {
   /** ===== Client-side expected totals (unchanged) ===== */
   const sellPrice = (k: ItemKey) => Number(catalog[k]?.sellPrice || 0);
   const computed = useMemo(() => {
+    // Only count submitted (locked) rows towards expected sales until the attendant submits
     const perItem = rows.map(r => {
-      const closing = toNum(r.closing);
-      const waste = toNum(r.waste);
-      const soldQty = Math.max(0, r.opening - closing - waste);
+      const isLocked = !!locked[r.key];
+      const closing = isLocked ? toNum(r.closing) : 0;
+      const waste = isLocked ? toNum(r.waste) : 0;
+      const soldQty = isLocked ? Math.max(0, r.opening - closing - waste) : 0;
       const expectedKsh = soldQty * sellPrice(r.key);
       return { ...r, soldQty, expectedKsh };
     });
@@ -621,12 +623,13 @@ export default function AttendantDashboardPage() {
     const depositedKsh = depositsFromServer
       .filter((d:any) => (d.status || "PENDING") === "VALID")
       .reduce((a: number, d: any) => a + Number(d.amount || 0), 0);
-    const expensesKsh = expenses.reduce((a, e) => a + toNum(e.amount), 0);
+    // Use only saved expenses for projections to avoid over/under counting drafts
+    const expensesKsh = expenses.filter(e => e.saved).reduce((a, e) => a + toNum(e.amount), 0);
     const projectedTill = expectedKsh - depositedKsh - expensesKsh;
     const counted = toNum(countedTill);
     const varianceKsh = counted - projectedTill;
     return { perItem, expectedKsh, depositedKsh, expensesKsh, projectedTill, counted, varianceKsh };
-  }, [rows, depositsFromServer, expenses, countedTill, catalog]);
+  }, [rows, locked, depositsFromServer, expenses, countedTill, catalog]);
 
   /** ===== Handlers ===== */
   const setClosing = (key: ItemKey, v: number | string | "") => {
@@ -1582,15 +1585,15 @@ export default function AttendantDashboardPage() {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <CardKPI label="Weight Sales (Ksh)" value={`Ksh ${fmt(kpi.weightSales)}`} />
-            <CardKPI label="Expenses (Ksh)" value={`Ksh ${fmt(kpi.expenses)}`} />
+            <CardKPI label="Weight Sales (Ksh)" value={`Ksh ${fmt(kpi.weightSales)}`} tooltip={summaryMode==='previous' ? 'Closed day: sum of (opening − closing − waste) × price for that day.' : 'For Current, totals reflect only submitted items so far.'} />
+            <CardKPI label="Expenses (Ksh)" value={`Ksh ${fmt(kpi.expenses)}`} tooltip={summaryMode==='previous' ? 'Closed day expenses.' : 'Submitted expenses so far for today.'} />
             <CardKPI
               label="Today Total Sales (Ksh)"
               value={`Ksh ${fmt(kpi.todayTotalSales)}`}
               tooltip={"Calculated from stock: sum over items of (opening − closing − waste) × price, then minus expenses."}
             />
-            <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} />
-            <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} />
+            <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />
+            <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} tooltip={summaryMode==='previous' ? 'Deposits verified for the closed day.' : 'Deposits verified so far today.'} />
             <CardKPI
               label="Till Sales (Net)"
               value={`Ksh ${fmt(kpi.tillSalesNet)}`}
@@ -1599,7 +1602,7 @@ export default function AttendantDashboardPage() {
             <CardKPI
               label="Carryover (Prev)"
               value={`Ksh ${fmt(kpi.carryoverPrev || 0)}`}
-              tooltip={"Outstanding from the previous day not yet deposited. Added to today's deposit requirement."}
+              tooltip={summaryMode==='previous' ? 'Outstanding entering that closed day from earlier periods.' : "Pending from the previous period to be deposited today."}
             />
             {summaryMode === 'current' && (
               <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
