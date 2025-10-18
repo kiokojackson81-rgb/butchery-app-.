@@ -406,7 +406,7 @@ export default function AttendantDashboardPage() {
       } catch {}
     }
     pullDeposits();
-    const id = setInterval(pullDeposits, 8000);
+  const id = setInterval(pullDeposits, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet, dateStr]);
 
@@ -430,7 +430,7 @@ export default function AttendantDashboardPage() {
       } catch {}
     }
     pullExpenses();
-    const tid = setInterval(pullExpenses, 7000);
+  const tid = setInterval(pullExpenses, 5000);
     return () => { cancelled = true; clearInterval(tid); };
   }, [tab, outlet, dateStr]);
 
@@ -442,7 +442,7 @@ export default function AttendantDashboardPage() {
       try { if (!cancelled) await refreshTill(outlet as string); } catch {}
     }
     tick();
-    const id = setInterval(tick, 7000);
+  const id = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet]);
 
@@ -458,7 +458,7 @@ export default function AttendantDashboardPage() {
       } catch {}
     }
     tick();
-    const id = setInterval(tick, 10000);
+  const id = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet, summaryMode, dateStr]);
 
@@ -476,7 +476,7 @@ export default function AttendantDashboardPage() {
             await refreshPeriodAndHeader(outlet as string, dateArg);
           }
         } catch {}
-      }, 30000);
+  }, 12000);
       return id;
     }
     const timer = start();
