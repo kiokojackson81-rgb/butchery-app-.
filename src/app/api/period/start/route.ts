@@ -97,6 +97,8 @@ export async function POST(req: Request) {
             date,
             closeIndex: 1,
             createdAt: new Date().toISOString(),
+            // Capture the opening snapshot used for revenue calc of the just-closed period
+            openingSnapshot: openingSnapshot || {},
             closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
             expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
           } as any;

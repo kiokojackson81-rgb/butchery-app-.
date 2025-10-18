@@ -1019,7 +1019,14 @@ export default function AttendantDashboardPage() {
   }
 
   /** ===== Logout ===== */
-  const logout = () => { window.location.href = "/attendant"; };
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    // Also clear client-only hints
+    try { sessionStorage.removeItem("attendant_code"); } catch {}
+    window.location.href = "/attendant";
+  };
 
   /** ===== Guard ===== */
   useEffect(() => {
