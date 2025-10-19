@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
+import { computeSnapshotTotals } from "@/server/finance";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -12,6 +13,7 @@ export async function GET(req: Request) {
   const dateParam = (searchParams.get("date") || "").slice(0, 10);
   const today = dateISOInTZ(new Date(), tz);
   const date = dateParam || today;
+  const period = (searchParams.get("period") || "").toLowerCase(); // "previous" to show previous trading period for given date
   const isCurrent = !dateParam || dateParam === today;
   if (!outlet)
     return NextResponse.json({
@@ -27,7 +29,7 @@ export async function GET(req: Request) {
       },
     });
 
-  const [openRows, closingRows, pbRows, products, expenses, deposits, tillCountRows] = await Promise.all([
+  const [openRows, closingRows, pbRows, products, expenses, deposits, tillCountRows, snap1, snap2] = await Promise.all([
     prisma.supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
     prisma.attendantClosing.findMany({ where: { date, outletName: outlet } }),
     prisma.pricebookRow.findMany({ where: { outletName: outlet } }),
@@ -36,13 +38,16 @@ export async function GET(req: Request) {
     prisma.attendantDeposit.findMany({ where: { date, outletName: outlet } }),
     // Till count (optional) — use raw to avoid Prisma client mismatches on some environments
     prisma.$queryRaw`SELECT "counted" FROM "AttendantTillCount" WHERE "date"=${date} AND "outletName"=${outlet} LIMIT 1` as any,
+    // Period snapshots saved by /api/period/start on first/second close
+    (prisma as any).setting.findUnique({ where: { key: `snapshot:closing:${date}:${outlet}:1` } }).catch(()=>null),
+    (prisma as any).setting.findUnique({ where: { key: `snapshot:closing:${date}:${outlet}:2` } }).catch(()=>null),
   ]);
 
   const pb = new Map(pbRows.map((r) => [`${r.productKey}`, r] as const));
   const prod = new Map(products.map((p) => [p.key, p] as const));
   const closingMap = new Map(closingRows.map((r) => [r.itemKey, r] as const));
 
-  // Compute previous day's carryover regardless, used even when we gate Current totals to zero
+  // Compute previous period/day carryover regardless, used even when we gate Current totals to zero
   const y = addDaysISO(date, -1, tz);
   const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
     prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet } }),
@@ -63,7 +68,23 @@ export async function GET(req: Request) {
   }
   const yExpensesSum = yExpenses.reduce((a, e) => a + (e.amount || 0), 0);
   const yVerifiedDeposits = yDeposits.filter((d) => d.status !== "INVALID").reduce((a, d) => a + (d.amount || 0), 0);
-  const outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+  let outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+  // If there is a snapshot for the same date (today), treat that snapshot as the previous trading period when viewing Current.
+  // This makes carryover available immediately after the first close.
+  const snapVal2: any = (snap2 as any)?.value || null;
+  const snapVal1: any = (snap1 as any)?.value || null;
+  const prevPeriodSnap: any = snapVal2 || snapVal1 || null;
+  if (isCurrent && prevPeriodSnap && typeof prevPeriodSnap === 'object') {
+    try {
+      const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
+      const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
+      const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
+      const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
+      const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+      const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
+      outstandingPrev = Math.max(0, todayTotalPrev - verifiedDepositsPrev);
+    } catch {}
+  }
 
   // If this is Current day and there's no activity yet, gate totals to zero to avoid inflating from opening stock
   const hasTill = Array.isArray(tillCountRows) && tillCountRows.length > 0 && Number((tillCountRows as any)[0]?.counted || 0) > 0;
@@ -78,9 +99,51 @@ export async function GET(req: Request) {
         tillSalesGross: 0,
         verifiedDeposits: 0,
         netTill: 0,
-        // Show outstanding from the previously closed period immediately
+        // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
         carryoverPrev: outstandingPrev,
         amountToDeposit: outstandingPrev,
+      },
+    });
+  }
+
+  // Previous period view for the given date: use latest snapshot on that date if present
+  if (period === 'previous') {
+    if (prevPeriodSnap && typeof prevPeriodSnap === 'object') {
+      try {
+        const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
+        const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
+        const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
+        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
+        const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+        const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
+        const amountToDepositPrev = outstandingPrev + (todayTotalPrev - verifiedDepositsPrev);
+        return NextResponse.json({
+          ok: true,
+          totals: {
+            weightSales: Number(totalsPrev.expectedSales || 0),
+            expenses: Number(totalsPrev.expenses || 0),
+            todayTotalSales: todayTotalPrev,
+            tillSalesGross: 0,
+            verifiedDeposits: verifiedDepositsPrev,
+            netTill: 0,
+            carryoverPrev: outstandingPrev,
+            amountToDeposit: amountToDepositPrev,
+          },
+        });
+      } catch {}
+    }
+    // Fallback behavior: treat "previous" as calendar previous day
+    return NextResponse.json({
+      ok: true,
+      totals: {
+        weightSales: 0,
+        expenses: yExpensesSum,
+        todayTotalSales: Math.max(0, yRevenue - yExpensesSum),
+        tillSalesGross: 0,
+        verifiedDeposits: yVerifiedDeposits,
+        netTill: 0,
+        carryoverPrev: 0,
+        amountToDeposit: Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits),
       },
     });
   }
