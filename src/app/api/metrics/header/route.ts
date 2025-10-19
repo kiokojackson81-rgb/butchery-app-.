@@ -96,27 +96,6 @@ export async function GET(req: Request) {
     }
   } catch {}
 
-  // If this is Current day and there's no activity yet, gate totals to zero to avoid inflating from opening stock
-  const hasTill = Array.isArray(tillCountRows) && tillCountRows.length > 0 && Number((tillCountRows as any)[0]?.counted || 0) > 0;
-  const hasActivity = (closingRows.length > 0) || (expenses.length > 0) || (deposits.length > 0) || hasTill;
-  if (isCurrent && !hasActivity) {
-    return NextResponse.json({
-      ok: true,
-      totals: {
-        weightSales: 0,
-        expenses: 0,
-        todayTotalSales: 0,
-        tillSalesGross: 0,
-        verifiedDeposits: 0,
-        netTill: 0,
-        openingValue: openingValueGross,
-        // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
-        carryoverPrev: outstandingPrev,
-        amountToDeposit: outstandingPrev,
-      },
-    });
-  }
-
   // Previous period view for the given date: use latest snapshot on that date if present
   if (period === 'previous') {
     if (prevPeriodSnap && typeof prevPeriodSnap === 'object') {
@@ -155,6 +134,27 @@ export async function GET(req: Request) {
         netTill: 0,
         carryoverPrev: 0,
         amountToDeposit: Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits),
+      },
+    });
+  }
+
+  // If this is Current day and there's no activity yet, gate totals to zero to avoid inflating from opening stock
+  const hasTill = Array.isArray(tillCountRows) && tillCountRows.length > 0 && Number((tillCountRows as any)[0]?.counted || 0) > 0;
+  const hasActivity = (closingRows.length > 0) || (expenses.length > 0) || (deposits.length > 0) || hasTill;
+  if (isCurrent && !hasActivity) {
+    return NextResponse.json({
+      ok: true,
+      totals: {
+        weightSales: 0,
+        expenses: 0,
+        todayTotalSales: 0,
+        tillSalesGross: 0,
+        verifiedDeposits: 0,
+        netTill: 0,
+        openingValue: openingValueGross,
+        // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
+        carryoverPrev: outstandingPrev,
+        amountToDeposit: outstandingPrev,
       },
     });
   }
