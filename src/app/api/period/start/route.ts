@@ -51,7 +51,7 @@ export async function POST(req: Request) {
         (tx as any).product.findMany({ select: { key: true, unit: true } }),
       ]);
 
-      const prevOpenByItem: Record<string, number> = {};
+  const prevOpenByItem: Record<string, number> = {};
       for (const r of prevClosings || []) {
         const k = String((r as any).itemKey);
         const qty = Number((r as any).closingQty || 0);
@@ -59,12 +59,20 @@ export async function POST(req: Request) {
         prevOpenByItem[k] = (prevOpenByItem[k] || 0) + qty;
       }
 
-      const supplyByItem: Record<string, number> = {};
+  const supplyByItem: Record<string, number> = {};
       for (const r of todaySupplyRows || []) {
         const k = String((r as any).itemKey);
         const qty = Number((r as any).qty || 0);
         if (!Number.isFinite(qty)) continue;
         supplyByItem[k] = (supplyByItem[k] || 0) + qty;
+      }
+
+      // Compute effective opening for the just-closed period: yesterday closing + today's supply (before reset)
+      const computedOpeningSnapshot: Record<string, number> = {};
+      const allKeysPreReset = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem)]);
+      for (const k of allKeysPreReset) {
+        const qty = Number((prevOpenByItem[k] || 0)) + Number((supplyByItem[k] || 0));
+        if (Number.isFinite(qty) && qty > 0) computedOpeningSnapshot[k] = qty;
       }
 
       const closingByItem: Record<string, { closingQty: number; wasteQty: number }> = {};
@@ -98,7 +106,7 @@ export async function POST(req: Request) {
             closeIndex: 1,
             createdAt: new Date().toISOString(),
             // Capture the opening snapshot used for revenue calc of the just-closed period
-            openingSnapshot: openingSnapshot || {},
+            openingSnapshot: (openingSnapshot && Object.keys(openingSnapshot || {}).length > 0) ? openingSnapshot : computedOpeningSnapshot,
             closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
             expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
           } as any;
@@ -150,7 +158,7 @@ export async function POST(req: Request) {
               date,
               closeIndex: 2,
               createdAt: new Date().toISOString(),
-              openingSnapshot: openingSnapshot || {},
+              openingSnapshot: (openingSnapshot && Object.keys(openingSnapshot || {}).length > 0) ? openingSnapshot : computedOpeningSnapshot,
               closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
               expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
             } as any;
