@@ -76,3 +76,59 @@ export async function computeDayTotals(args: { date: string; outletName: string 
 
   return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
 }
+
+// Compute totals for a closed period from a saved snapshot (used after first close when live rows were cleared)
+export async function computeSnapshotTotals(args: {
+  outletName: string;
+  openingSnapshot: Record<string, number>;
+  closings: Array<{ itemKey: string; closingQty: number; wasteQty: number }>;
+  expenses?: Array<{ amount: number }>;
+  deposits?: Array<{ amount: number; status?: string }>;
+}) {
+  const { outletName, openingSnapshot, closings, expenses = [], deposits = [] } = args;
+
+  const [pbRows, products] = await Promise.all([
+    (prisma as any).pricebookRow.findMany({ where: { outletName } }),
+    (prisma as any).product.findMany(),
+  ]);
+
+  const pb = new Map<any, any>(pbRows.map((r: any) => [`${r.productKey}`, r] as const));
+  const prod = new Map<any, any>(products.map((p: any) => [p.key, p] as const));
+  const closingMap = new Map<any, any>(closings.map((r: any) => [r.itemKey, r] as const));
+
+  let weightSales = 0;
+  for (const [itemKey, openingQtyRaw] of Object.entries(openingSnapshot || {})) {
+    const openingQty = Number(openingQtyRaw || 0);
+    if (!Number.isFinite(openingQty) || openingQty <= 0) continue;
+    const cl: any = closingMap.get(itemKey) || {};
+    const closing = Number(cl?.closingQty || 0);
+    const waste = Number(cl?.wasteQty || 0);
+    const soldQty = Math.max(0, openingQty - closing - waste);
+    const pbr: any = pb.get(itemKey) || null;
+    const prodRow: any = prod.get(itemKey) || null;
+    const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : prodRow?.active ? prodRow?.sellPrice || 0 : 0;
+    weightSales += soldQty * price;
+  }
+
+  // Potatoes-specific expected deposit (from snapshot): sales_qty = opening - closing (do not subtract waste)
+  let potatoesExpectedDeposit = 0;
+  try {
+    const POTATOES_KEY = "potatoes";
+    const openPotatoes = Number((openingSnapshot as any)[POTATOES_KEY] || 0);
+    const clPot: any = closingMap.get(POTATOES_KEY) || {};
+    const closingPot = Number(clPot?.closingQty || 0);
+    const soldNoWaste = Math.max(0, openPotatoes - closingPot);
+    const yieldFactor = 0.75; // 75% yield
+    const rateKsh = 130;      // Ksh per kg
+    potatoesExpectedDeposit = soldNoWaste * yieldFactor * rateKsh;
+  } catch {}
+
+  const expensesSum = (expenses || []).reduce((a: number, e: any) => a + (Number(e?.amount) || 0), 0);
+  const tillSalesGross = 0;
+  const verifiedDeposits = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+  const todayTotalSales = weightSales - expensesSum;
+  const netTill = tillSalesGross - verifiedDeposits;
+  const expectedDeposit = todayTotalSales - netTill;
+
+  return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
+}
