@@ -30,6 +30,7 @@
     "codes:normalize": "tsx scripts/normalize-codes.ts",
     "db:reset:admin": "node scripts/db-reset-official.mjs --confirm WIPE",
     "db:reset:all": "node scripts/db-reset-official.mjs --all --confirm WIPE",
+    "dev:wa:dry-notify": "node scripts/dev-wa-dry-notify-http.mjs",
     "postinstall": "prisma generate",
     "verify:all": "bash scripts/verify-all.sh"
   },
