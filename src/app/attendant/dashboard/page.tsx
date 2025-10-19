@@ -818,7 +818,7 @@ export default function AttendantDashboardPage() {
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
     try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
     // Show the closed day's results in Summary (use server-provided date if available)
-  await refreshPeriodAndHeader(outlet, rotatedDate || dateStr, true);
+  await refreshPreviousWithRetry(outlet, rotatedDate || dateStr);
     // Show confirmation toast
     if (seededTomorrowCount > 0) setToastMsg(`Seeded tomorrow's opening for ${seededTomorrowCount} item(s).`);
   } else {
@@ -948,22 +948,17 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
-      const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
-      const url = `${base}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
-      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number } }>(
-        url
-      );
-      if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
+      const totals = await fetchHeaderTotals(outletName, summaryDate, periodPrevious);
       setKpi({
-        weightSales: Number(h.totals.weightSales ?? 0),
-        expenses: Number(h.totals.expenses ?? 0),
-        todayTotalSales: Number(h.totals.todayTotalSales ?? 0),
-        tillSalesNet: Number(h.totals.netTill ?? 0),
-        tillSalesGross: Number(h.totals.todayTillSales ?? 0),
-        verifiedDeposits: Number(h.totals.verifiedDeposits ?? 0),
-        amountToDeposit: Number(h.totals.amountToDeposit ?? 0),
-        carryoverPrev: Number(h.totals.carryoverPrev ?? 0),
-        openingValue: Number((h.totals as any).openingValue ?? 0),
+        weightSales: Number(totals.weightSales ?? 0),
+        expenses: Number(totals.expenses ?? 0),
+        todayTotalSales: Number(totals.todayTotalSales ?? 0),
+        tillSalesNet: Number(totals.netTill ?? 0),
+        tillSalesGross: Number(totals.todayTillSales ?? 0),
+        verifiedDeposits: Number(totals.verifiedDeposits ?? 0),
+        amountToDeposit: Number(totals.amountToDeposit ?? 0),
+        carryoverPrev: Number(totals.carryoverPrev ?? 0),
+        openingValue: Number((totals as any).openingValue ?? 0),
       });
     } catch {
       // Conservative fallback:
@@ -1001,6 +996,60 @@ export default function AttendantDashboardPage() {
           openingValue: 0,
         });
       }
+    }
+  }
+
+  // Small helper to fetch header totals with parameters
+  async function fetchHeaderTotals(outletName: string, summaryDate?: string, periodPrevious?: boolean): Promise<{
+    todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number;
+  }> {
+    const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
+    const url = `${base}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
+    const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number } }>(url);
+    if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
+    return h.totals as any;
+  }
+
+  // After rotation to Previous, retry briefly if snapshot reads are momentarily lagging
+  async function refreshPreviousWithRetry(outletName: string, closedDate: string) {
+    const attempts = [0, 250, 500];
+    let last: any = null;
+    for (let i = 0; i < attempts.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, attempts[i]));
+      try {
+        const totals = await fetchHeaderTotals(outletName, closedDate, true);
+        last = totals;
+        // Heuristic: if all of these are zero, it might be before snapshot is visible; retry
+        const looksEmpty = Number(totals.weightSales || 0) === 0 && Number(totals.expenses || 0) === 0 && Number(totals.verifiedDeposits || 0) === 0;
+        if (!looksEmpty) {
+          setKpi({
+            weightSales: Number(totals.weightSales || 0),
+            expenses: Number(totals.expenses || 0),
+            todayTotalSales: Number(totals.todayTotalSales || 0),
+            tillSalesNet: Number(totals.netTill || 0),
+            tillSalesGross: Number(totals.todayTillSales || 0),
+            verifiedDeposits: Number(totals.verifiedDeposits || 0),
+            amountToDeposit: Number(totals.amountToDeposit || 0),
+            carryoverPrev: Number(totals.carryoverPrev || 0),
+            openingValue: Number((totals as any).openingValue || 0),
+          });
+          return;
+        }
+      } catch {}
+    }
+    // Commit the last totals even if empty so UI updates deterministically
+    if (last) {
+      setKpi({
+        weightSales: Number(last.weightSales || 0),
+        expenses: Number(last.expenses || 0),
+        todayTotalSales: Number(last.todayTotalSales || 0),
+        tillSalesNet: Number(last.netTill || 0),
+        tillSalesGross: Number(last.todayTillSales || 0),
+        verifiedDeposits: Number(last.verifiedDeposits || 0),
+        amountToDeposit: Number(last.amountToDeposit || 0),
+        carryoverPrev: Number(last.carryoverPrev || 0),
+        openingValue: Number((last as any).openingValue || 0),
+      });
     }
   }
 
