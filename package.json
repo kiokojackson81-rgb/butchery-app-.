@@ -31,6 +31,9 @@
     "db:reset:admin": "node scripts/db-reset-official.mjs --confirm WIPE",
     "db:reset:all": "node scripts/db-reset-official.mjs --all --confirm WIPE",
     "dev:wa:dry-notify": "node scripts/dev-wa-dry-notify-http.mjs",
+  "seed:phone:supervisor": "tsx scripts/seed-phone-mapping.ts +254705663175 supervisor Kawangware SUPV001 'Supervisor'",
+  "seed:phone:attendant": "tsx scripts/seed-phone-mapping.ts +254705663175 attendant Kawangware ATT001 'Attendant'",
+  "seed:phone:supplier": "tsx scripts/seed-phone-mapping.ts +254705663175 supplier Kawangware SUPL001 'Supplier'",
     "postinstall": "prisma generate",
     "verify:all": "bash scripts/verify-all.sh"
   },

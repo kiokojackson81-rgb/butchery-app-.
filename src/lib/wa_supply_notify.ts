@@ -3,7 +3,7 @@
 // and 24h session window awareness.
 
 import { prisma } from "@/lib/prisma";
-import { sendTextSafe, sendTemplate } from "@/lib/wa";
+import { sendTextSafe, sendTemplate, warmUpSession } from "@/lib/wa";
 
 export type SupplyItem = { name: string; qty: number; unit?: string; unitPrice?: number; productKey?: string };
 export type SupplyPayload = {
@@ -151,7 +151,7 @@ export async function notifySupplyMultiRole(opts: {
     const windowOpen = await hasRecentInbound(phone);
     if (windowOpen) {
       results[role] = await sendTextSafe(phone, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
-    } else if (templates && (templates as any)[role]) {
+  } else if (templates && (templates as any)[role]) {
       // fallback to template; map a few dynamic params (we keep it minimal)
       const tmplName = (templates as any)[role];
       try {
@@ -161,16 +161,9 @@ export async function notifySupplyMultiRole(opts: {
         results[role] = { ok: false, error: String(e?.message || e) };
       }
     } else {
-      // No template configured; proactively try to reopen with a generic/approved template, then send the text.
-      // This improves delivery in live when the 24h window is closed.
-      try {
-        const tmpl = (process.env.WA_TEMPLATE_NAME || process.env.WHATSAPP_WARMUP_TEMPLATE || "hello_world").trim();
-        if (tmpl && tmpl.toLowerCase() !== "none") {
-          try { await sendTemplate({ to: phone, template: tmpl, contextType: "TEMPLATE_REOPEN" }); } catch {}
-          // tiny delay to give Graph a moment before the text follows
-          try { await new Promise(r => setTimeout(r, 250)); } catch {}
-        }
-      } catch {}
+      // No template configured; use the central warmUpSession helper which no-ops in DRY
+      try { await warmUpSession(phone); } catch {}
+      try { await new Promise(r => setTimeout(r, 250)); } catch {}
       results[role] = await sendTextSafe(phone, text, "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
   }

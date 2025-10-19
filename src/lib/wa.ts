@@ -294,15 +294,12 @@ export async function sendWithReopen(opts: {
   const to = opts.toE164;
   const open = await isWindowOpen(to);
   if (!open) {
-    // Attempt to reopen using configured template
+    // Attempt to reopen using warmUpSession, which honors WA_DRY_RUN and configured HELLO template
     try {
-      const tmpl = (process.env.WA_TEMPLATE_NAME || "ops_role_notice").trim();
-      await logOutbound({ direction: "out", templateName: tmpl, payload: { phone: to, meta: { phoneE164: to, reopen_reason: "window_closed", _type: "TEMPLATE_REOPEN_ATTEMPT" } }, status: "INFO", type: "TEMPLATE_REOPEN_ATTEMPT" });
-      await sendTemplate({ to, template: tmpl, contextType: "TEMPLATE_REOPEN" });
+      await logOutbound({ direction: "out", templateName: (process.env.WHATSAPP_WARMUP_TEMPLATE || "hello_world").trim(), payload: { phone: to, meta: { phoneE164: to, reopen_reason: "window_closed", _type: "TEMPLATE_REOPEN_ATTEMPT" } }, status: "INFO", type: "TEMPLATE_REOPEN_ATTEMPT" });
+      await warmUpSession(to);
       await sleep(250);
-    } catch {
-      // proceed anyway; the next send may fail if window remained closed
-    }
+    } catch {}
   }
   if (opts.kind === "text") {
     return _sendTextRaw(to, opts.text || "", opts.ctxType, opts.inReplyTo);
