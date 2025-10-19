@@ -378,7 +378,7 @@ export default function AttendantDashboardPage() {
         const saved = (typeof window !== 'undefined' ? window.localStorage.getItem(key) : null) || 'current';
         const mode = saved === 'previous' ? 'previous' : 'current';
         setSummaryMode(mode as any);
-        await refreshPeriodAndHeader(outlet, mode === 'previous' ? prevDate(dateStr) : undefined);
+  await refreshPeriodAndHeader(outlet, mode === 'previous' ? dateStr : undefined, mode === 'previous');
         // Initialize rotation banner visibility from storage if present
         try {
           const bKey = rotationBannerKeyFor(dateStr, outlet);
@@ -453,8 +453,8 @@ export default function AttendantDashboardPage() {
     async function tick() {
       try {
         if (cancelled) return;
-        const dateArg = summaryMode === 'previous' ? prevDate(dateStr) : undefined;
-        await refreshPeriodAndHeader(outlet as string, dateArg);
+  const dateArg = summaryMode === 'previous' ? dateStr : undefined;
+  await refreshPeriodAndHeader(outlet as string, dateArg, summaryMode === 'previous');
       } catch {}
     }
     tick();
@@ -470,10 +470,10 @@ export default function AttendantDashboardPage() {
       const id = setInterval(async () => {
         try {
           if (cancelled) return;
-          const dateArg = summaryMode === 'previous' ? prevDate(dateStr) : undefined;
+          const dateArg = summaryMode === 'previous' ? dateStr : undefined;
           // Avoid duplicating the tighter 10s poll when Summary tab is open
           if (tab !== 'summary') {
-            await refreshPeriodAndHeader(outlet as string, dateArg);
+            await refreshPeriodAndHeader(outlet as string, dateArg, summaryMode === 'previous');
           }
         } catch {}
   }, 12000);
@@ -817,14 +817,14 @@ export default function AttendantDashboardPage() {
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}
     try { window.localStorage.setItem(rotationBannerKeyFor(dateStr, outlet), 'show'); setShowRotationBanner(true); } catch {}
     // Show the closed day's results in Summary (use server-provided date if available)
-    await refreshPeriodAndHeader(outlet, rotatedDate || dateStr);
+  await refreshPeriodAndHeader(outlet, rotatedDate || dateStr, true);
     // Show confirmation toast
     if (seededTomorrowCount > 0) setToastMsg(`Seeded tomorrow's opening for ${seededTomorrowCount} item(s).`);
   } else {
     // Midday period switch: stay on current day; keep Summary on current
     setSummaryMode("current");
     try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'current'); } catch {}
-    await refreshPeriodAndHeader(outlet, undefined);
+  await refreshPeriodAndHeader(outlet, undefined);
     if (rotated && seededTodayCount > 0) setToastMsg(`Reset today's opening for ${seededTodayCount} item(s).`);
   }
     // refresh closing/waste reads from DB for consistency
@@ -938,7 +938,7 @@ export default function AttendantDashboardPage() {
     } catch {}
   }
 
-  async function refreshPeriodAndHeader(outletName: string, summaryDate?: string) {
+  async function refreshPeriodAndHeader(outletName: string, summaryDate?: string, periodPrevious?: boolean) {
     try {
       const pa = await getJSON<{ ok: boolean; active: { periodStartAt: string } | null }>(`/api/period/active?outlet=${encodeURIComponent(outletName)}`);
       const startAt = pa?.active?.periodStartAt ?? null;
@@ -947,41 +947,12 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
-      // If viewing Current and there is no submitted activity yet, force zeros to avoid premature totals
-      const hasAnyActivity = (savedClosingTodayCount > 0) || (depositsFromServer.length > 0) || (expenses.some(e => e.saved)) || (toNum(countedTill) > 0);
-      if (!summaryDate && !hasAnyActivity) {
-        setKpi({
-          weightSales: 0,
-          expenses: 0,
-          todayTotalSales: 0,
-          tillSalesNet: 0,
-          tillSalesGross: 0,
-          verifiedDeposits: 0,
-          amountToDeposit: 0,
-          carryoverPrev: 0,
-        });
-        return;
-      }
       const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
-      const url = summaryDate ? `${base}&date=${encodeURIComponent(summaryDate)}` : base;
+      const url = `${base}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
       const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number } }>(
         url
       );
       if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
-      // For Current view, if still no activity by the time header resolves (race), keep zeros
-      if (!summaryDate && !hasAnyActivity) {
-        setKpi({
-          weightSales: 0,
-          expenses: 0,
-          todayTotalSales: 0,
-          tillSalesNet: 0,
-          tillSalesGross: 0,
-          verifiedDeposits: 0,
-          amountToDeposit: 0,
-          carryoverPrev: 0,
-        });
-        return;
-      }
       setKpi({
         weightSales: Number(h.totals.weightSales ?? 0),
         expenses: Number(h.totals.expenses ?? 0),
@@ -1594,7 +1565,7 @@ export default function AttendantDashboardPage() {
           {summaryMode === 'current' && savedClosingTodayCount === 0 && depositsFromServer.length === 0 && !expenses.some(e=>e.saved) && toNum(countedTill) === 0 && (
             <div className="mb-3 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm bg-yellow-50 border-yellow-200 text-yellow-700 w-full">
               <div>
-                Current shows zeros until the first submission (closing, waste, expense, deposit, or till count).
+                Current shows carryover from the just-closed period. Other totals appear after you make today’s first submission (closing, expense, deposit, or till count).
               </div>
             </div>
           )}
@@ -1619,7 +1590,7 @@ export default function AttendantDashboardPage() {
                 >Current</button>
                 <button
                   className={`px-2 py-1 rounded-lg border ${summaryMode==='previous' ? 'bg-black text-white' : ''}`}
-                  onClick={async()=>{ if(!outlet) return; setSummaryMode('previous'); try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}; await refreshPeriodAndHeader(outlet, prevDate(dateStr)); }}
+                  onClick={async()=>{ if(!outlet) return; setSummaryMode('previous'); try { window.localStorage.setItem(summaryKeyFor(dateStr, outlet), 'previous'); } catch {}; await refreshPeriodAndHeader(outlet, dateStr, true); }}
                 >Previous</button>
                 <span className="ml-2 text-[11px] text-gray-500">Showing: {summaryMode === 'previous' ? 'Previous' : 'Current'}</span>
               </div>
