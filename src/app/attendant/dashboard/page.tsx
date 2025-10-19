@@ -114,7 +114,7 @@ export default function AttendantDashboardPage() {
 
   // Trading period + header KPIs
   const [periodStartAt, setPeriodStartAt] = useState<string | null>(null);
-  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number; carryoverPrev: number }>(
+  const [kpi, setKpi] = useState<{ weightSales: number; expenses: number; todayTotalSales: number; tillSalesNet: number; tillSalesGross: number; verifiedDeposits: number; amountToDeposit: number; carryoverPrev: number; openingValue?: number }>(
     {
       weightSales: 0,
       expenses: 0,
@@ -124,6 +124,7 @@ export default function AttendantDashboardPage() {
       verifiedDeposits: 0,
       amountToDeposit: 0,
       carryoverPrev: 0,
+      openingValue: 0,
     }
   );
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
@@ -949,7 +950,7 @@ export default function AttendantDashboardPage() {
     try {
       const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
       const url = `${base}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
-      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number } }>(
+      const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number } }>(
         url
       );
       if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
@@ -962,6 +963,7 @@ export default function AttendantDashboardPage() {
         verifiedDeposits: Number(h.totals.verifiedDeposits ?? 0),
         amountToDeposit: Number(h.totals.amountToDeposit ?? 0),
         carryoverPrev: Number(h.totals.carryoverPrev ?? 0),
+        openingValue: Number((h.totals as any).openingValue ?? 0),
       });
     } catch {
       // Conservative fallback:
@@ -984,6 +986,7 @@ export default function AttendantDashboardPage() {
           verifiedDeposits: 0,
           amountToDeposit: Math.max(0, todayTotal),
           carryoverPrev: 0,
+          openingValue: 0,
         });
       } else {
         setKpi({
@@ -995,6 +998,7 @@ export default function AttendantDashboardPage() {
           verifiedDeposits: 0,
           amountToDeposit: 0,
           carryoverPrev: 0,
+          openingValue: 0,
         });
       }
     }
@@ -1625,6 +1629,13 @@ export default function AttendantDashboardPage() {
             />
             {summaryMode === 'current' && (
               <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
+            )}
+            {summaryMode === 'current' && savedClosingTodayCount === 0 && depositsFromServer.length === 0 && !expenses.some(e=>e.saved) && toNum(countedTill) === 0 && (kpi.openingValue || 0) > 0 && (
+              <CardKPI
+                label="Opening Value (supply)"
+                value={`Ksh ${fmt(kpi.openingValue || 0)}`}
+                tooltip={'Estimated value of today\'s opening stock (yesterday\'s closing + today\'s supply) priced at current sell prices.'}
+              />
             )}
           </div>
 

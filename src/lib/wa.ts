@@ -419,7 +419,8 @@ export async function logOutbound(entry: {
 }) {
   try {
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-    if (DRY) return; // skip DB logging in DRY mode
+    const LOG_DRY = String(process.env.WA_LOG_DRY_RUN || "").toLowerCase() === "true";
+    if (DRY && !LOG_DRY) return; // skip DB logging in DRY mode unless explicitly enabled
     await logMessage({
       attendantId: entry.attendantId ?? null,
       direction: entry.direction ?? "out",

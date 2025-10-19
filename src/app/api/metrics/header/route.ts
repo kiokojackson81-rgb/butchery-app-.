@@ -86,6 +86,16 @@ export async function GET(req: Request) {
     } catch {}
   }
 
+  // Pre-compute opening value (qty × price) for the date; useful to display supply value when no activity yet
+  let openingValueGross = 0;
+  try {
+    for (const row of openRows) {
+      const pbr = pb.get(row.itemKey as any) || pbRows.find((p) => `${p.productKey}` === row.itemKey);
+      const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : (products.find((p) => p.key === row.itemKey)?.active ? (products.find((p) => p.key === row.itemKey)?.sellPrice || 0) : 0);
+      openingValueGross += (Number(row.qty || 0) || 0) * (Number(price || 0) || 0);
+    }
+  } catch {}
+
   // If this is Current day and there's no activity yet, gate totals to zero to avoid inflating from opening stock
   const hasTill = Array.isArray(tillCountRows) && tillCountRows.length > 0 && Number((tillCountRows as any)[0]?.counted || 0) > 0;
   const hasActivity = (closingRows.length > 0) || (expenses.length > 0) || (deposits.length > 0) || hasTill;
@@ -99,6 +109,7 @@ export async function GET(req: Request) {
         tillSalesGross: 0,
         verifiedDeposits: 0,
         netTill: 0,
+        openingValue: openingValueGross,
         // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
         carryoverPrev: outstandingPrev,
         amountToDeposit: outstandingPrev,
@@ -184,6 +195,7 @@ export async function GET(req: Request) {
       tillSalesGross,
       verifiedDeposits,
       netTill,
+      openingValue: openingValueGross,
       carryoverPrev: outstandingPrev,
       amountToDeposit,
     },
