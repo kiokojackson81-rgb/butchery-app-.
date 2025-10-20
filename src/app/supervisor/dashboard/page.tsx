@@ -599,8 +599,7 @@ export default function SupervisorDashboard() {
               <span className={`text-xs px-2 py-0.5 rounded-full border ${dayStatus?.status === 'LOCKED' ? 'bg-green-600 text-white' : dayStatus?.status === 'SUBMITTED' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-white'}`}>
                 {dayStatus?.status || 'OPEN'}
               </span>
-              <button disabled={dayBusy || dayStatus?.status === 'SUBMITTED' || dayStatus?.status === 'LOCKED'} onClick={submitCurrentDay} className="btn-mobile px-3 py-2 rounded-xl border text-sm disabled:opacity-50">Submit Day</button>
-              <button disabled={dayBusy || dayStatus?.status === 'LOCKED'} onClick={lockCurrentDay} className="btn-mobile px-3 py-2 rounded-xl border text-sm disabled:opacity-50">Lock Day</button>
+              {/* View-only: submit/lock actions removed */}
             </div>
           )}
         </div>
@@ -698,28 +697,24 @@ export default function SupervisorDashboard() {
         <ReviewTable
           title="Waste Requests"
           data={waste}
-          onAction={(id, state) => updateState(WASTE_KEY, id, state)}
         />
       )}
       {tab === "expenses" && (
         <ReviewTable
           title="Expense Requests"
           data={expenses}
-          onAction={(id, state) => updateState(EXPENSES_KEY, id, state)}
         />
       )}
       {tab === "excess" && (
         <ReviewTable
           title="Excess Approvals"
           data={excess}
-          onAction={(id, state) => updateState(EXCESS_KEY, id, state)}
         />
       )}
       {tab === "deficit" && (
         <ReviewTable
           title="Deficit Disputes"
           data={deficit}
-          onAction={(id, state) => updateState(DEFICIT_KEY, id, state)}
         />
       )}
 
@@ -845,13 +840,7 @@ export default function SupervisorDashboard() {
             <TransfersTable date={date} outlet={selectedOutlet === "__ALL__" ? "" : selectedOutlet} />
           </div>
 
-          {/* Quick Closing Update */}
-          {selectedOutlet !== "__ALL__" && (
-            <div className="mt-6">
-              <h3 className="font-medium mb-2">Quick Closing Update — {selectedOutlet}</h3>
-              <QuickClosingUpdate date={date} outlet={selectedOutlet} />
-            </div>
-          )}
+          {/* View-only: Quick Closing Update removed */}
         </section>
       )}
 
@@ -1191,45 +1180,14 @@ function TransfersTable({ date, outlet }: { date: string; outlet: string }) {
 }
 
 /* ===== Quick closing update form (supervisor) ===== */
-function QuickClosingUpdate({ date, outlet }: { date: string; outlet: string }) {
-  const [itemKey, setItemKey] = useState("");
-  const [closing, setClosing] = useState<string>("");
-  const [waste, setWaste] = useState<string>("");
-  const [reason, setReason] = useState("");
-  const submit = async () => {
-    if (!itemKey) { alert("Pick item key (e.g., beef)"); return; }
-    try {
-      const res = await fetch("/api/supervisor/closing/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ date, outlet, itemKey, closingQty: closing === "" ? undefined : Number(closing), wasteQty: waste === "" ? undefined : Number(waste), reason }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      alert("Saved");
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  };
-  return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <input className="input-mobile border rounded-xl p-2 text-sm w-28" placeholder="item key (e.g., beef)" value={itemKey} onChange={(e)=>setItemKey(e.target.value)} />
-      <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="closing" value={closing} onChange={(e)=>setClosing(e.target.value)} />
-      <input className="input-mobile border rounded-xl p-2 text-sm w-28" type="number" placeholder="waste" value={waste} onChange={(e)=>setWaste(e.target.value)} />
-      <input className="input-mobile border rounded-xl p-2 text-sm w-72" placeholder="reason (optional)" value={reason} onChange={(e)=>setReason(e.target.value)} />
-      <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={submit}>Save</button>
-    </div>
-  );
-}
+// View-only: QuickClosingUpdate component removed
 /* ===== Review Table (existing) ===== */
 function ReviewTable({
   title,
   data,
-  onAction,
 }: {
   title: string;
   data: ReviewItem[];
-  onAction: (id: string, state: "approved" | "rejected") => void;
 }) {
   return (
     <section className="rounded-2xl border p-4">
@@ -1244,7 +1202,6 @@ function ReviewTable({
               <th className="p-2">Amount</th>
               <th className="p-2">Note</th>
               <th className="p-2">State</th>
-              <th className="p-2">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1256,24 +1213,6 @@ function ReviewTable({
                 <td className="p-2">Ksh {fmt(r.amount)}</td>
                 <td className="p-2">{r.note || "—"}</td>
                 <td className="p-2">{r.state}</td>
-                <td className="p-2 flex gap-2">
-                  {r.state === "pending" && (
-                    <>
-                      <button
-                        onClick={() => onAction(r.id, "approved")}
-                        className="text-xs border rounded px-2 py-1 bg-green-600 text-white"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => onAction(r.id, "rejected")}
-                        className="text-xs border rounded px-2 py-1 bg-red-600 text-white"
-                      >
-                        Reject
-                      </button>
-                    </>
-                  )}
-                </td>
               </tr>
             ))}
           </tbody>
