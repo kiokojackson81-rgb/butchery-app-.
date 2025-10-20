@@ -742,6 +742,25 @@ export default function SupervisorDashboard() {
         </TabBtn>
       </nav>
 
+    {/* Inserted menu below review tabs */}
+    <div className="rounded-2xl border p-4 mb-6">
+      <h2 className="font-semibold mb-2">Waste Requests</h2>
+      <div className="table-wrap">
+        <table className="w-full text-sm border">
+          <thead>
+            <tr className="text-left border-b">
+              <th className="p-2">Date</th>
+              <th>Outlet</th>
+              <th>Item</th>
+              <th>Amount</th>
+              <th>Note</th>
+              <th>State</th>
+            </tr>
+          </thead>
+        </table>
+      </div>
+    </div>
+
       {tab === "waste" && (
         <ReviewTable
           title="Waste Requests"
