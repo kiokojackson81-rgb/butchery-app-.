@@ -3034,13 +3034,33 @@ function DepositsVerifyEmbed() {
   type Row = { id: string; date: string; outletName: string; amount: number; code: string | null; note: string | null; status: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
   const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
   const [outlet, setOutlet] = React.useState<string>("");
+  const [outletOptions, setOutletOptions] = React.useState<Array<{ id: string; name: string; active: boolean }>>([]);
   const [rows, setRows] = React.useState<Row[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Load outlets list for selection; default to first active if none picked yet
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ro = await fetch('/api/admin/list/outlets', { cache: 'no-store' });
+        const jo = await ro.json().catch(()=>({ ok:false }));
+        if (!cancelled && jo?.ok && Array.isArray(jo.rows)) {
+          const opts = jo.rows.map((r: any)=>({ id: r.id, name: r.name, active: !!r.active }));
+          setOutletOptions(opts);
+          const firstActive = opts.find(o=>o.active)?.name || opts[0]?.name || '';
+          setOutlet(prev => prev || firstActive || "");
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   async function load() {
     try {
       setLoading(true); setError(null);
+      if (!date || !outlet) { setError("Pick date and outlet"); setRows([]); return; }
       const qs = new URLSearchParams();
       if (date) qs.set("date", date);
       if (outlet.trim()) qs.set("outlet", outlet.trim());
@@ -3056,8 +3076,8 @@ function DepositsVerifyEmbed() {
       setLoading(false);
     }
   }
-
-  React.useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // Auto-load when both date and outlet are available
+  React.useEffect(() => { if (date && outlet) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date, outlet]);
 
   async function setStatus(id: string, status: "VALID"|"INVALID") {
     try {
@@ -3076,20 +3096,45 @@ function DepositsVerifyEmbed() {
     pending: pending.reduce((a,r)=>a+Number(r.amount||0),0),
   }), [rows]);
 
+  // Expected vs Deposited metrics (reads client snapshot used in Reports)
+  const expected = React.useMemo(() => {
+    try {
+      if (!date || !outlet) return 0;
+      const sum = readJSON<{ expectedKsh?: number } | null>(summaryKey(date, outlet), null);
+      return Number(sum?.expectedKsh || 0);
+    } catch { return 0; }
+  }, [date, outlet]);
+  const variance = React.useMemo(() => expected - totals.valid, [expected, totals.valid]);
+
   return (
     <div className="rounded-2xl border p-3">
       <div className="flex items-center justify-between mb-3 mobile-scroll-x">
         <h2 className="font-semibold">Deposits Verify</h2>
         <div className="flex items-center gap-2">
           <input className="input-mobile border rounded-xl p-2 text-sm" type="date" value={date} onChange={e=>setDate(e.target.value)} />
-          <input className="input-mobile border rounded-xl p-2 text-sm" placeholder="Outlet (optional)" value={outlet} onChange={e=>setOutlet(e.target.value)} />
-          <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={load} disabled={loading}>Refresh</button>
+          {outletOptions.length > 0 ? (
+            <select className="input-mobile border rounded-xl p-2 text-sm" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+              {outletOptions.map(o => (
+                <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="input-mobile border rounded-xl p-2 text-sm" placeholder="Outlet" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          )}
+          <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={load} disabled={loading || !outlet}>Refresh</button>
         </div>
       </div>
-      <div className="grid sm:grid-cols-3 gap-3 mb-3">
+      <div className="grid sm:grid-cols-4 gap-3 mb-3">
         <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Total submitted</div><div className="text-lg font-semibold">Ksh {fmt(totals.all)}</div></div>
         <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Count (pending)</div><div className="text-lg font-semibold">{pending.length}</div></div>
-        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Deposits (valid+pending)</div><div className="text-lg font-semibold">Ksh {fmt(totals.valid)}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Deposited (valid+pending)</div><div className="text-lg font-semibold">Ksh {fmt(totals.valid)}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expected (from summary)</div><div className="text-lg font-semibold">Ksh {fmt(expected)}</div></div>
+      </div>
+      <div className="grid sm:grid-cols-4 gap-3 mb-3">
+        <div className={`rounded-2xl border p-3 ${variance === 0 ? '' : variance > 0 ? 'border-yellow-400' : 'border-red-400'}`}>
+          <div className="text-xs text-gray-500">Variance (Expected − Deposited)</div>
+          <div className={`text-lg font-semibold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-yellow-700' : 'text-red-700'}`}>Ksh {fmt(variance)}</div>
+        </div>
       </div>
       <div className="table-wrap">
         <table className="w-full text-xs">
@@ -3104,7 +3149,7 @@ function DepositsVerifyEmbed() {
             </tr>
           </thead>
           <tbody>
-            {error && <tr><td className="py-2 text-red-700" colSpan={6}>{error}</td></tr>}
+            {error && <tr><td className="py-2 text-red-700" colSpan={6}>{String(error).replace(/^\{.*\}$/,'')}</td></tr>}
             {!error && rows.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={6}>No deposits.</td></tr>}
             {rows.map((r)=> (
               <tr key={r.id} className="border-b">
