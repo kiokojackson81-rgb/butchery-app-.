@@ -123,7 +123,16 @@ async function postJSON<T>(url: string, body: any): Promise<T> {
   return r.json();
 }
 function toNumStr(s: string): number {
-  return s.trim() === "" ? 0 : Number(s);
+  // Tolerant numeric parser:
+  // - Accepts values like "4kgs" or "3,5 kg" by using parseFloat
+  // - Treats comma as decimal separator
+  // - Falls back to 0 for empty/NaN
+  if (s == null) return 0;
+  const raw = String(s).trim();
+  if (raw === "") return 0;
+  const normalized = raw.replace(/,/g, ".");
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : 0;
 }
 function fmt(n: number) {
   return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -871,13 +880,23 @@ export default function SupplierDashboard(): JSX.Element {
                     <td>
                       <input
                         className="input-mobile border rounded-xl p-2 w-28"
-                        type="number"
-                        min={0}
-                        step={unit === "kg" ? 0.01 : 1}
-                        value={r.qty}
-                        onChange={(e) =>
-                          updateRow(r.id, { qty: toNumStr(e.target.value) })
-                        }
+                        type="text"
+                        inputMode={unit === "kg" ? "decimal" : "numeric"}
+                        placeholder={unit === "kg" ? "e.g. 4.5 kg" : "e.g. 4 pcs"}
+                        value={String(r.qty ?? "")}
+                        onChange={(e) => {
+                          const n = toNumStr(e.target.value);
+                          const clamped = n < 0 ? 0 : n;
+                          const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
+                          updateRow(r.id, { qty: finalQty });
+                        }}
+                        onBlur={(e) => {
+                          // Normalize visually on blur
+                          const n = toNumStr(e.target.value);
+                          const clamped = n < 0 ? 0 : n;
+                          const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
+                          updateRow(r.id, { qty: finalQty });
+                        }}
                         disabled={submitted}
                       />
                     </td>
@@ -885,13 +904,20 @@ export default function SupplierDashboard(): JSX.Element {
                     <td>
                       <input
                         className="input-mobile border rounded-xl p-2 w-28"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={r.buyPrice}
-                        onChange={(e) =>
-                          updateRow(r.id, { buyPrice: toNumStr(e.target.value) })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="e.g. 300"
+                        value={String(r.buyPrice ?? "")}
+                        onChange={(e) => {
+                          const n = toNumStr(e.target.value);
+                          const final = n < 0 ? 0 : n;
+                          updateRow(r.id, { buyPrice: final });
+                        }}
+                        onBlur={(e) => {
+                          const n = toNumStr(e.target.value);
+                          const final = n < 0 ? 0 : n;
+                          updateRow(r.id, { buyPrice: final });
+                        }}
                         disabled={submitted}
                       />
                     </td>

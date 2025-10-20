@@ -266,6 +266,16 @@
 			"type": "shell",
 			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.deposit-and-closing.spec.ts --reporter=line --workers=1",
 			"group": "build"
+		},
+		{
+			"label": "dev:3002 (pwsh, DRY logging)",
+			"type": "shell",
+			"command": "$env:PORT=\"3002\"; $env:WA_DRY_RUN=\"true\"; $env:WA_LOG_DRY_RUN=\"true\"; $env:WA_GPT_ONLY=\"true\"; $env:WA_AI_ENABLED=\"true\"; $env:WA_INTERACTIVE_ENABLED=\"true\"; $env:WA_TABS_ENABLED=\"true\"; npm run dev:3002",
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
 		}
 	]
 }
