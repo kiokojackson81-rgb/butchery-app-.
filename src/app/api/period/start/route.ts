@@ -126,9 +126,19 @@ export async function POST(req: Request) {
           if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
         }
         if (dataToday.length > 0) {
-          await (tx as any).supplyOpeningRow.createMany({ data: dataToday });
-          seededTodayCount = dataToday.length;
-          seededTodayKeys = dataToday.map((r) => r.itemKey);
+          // Be tolerant of races/duplicates and ensure we can report exactly what was written.
+          try {
+            await (tx as any).supplyOpeningRow.createMany({ data: dataToday, skipDuplicates: true });
+          } catch {}
+          // Read back the resulting rows for today to report accurate keys/count
+          try {
+            const created = await (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet }, select: { itemKey: true } });
+            seededTodayCount = (created || []).length;
+            seededTodayKeys = (created || []).map((r: any) => String(r.itemKey));
+          } catch {
+            seededTodayCount = dataToday.length;
+            seededTodayKeys = dataToday.map((r) => r.itemKey);
+          }
         }
         // Important: start a clean in-day period by clearing any saved closings for today.
         // We already used today's closings above to compute the new base; now wipe them so the
@@ -178,9 +188,17 @@ export async function POST(req: Request) {
             if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
           }
           if (dataTomorrow.length > 0) {
-            await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow });
-            seededTomorrowCount = dataTomorrow.length;
-            seededTomorrowKeys = dataTomorrow.map((r) => r.itemKey);
+            try {
+              await (tx as any).supplyOpeningRow.createMany({ data: dataTomorrow, skipDuplicates: true });
+            } catch {}
+            try {
+              const created = await (tx as any).supplyOpeningRow.findMany({ where: { date: tomorrow, outletName: outlet }, select: { itemKey: true } });
+              seededTomorrowCount = (created || []).length;
+              seededTomorrowKeys = (created || []).map((r: any) => String(r.itemKey));
+            } catch {
+              seededTomorrowCount = dataTomorrow.length;
+              seededTomorrowKeys = dataTomorrow.map((r) => r.itemKey);
+            }
           }
           rotated = true;
           phase = "second";

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { sendText } from "@/lib/wa";
+import { sendText, logOutbound } from "@/lib/wa";
 
 type BreakdownRow = {
   key: string;
@@ -264,6 +264,33 @@ export async function sendDayCloseNotifications(args: { date: string; outletName
 
   // Supplier recipients (by outlet)
   const supplierPhones = (supplierMappings || []).map((r: any) => r.phoneE164).filter(Boolean) as string[];
+
+  // Observability: record resolved recipient phones so admins can verify
+  try {
+    await logOutbound({
+      direction: 'out',
+      templateName: null,
+      payload: {
+        outlet: outletName,
+        date,
+        resolvedRecipients: {
+          supervisors: supPhones,
+          suppliers: supplierPhones,
+          admins: adminPhones,
+          attendants: (attMappings || []).map((r: any) => r.phoneE164).filter(Boolean),
+        },
+      },
+      status: 'INFO',
+      type: 'DAY_CLOSE_RECIPIENTS',
+    });
+  } catch {}
+
+  if (!supPhones || supPhones.length === 0) {
+    try { await logOutbound({ direction: 'out', templateName: null, payload: { outlet: outletName, date, msg: 'No supervisor phone mappings found' }, status: 'WARN', type: 'DAY_CLOSE_NO_SUPERVISOR' }); } catch {}
+  }
+  if (!supplierPhones || supplierPhones.length === 0) {
+    try { await logOutbound({ direction: 'out', templateName: null, payload: { outlet: outletName, date, msg: 'No supplier phone mappings found' }, status: 'WARN', type: 'DAY_CLOSE_NO_SUPPLIER' }); } catch {}
+  }
 
   // Resolve person names by code for supervisors/admins/suppliers/attendant
   const codes = Array.from(new Set([

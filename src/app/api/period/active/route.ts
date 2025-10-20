@@ -94,16 +94,19 @@ export async function GET(req: Request) {
         if ((yOpenings?.length || 0) > 0) {
           await prisma.$transaction(async (tx) => {
             await tx.supplyOpeningRow.deleteMany({ where: { date: today, outletName: outlet } });
-            await tx.supplyOpeningRow.createMany({
-              data: (yOpenings || []).map((r: any) => ({
-                date: today,
-                outletName: outlet,
-                itemKey: r.itemKey,
-                qty: Number(r.qty || 0),
-                unit: (r as any).unit || undefined,
-                buyPrice: (r as any).buyPrice || undefined,
-              })),
-            });
+              try {
+                await tx.supplyOpeningRow.createMany({
+                  data: (yOpenings || []).map((r: any) => ({
+                    date: today,
+                    outletName: outlet,
+                    itemKey: r.itemKey,
+                    qty: Number(r.qty || 0),
+                    unit: (r as any).unit || undefined,
+                    buyPrice: (r as any).buyPrice || undefined,
+                  })),
+                  skipDuplicates: true,
+                });
+              } catch {}
           });
         }
       } catch {}

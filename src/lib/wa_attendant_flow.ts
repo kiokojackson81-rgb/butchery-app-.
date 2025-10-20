@@ -250,7 +250,7 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
             }
           }
           if (dataToday.length > 0) {
-            await (tx as any).supplyOpeningRow.createMany({ data: dataToday }).catch(() => {});
+            try { await (tx as any).supplyOpeningRow.createMany({ data: dataToday, skipDuplicates: true }); } catch {}
           }
           // Clear today's closings and expenses to reset for the new in-day period
           try { await (tx as any).attendantClosing.deleteMany({ where: { date, outletName: outlet } }); } catch {}
@@ -314,7 +314,7 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
       if (nextQty > 0) data.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
     }
     if (data.length > 0) {
-      try { await (prisma as any).supplyOpeningRow.createMany({ data }); } catch {}
+      try { await (prisma as any).supplyOpeningRow.createMany({ data, skipDuplicates: true }); } catch {}
     }
   } catch {}
 }

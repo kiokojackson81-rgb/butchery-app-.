@@ -21,16 +21,19 @@ export async function POST(req: Request) {
     const unitByKey = Object.fromEntries(products.map((p) => [p.key, p.unit]));
 
     if (Array.isArray(rows) && rows.length) {
-      await tx.supplyOpeningRow.createMany({
-        data: rows.map((r) => ({
-          date,
-          outletName: outlet,
-          itemKey: r.itemKey,
-          qty: Number(r.qty || 0),
-          buyPrice: Number(r.buyPrice || 0),
-          unit: r.unit || (unitByKey[r.itemKey] || "kg"),
-        })),
-      });
+      try {
+        await tx.supplyOpeningRow.createMany({
+          data: rows.map((r) => ({
+            date,
+            outletName: outlet,
+            itemKey: r.itemKey,
+            qty: Number(r.qty || 0),
+            buyPrice: Number(r.buyPrice || 0),
+            unit: r.unit || (unitByKey[r.itemKey] || "kg"),
+          })),
+          skipDuplicates: true,
+        });
+      } catch {}
     }
   });
 
