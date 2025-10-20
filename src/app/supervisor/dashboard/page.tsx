@@ -84,6 +84,7 @@ export default function SupervisorDashboard() {
   const [depError, setDepError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ALL'|'VALID'|'PENDING'|'INVALID'>('ALL');
   const [recon, setRecon] = useState<null | { expectedSales: number; expenses: number; depositedValid: number; depositedPending: number; depositedInvalid: number; depositedNonInvalid: number; projectedTill: number; variance: number }>(null);
+  const [depTick, setDepTick] = useState<number>(0); // auto-refresh ticker for deposits view
   // Aggregated (All Outlets) deposits + recon
   const [aggDepRows, setAggDepRows] = useState<DepRow[]>([]);
   const [aggRecon, setAggRecon] = useState<null | { expectedSales: number; expenses: number; depositedValid: number; depositedPending: number; depositedInvalid: number; depositedNonInvalid: number; projectedTill: number; variance: number }>(null);
@@ -352,6 +353,13 @@ export default function SupervisorDashboard() {
         setDepError(String(e?.message || e)); setDepRows([]);
       } finally { setDepLoading(false); }
     })();
+  }, [tab, date, selectedOutlet, depTick]);
+
+  // Auto-refresh deposits monitor every 12s while on Deposits tab
+  useEffect(() => {
+    if (tab !== 'deposits') return;
+    const id = setInterval(() => setDepTick((t) => t + 1), 12000);
+    return () => clearInterval(id);
   }, [tab, date, selectedOutlet]);
 
   // Compute outlet names from selection before using in effects
