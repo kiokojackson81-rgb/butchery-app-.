@@ -2863,6 +2863,8 @@ function OpsCombined(props: {
       {opsTab === "history" && (
         <section>
           <SupplyHistoryEmbed />
+          <div className="mt-4" />
+          <DepositsVerifyEmbed />
         </section>
       )}
     </div>
@@ -3018,6 +3020,106 @@ function SupplyHistoryEmbed() {
       <p className="text-xs text-gray-500 mt-3">
         Note: Supplier filter is not shown here because opening rows don’t store supplier attribution. For supplier-submitted orders, use supply.create views.
       </p>
+    </div>
+  );
+}
+
+/** Lightweight Admin panel to review and verify deposits that remain PENDING */
+function DepositsVerifyEmbed() {
+  type Row = { id: string; date: string; outletName: string; amount: number; code: string | null; note: string | null; status: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
+  const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
+  const [outlet, setOutlet] = React.useState<string>("");
+  const [rows, setRows] = React.useState<Row[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function load() {
+    try {
+      setLoading(true); setError(null);
+      const qs = new URLSearchParams();
+      if (date) qs.set("date", date);
+      if (outlet.trim()) qs.set("outlet", outlet.trim());
+      const r = await fetch(`/api/admin/day/txns?${qs.toString()}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      const list: Row[] = (j?.deposits || []).map((d: any) => ({ id: d.id, date: d.date, outletName: d.outletName, amount: Number(d.amount||0), code: d.code || null, note: d.note || null, status: d.status || "PENDING", createdAt: d.createdAt }));
+      setRows(list);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function setStatus(id: string, status: "VALID"|"INVALID") {
+    try {
+      const r = await fetch(`/api/admin/edit/deposit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
+      const j = await r.json(); if (!j?.ok) throw new Error(j?.error || "Failed");
+      await load();
+    } catch (e: any) {
+      alert(e?.message || "Failed to update status");
+    }
+  }
+
+  const pending = rows.filter(r => r.status === "PENDING");
+  const totals = React.useMemo(() => ({
+    all: rows.reduce((a,r)=>a+Number(r.amount||0),0),
+    valid: rows.filter(r=>r.status!=="INVALID").reduce((a,r)=>a+Number(r.amount||0),0),
+    pending: pending.reduce((a,r)=>a+Number(r.amount||0),0),
+  }), [rows]);
+
+  return (
+    <div className="rounded-2xl border p-3">
+      <div className="flex items-center justify-between mb-3 mobile-scroll-x">
+        <h2 className="font-semibold">Deposits Verify</h2>
+        <div className="flex items-center gap-2">
+          <input className="input-mobile border rounded-xl p-2 text-sm" type="date" value={date} onChange={e=>setDate(e.target.value)} />
+          <input className="input-mobile border rounded-xl p-2 text-sm" placeholder="Outlet (optional)" value={outlet} onChange={e=>setOutlet(e.target.value)} />
+          <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={load} disabled={loading}>Refresh</button>
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-3 gap-3 mb-3">
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Total submitted</div><div className="text-lg font-semibold">Ksh {fmt(totals.all)}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Count (pending)</div><div className="text-lg font-semibold">{pending.length}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Deposits (valid+pending)</div><div className="text-lg font-semibold">Ksh {fmt(totals.valid)}</div></div>
+      </div>
+      <div className="table-wrap">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left border-b">
+              <th className="py-2">Time</th>
+              <th>Outlet</th>
+              <th>Amount</th>
+              <th>Code</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {error && <tr><td className="py-2 text-red-700" colSpan={6}>{error}</td></tr>}
+            {!error && rows.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={6}>No deposits.</td></tr>}
+            {rows.map((r)=> (
+              <tr key={r.id} className="border-b">
+                <td className="py-2 whitespace-nowrap">{r.createdAt ? new Date(r.createdAt).toLocaleTimeString() : "—"}</td>
+                <td>{r.outletName}</td>
+                <td>Ksh {fmt(r.amount)}</td>
+                <td>{r.code || "—"}</td>
+                <td>{r.status}</td>
+                <td className="text-right">
+                  <div className="flex gap-2 justify-end">
+                    <button className="btn-mobile px-2 py-1 rounded-xl border" onClick={()=>setStatus(r.id, "VALID")} disabled={r.status==="VALID"}>Mark VALID</button>
+                    <button className="btn-mobile px-2 py-1 rounded-xl border" onClick={()=>setStatus(r.id, "INVALID")} disabled={r.status==="INVALID"}>Mark INVALID</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-600 mt-2">Use this panel to resolve PENDING deposits when auto-verification is unavailable. For mapping against expected Ksh and till, use the Reports tab for the same date.</p>
     </div>
   );
 }
