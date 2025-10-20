@@ -3038,6 +3038,11 @@ function DepositsVerifyEmbed() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [expectedSrv, setExpectedSrv] = React.useState<number>(0);
+  const [recon, setRecon] = React.useState<null | {
+    expectedSales: number; expenses: number; depositedValid: number; depositedPending: number; depositedInvalid: number; depositedNonInvalid: number; projectedTill: number; variance: number;
+  }>(null);
+  const [statusFilter, setStatusFilter] = React.useState<'ALL'|'VALID'|'PENDING'|'INVALID'>('ALL');
 
   // Load outlets list for selection; default to first active if none picked yet
   React.useEffect(() => {
@@ -3049,7 +3054,7 @@ function DepositsVerifyEmbed() {
         if (!cancelled && jo?.ok && Array.isArray(jo.rows)) {
           const opts = jo.rows.map((r: any)=>({ id: r.id, name: r.name, active: !!r.active }));
           setOutletOptions(opts);
-          const firstActive = opts.find(o=>o.active)?.name || opts[0]?.name || '';
+          const firstActive = opts.find((o: { active: boolean; name: string }) => o.active)?.name || opts[0]?.name || '';
           setOutlet(prev => prev || firstActive || "");
         }
       } catch {}
@@ -3079,6 +3084,30 @@ function DepositsVerifyEmbed() {
   // Auto-load when both date and outlet are available
   React.useEffect(() => { if (date && outlet) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date, outlet]);
 
+  // Fetch server-sourced recon (expected, deposits by status, expenses, projected till)
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setExpectedSrv(0); setRecon(null);
+        if (!date || !outlet) return;
+        const qs = new URLSearchParams({ date, outlet });
+        const [rh, rr] = await Promise.all([
+          fetch(`/api/metrics/header?${qs.toString()}`, { cache: 'no-store' }),
+          fetch(`/api/admin/recon/day?${qs.toString()}`, { cache: 'no-store' }),
+        ]);
+        const jh = await rh.json().catch(()=> ({}));
+        const jr = await rr.json().catch(()=> ({ ok:false }));
+        if (!cancelled) {
+          const v = Number(jh?.totals?.expectedSales ?? 0);
+          setExpectedSrv(Number.isFinite(v) ? v : 0);
+          if (jr?.ok) setRecon(jr.totals as any);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [date, outlet]);
+
   async function setStatus(id: string, status: "VALID"|"INVALID") {
     try {
       const r = await fetch(`/api/admin/edit/deposit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
@@ -3100,10 +3129,12 @@ function DepositsVerifyEmbed() {
   const expected = React.useMemo(() => {
     try {
       if (!date || !outlet) return 0;
+      if (expectedSrv && Number.isFinite(expectedSrv)) return expectedSrv;
       const sum = readJSON<{ expectedKsh?: number } | null>(summaryKey(date, outlet), null);
       return Number(sum?.expectedKsh || 0);
     } catch { return 0; }
-  }, [date, outlet]);
+  }, [date, outlet, expectedSrv]);
+  // Variance is strictly Expected − Deposited (excludes expenses). Projected Till accounts for expenses separately.
   const variance = React.useMemo(() => expected - totals.valid, [expected, totals.valid]);
 
   return (
@@ -3124,17 +3155,45 @@ function DepositsVerifyEmbed() {
           <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={load} disabled={loading || !outlet}>Refresh</button>
         </div>
       </div>
-      <div className="grid sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid sm:grid-cols-6 gap-3 mb-3">
         <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Total submitted</div><div className="text-lg font-semibold">Ksh {fmt(totals.all)}</div></div>
         <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Count (pending)</div><div className="text-lg font-semibold">{pending.length}</div></div>
         <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Deposited (valid+pending)</div><div className="text-lg font-semibold">Ksh {fmt(totals.valid)}</div></div>
-        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expected (from summary)</div><div className="text-lg font-semibold">Ksh {fmt(expected)}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Verified (VALID only)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedValid ?? rows.filter(r=>r.status==='VALID').reduce((a,r)=>a+r.amount,0))}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expected (server)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.expectedSales ?? expected)}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expenses</div><div className="text-lg font-semibold">Ksh {fmt(recon?.expenses ?? 0)}</div></div>
       </div>
-      <div className="grid sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid sm:grid-cols-6 gap-3 mb-3">
         <div className={`rounded-2xl border p-3 ${variance === 0 ? '' : variance > 0 ? 'border-yellow-400' : 'border-red-400'}`}>
           <div className="text-xs text-gray-500">Variance (Expected − Deposited)</div>
           <div className={`text-lg font-semibold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-yellow-700' : 'text-red-700'}`}>Ksh {fmt(variance)}</div>
         </div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Projected Till</div><div className="text-lg font-semibold">Ksh {fmt(recon?.projectedTill ?? (expected - totals.valid - (recon?.expenses ?? 0)))}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Pending Only</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedPending ?? rows.filter(r=>r.status==='PENDING').reduce((a,r)=>a+r.amount,0))}</div></div>
+        <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Invalid (ignored)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedInvalid ?? rows.filter(r=>r.status==='INVALID').reduce((a,r)=>a+r.amount,0))}</div></div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2 mobile-scroll-x">
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-600">Filter</label>
+          <select className="input-mobile border rounded-xl p-2 text-sm" value={statusFilter} onChange={e=>setStatusFilter(e.target.value as any)}>
+            <option value="ALL">ALL</option>
+            <option value="VALID">VALID</option>
+            <option value="PENDING">PENDING</option>
+            <option value="INVALID">INVALID</option>
+          </select>
+        </div>
+        <button className="btn-mobile px-3 py-2 rounded-xl border text-xs" onClick={()=>{
+          const hdr = ['time','outlet','amount','code','status'];
+          const dat = rows
+            .filter(r => statusFilter==='ALL' ? true : r.status===statusFilter)
+            .map(r => [r.createdAt ? new Date(r.createdAt).toISOString() : '', r.outletName, r.amount, r.code||'', r.status]);
+          const csv = [hdr.join(','), ...dat.map(a=>a.map(v=>String(v).replaceAll('"','""')).map(v=>/[,\n]/.test(v)?`"${v}"`:v).join(','))].join('\n');
+          const a = document.createElement('a');
+          a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+          a.download = `deposits-${outlet}-${date}.csv`;
+          a.click();
+        }}>Export CSV</button>
       </div>
       <div className="table-wrap">
         <table className="w-full text-xs">
@@ -3150,8 +3209,8 @@ function DepositsVerifyEmbed() {
           </thead>
           <tbody>
             {error && <tr><td className="py-2 text-red-700" colSpan={6}>{String(error).replace(/^\{.*\}$/,'')}</td></tr>}
-            {!error && rows.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={6}>No deposits.</td></tr>}
-            {rows.map((r)=> (
+            {!error && rows.filter(r=>statusFilter==='ALL'?true:r.status===statusFilter).length === 0 && <tr><td className="py-2 text-gray-500" colSpan={6}>No deposits.</td></tr>}
+            {rows.filter(r=>statusFilter==='ALL'?true:r.status===statusFilter).map((r)=> (
               <tr key={r.id} className="border-b">
                 <td className="py-2 whitespace-nowrap">{r.createdAt ? new Date(r.createdAt).toLocaleTimeString() : "—"}</td>
                 <td>{r.outletName}</td>
