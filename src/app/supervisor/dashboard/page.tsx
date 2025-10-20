@@ -76,7 +76,14 @@ export default function SupervisorDashboard() {
   const [expenses, setExpenses] = useState<ReviewItem[]>([]);
   const [excess, setExcess] = useState<ReviewItem[]>([]);
   const [deficit, setDeficit] = useState<ReviewItem[]>([]);
-  const [deposits, setDeposits] = useState<ReviewItem[]>([]);
+  const [deposits, setDeposits] = useState<ReviewItem[]>([]); // legacy supervisor review list (kept for compatibility)
+  // New: per-day/outlet deposit monitor data (linked to Admin Recon)
+  type DepRow = { id: string; date: string; outletName: string; amount: number; code: string | null; note: string | null; status: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
+  const [depRows, setDepRows] = useState<DepRow[]>([]);
+  const [depLoading, setDepLoading] = useState<boolean>(false);
+  const [depError, setDepError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'ALL'|'VALID'|'PENDING'|'INVALID'>('ALL');
+  const [recon, setRecon] = useState<null | { expectedSales: number; expenses: number; depositedValid: number; depositedPending: number; depositedInvalid: number; depositedNonInvalid: number; projectedTill: number; variance: number }>(null);
   // Prices view
   const [pricesByOutlet, setPricesByOutlet] = useState<Record<string, Array<{ key: string; name: string; price: number; active: boolean }>>>({});
   const [pricesLoading, setPricesLoading] = useState(false);
@@ -277,6 +284,34 @@ export default function SupervisorDashboard() {
       setOutlets((outs || []).filter(o => o?.name));
     })();
   }, []);
+
+  // Load supervisor Deposits Monitor details when viewing deposits tab and a single outlet is selected
+  useEffect(() => {
+    (async () => {
+      try {
+        setDepError(null); setDepRows([]); setRecon(null);
+        if (tab !== 'deposits') return;
+        if (!date || !selectedOutlet || selectedOutlet === '__ALL__') return;
+        setDepLoading(true);
+        const qs = new URLSearchParams({ date, outlet: selectedOutlet });
+        const [rr, rt] = await Promise.all([
+          fetch(`/api/admin/recon/day?${qs.toString()}`, { cache: 'no-store' }),
+          fetch(`/api/admin/day/txns?${qs.toString()}`, { cache: 'no-store' }),
+        ]);
+        const jr = await rr.json().catch(()=>({ ok:false }));
+        const jt = await rt.json().catch(()=>({ ok:false }));
+        if (jr?.ok) setRecon(jr.totals as any);
+        if (jt?.ok || jt?.deposits) {
+          const list: DepRow[] = (jt?.deposits || []).map((d: any) => ({ id: d.id, date: d.date, outletName: d.outletName, amount: Number(d.amount||0), code: d.code || null, note: d.note || null, status: d.status || 'PENDING', createdAt: d.createdAt }));
+          setDepRows(list);
+        } else {
+          setDepRows([]);
+        }
+      } catch (e: any) {
+        setDepError(String(e?.message || e)); setDepRows([]);
+      } finally { setDepLoading(false); }
+    })();
+  }, [tab, date, selectedOutlet]);
 
   // Compute outlet names from selection before using in effects
   const outletNames = useMemo(
@@ -691,37 +726,89 @@ export default function SupervisorDashboard() {
       {tab === "deposits" && (
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Deposits Monitor</h2>
-          <div className="table-wrap">
-          <table className="w-full text-sm border">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="p-2">Date</th>
-                <th>Outlet</th>
-                <th>Amount</th>
-                <th>Code</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deposits.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="p-2 text-gray-500">
-                    No deposits yet.
-                  </td>
-                </tr>
-              )}
-              {deposits.map((d) => (
-                <tr key={d.id} className="border-b">
-                  <td className="p-2">{d.date}</td>
-                  <td className="p-2">{d.outlet}</td>
-                  <td className="p-2">Ksh {fmt(d.amount)}</td>
-                  <td className="p-2">{d.note || "—"}</td>
-                  <td className="p-2">{d.state}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+          {selectedOutlet === "__ALL__" ? (
+            <div className="text-sm text-gray-600">Pick an outlet above to view detailed deposits and reconciliation for {date}.</div>
+          ) : (
+            <>
+              {/* Tiles from Recon */}
+              <div className="grid sm:grid-cols-6 gap-3 mb-3">
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Total submitted</div><div className="text-lg font-semibold">Ksh {fmt(depRows.reduce((a,r)=>a+Number(r.amount||0),0))}</div></div>
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Verified (VALID)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedValid ?? depRows.filter(r=>r.status==='VALID').reduce((a,r)=>a+r.amount,0))}</div></div>
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Pending Only</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedPending ?? depRows.filter(r=>r.status==='PENDING').reduce((a,r)=>a+r.amount,0))}</div></div>
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Invalid (ignored)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.depositedInvalid ?? depRows.filter(r=>r.status==='INVALID').reduce((a,r)=>a+r.amount,0))}</div></div>
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expected (server)</div><div className="text-lg font-semibold">Ksh {fmt(recon?.expectedSales ?? 0)}</div></div>
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Expenses</div><div className="text-lg font-semibold">Ksh {fmt(recon?.expenses ?? 0)}</div></div>
+              </div>
+              <div className="grid sm:grid-cols-6 gap-3 mb-3">
+                {(() => {
+                  const expected = Number(recon?.expectedSales || 0);
+                  const deposited = Number(recon?.depositedNonInvalid ?? depRows.filter(r=>r.status!=='INVALID').reduce((a,r)=>a+r.amount,0));
+                  const variance = expected - deposited; // exclude expenses
+                  return (
+                    <div className={`rounded-2xl border p-3 ${variance === 0 ? '' : variance > 0 ? 'border-yellow-400' : 'border-red-400'}`}>
+                      <div className="text-xs text-gray-500">Variance (Expected − Deposited)</div>
+                      <div className={`text-lg font-semibold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-yellow-700' : 'text-red-700'}`}>Ksh {fmt(variance)}</div>
+                    </div>
+                  );
+                })()}
+                <div className="rounded-2xl border p-3"><div className="text-xs text-gray-500">Projected Till</div><div className="text-lg font-semibold">Ksh {fmt(recon ? recon.projectedTill : 0)}</div></div>
+              </div>
+
+              <div className="flex items-center justify-between mb-2 mobile-scroll-x">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600">Filter</label>
+                  <select className="input-mobile border rounded-xl p-2 text-sm" value={statusFilter} onChange={e=>setStatusFilter(e.target.value as any)}>
+                    <option value="ALL">ALL</option>
+                    <option value="VALID">VALID</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="INVALID">INVALID</option>
+                  </select>
+                </div>
+                <button className="btn-mobile px-3 py-2 rounded-xl border text-xs" onClick={()=>{
+                  const hdr = ['time','outlet','amount','code','status'];
+                  const dat = depRows
+                    .filter(r => statusFilter==='ALL' ? true : r.status===statusFilter)
+                    .map(r => [r.createdAt ? new Date(r.createdAt).toISOString() : '', r.outletName, r.amount, r.code||'', r.status]);
+                  const csv = [hdr.join(','), ...dat.map(a=>a.map(v=>String(v).replaceAll('"','""')).map(v=>/[,\n]/.test(v)?`"${v}"`:v).join(','))].join('\n');
+                  const a = document.createElement('a');
+                  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                  a.download = `deposits-${selectedOutlet}-${date}.csv`;
+                  a.click();
+                }}>Export CSV</button>
+              </div>
+
+              <div className="table-wrap">
+                <table className="w-full text-sm border">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="p-2">Time</th>
+                      <th>Outlet</th>
+                      <th>Amount</th>
+                      <th>Code</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {depError && (
+                      <tr><td colSpan={5} className="p-2 text-red-700">{depError}</td></tr>
+                    )}
+                    {!depError && depRows.filter(r=>statusFilter==='ALL'?true:r.status===statusFilter).length === 0 && (
+                      <tr><td colSpan={5} className="p-2 text-gray-500">No deposits yet.</td></tr>
+                    )}
+                    {depRows.filter(r=>statusFilter==='ALL'?true:r.status===statusFilter).map((r)=> (
+                      <tr key={r.id} className="border-b">
+                        <td className="p-2 whitespace-nowrap">{r.createdAt ? new Date(r.createdAt).toLocaleTimeString() : r.date}</td>
+                        <td className="p-2">{r.outletName}</td>
+                        <td className="p-2">Ksh {fmt(r.amount)}</td>
+                        <td className="p-2">{r.code || '—'}</td>
+                        <td className="p-2">{r.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           {/* Sticky quick actions on mobile */}
           <div className="sm:hidden sticky-save-bottom mt-3">
             <div className="flex items-center justify-between gap-3">
