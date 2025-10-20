@@ -1,0 +1,38 @@
+name: Recon UI alignment (external domain)
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain (including https://)'
+        required: true
+        default: 'https://barakafresh.com'
+
+jobs:
+  recon-domain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Playwright recon alignment smoke against domain
+        env:
+          BASE_URL: ${{ github.event.inputs.domain }}
+          PW_RECON_UI_ALIGNMENT: 'true'
+        run: npx playwright test playwright/recon.ui-alignment.spec.ts --reporter=github --workers=1
+
+      - name: Upload Playwright Report (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-domain
+          path: playwright-report/
