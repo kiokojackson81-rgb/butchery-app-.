@@ -156,9 +156,9 @@ export default function AdminPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const opsTabFromURL = useMemo<"supply"|"reports"|"history"|undefined>(() => {
+  const opsTabFromURL = useMemo<"supply"|"reports"|"history"|"deposits"|undefined>(() => {
     const o = (searchParams.get("opsTab") || "").toLowerCase();
-    return o === "supply" || o === "reports" || o === "history" ? (o as any) : undefined;
+    return o === "supply" || o === "reports" || o === "history" || o === "deposits" ? (o as any) : undefined;
   }, [searchParams]);
 
   const [outlets, setOutlets]   = useState<Outlet[]>([]);
@@ -2609,10 +2609,10 @@ function OpsCombined(props: {
     profitEstimate: { revenue: number; supplyTotal: number; expensesTotal: number; grossProfit: number; netAfterExpenses: number };
     raiseExpenseDispute: (outletName: string) => void;
   };
-  initialOpsTab?: "supply" | "reports" | "history";
+  initialOpsTab?: "supply" | "reports" | "history" | "deposits";
 }) {
   const { outlets, supply, reports, initialOpsTab } = props;
-  const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history">(initialOpsTab || "supply");
+  const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history" | "deposits">(initialOpsTab || "supply");
 
   return (
     <div>
@@ -2620,6 +2620,7 @@ function OpsCombined(props: {
         <TabBtn active={opsTab === "supply"} onClick={() => setOpsTab("supply")}>Supply View</TabBtn>
         <TabBtn active={opsTab === "reports"} onClick={() => setOpsTab("reports")}>Reports</TabBtn>
         <TabBtn active={opsTab === "history"} onClick={() => setOpsTab("history")}>Supply History</TabBtn>
+        <TabBtn active={opsTab === "deposits"} onClick={() => setOpsTab("deposits")}>Deposits</TabBtn>
       </div>
 
       {opsTab === "supply" && (
@@ -2863,7 +2864,11 @@ function OpsCombined(props: {
       {opsTab === "history" && (
         <section>
           <SupplyHistoryEmbed />
-          <div className="mt-4" />
+        </section>
+      )}
+
+      {opsTab === "deposits" && (
+        <section>
           <DepositsVerifyEmbed />
         </section>
       )}
