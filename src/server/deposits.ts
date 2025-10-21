@@ -6,6 +6,8 @@ import { notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor
 import { computeDayTotals } from "@/server/finance";
 
 // Config: enable automatic Daraja verification via env
+// For safety, require an explicit opt-in to auto-verification. Default: force manual approval.
+const FORCE_MANUAL_DEPOSITS = String(process.env.FORCE_MANUAL_DEPOSITS || "true").toLowerCase() === "true";
 const DARAJA_VERIFY_ENABLED = String(process.env.DARAJA_VERIFY_ENABLED || "").toLowerCase() === "true";
 const DARAJA_VERIFY_STUB = String(process.env.DARAJA_VERIFY_STUB || "").toLowerCase() === "true";
 // Optional path for verification endpoint, if your Daraja setup expects a custom path
@@ -137,6 +139,12 @@ export async function addDeposit(args: { date?: string; outletName: string; amou
 }
 
 async function tryAutoVerifyDeposit(opts: { amount: number; ref?: string | null; outlet?: string }) : Promise<{ verified: boolean; payload?: any }> {
+  // Safety: if FORCE_MANUAL_DEPOSITS is true, skip auto-verification entirely (manual admin approval required)
+  if (FORCE_MANUAL_DEPOSITS) {
+    try { console.info('[deposits] FORCE_MANUAL_DEPOSITS enabled: skipping auto-verification (manual approval required)'); } catch {}
+    return { verified: false, payload: { reason: 'force_manual' } };
+  }
+
   // Quick stub / env gated verification:
   if (DARAJA_VERIFY_STUB) {
     try { console.info('[deposits] DARAJA_VERIFY_STUB enabled: auto-verify true'); } catch {}
