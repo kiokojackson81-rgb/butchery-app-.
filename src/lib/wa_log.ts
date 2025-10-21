@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { addDevWaLog } from "@/lib/dev_wa_logs";
 
 export async function logMessage(entry: {
   attendantId?: string | null;
@@ -13,7 +14,13 @@ export async function logMessage(entry: {
   // In DRY/dev mode, skip DB logging entirely to keep local tests fast and resilient
   try {
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-    if (DRY) return;
+    if (DRY) {
+      // Always write to the in-memory dev log store in DRY mode so tests can inspect logs
+      try {
+        addDevWaLog({ direction: entry.direction ?? 'out', templateName: entry.templateName ?? null, payload: entry.payload ?? {}, waMessageId: entry.waMessageId ?? null, status: entry.status ?? null });
+      } catch {}
+      return;
+    }
   } catch {}
   // Hotflag: allow disabling DB logging immediately in prod incidents
   const disableRaw = (() => {

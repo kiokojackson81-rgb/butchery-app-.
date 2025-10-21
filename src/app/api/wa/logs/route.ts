@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { queryDevWaLogs } from "@/lib/dev_wa_logs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,23 +32,33 @@ export async function GET(req: Request) {
     }
     if (ors.length) where = { OR: ors };
 
-    const rows = await (prisma as any).waMessageLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      ...(after ? { cursor: { id: after }, skip: 1 } : {}),
-      select: {
-        id: true,
-        createdAt: true,
-        direction: true,
-        templateName: true,
-        status: true,
-        waMessageId: true,
-        payload: true,
-      },
-    });
-
-    return NextResponse.json({ ok: true, rows });
+    try {
+      const rows = await (prisma as any).waMessageLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+        select: {
+          id: true,
+          createdAt: true,
+          direction: true,
+          templateName: true,
+          status: true,
+          waMessageId: true,
+          payload: true,
+        },
+      });
+      return NextResponse.json({ ok: true, rows });
+    } catch (e) {
+      // DB not available: fall back to in-memory dev logs
+      try {
+        const toParam = to || undefined;
+        const rows = queryDevWaLogs({ to: toParam, q, limit });
+        return NextResponse.json({ ok: true, rows });
+      } catch (err: any) {
+        return NextResponse.json({ ok: false, error: String(err || "dev logs failed") }, { status: 500 });
+      }
+    }
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }

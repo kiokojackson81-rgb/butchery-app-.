@@ -102,6 +102,7 @@ model AttendantDeposit {
   note       String?
   amount     Int
   status     DepositStatus @default(PENDING)
+  verifyPayload Json?
   createdAt  DateTime      @default(now())
 }
 

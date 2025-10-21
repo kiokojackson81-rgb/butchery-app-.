@@ -14,7 +14,7 @@ import { sendText, sendInteractive } from "@/lib/wa";
 // GPT/OOC removed for legacy-only mode
 import { toGraphPhone } from "@/server/canon";
 import { touchWaSession } from "@/lib/waSession";
-import { updateDrySession } from "@/lib/dev_dry";
+import { updateDrySession, getDrySession as _getDrySession } from "@/lib/dev_dry";
 // OOC helpers removed in legacy-only
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 
@@ -399,7 +399,17 @@ export async function POST(req: Request) {
           }
 
           // Do not touch session before auth; avoid extending stale sessions
-          try { updateDrySession(phoneE164, { state: 'MENU' }); } catch {}
+          try {
+            // Avoid stomping a LOGIN/SPLASH state set by dev expire helpers.
+            try {
+              const dry = _getDrySession(phoneE164);
+              if (!dry || (String(dry.state || "").toUpperCase() !== "LOGIN" && String(dry.state || "").toUpperCase() !== "SPLASH")) {
+                updateDrySession(phoneE164, { state: 'MENU' });
+              }
+            } catch {
+              updateDrySession(phoneE164, { state: 'MENU' });
+            }
+          } catch {}
           let auth = await ensureAuthenticated(phoneE164);
           try { console.info('[WA] AUTH', { phone: phoneE164, authOk: !!auth?.ok, reason: (auth as any)?.reason || null, sess: authOk(auth) ? { role: auth.sess.role, outlet: auth.sess.outlet } : null }); } catch {}
           // Quick DB re-check fallback: if ensureAuthenticated said unauthenticated but
@@ -450,10 +460,21 @@ export async function POST(req: Request) {
 
             // DRY fallback: if DB is unavailable and we are in DRY mode, proceed as a basic attendant
             try {
-              const dry = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
-              if (!auth.ok && dry) {
-                auth = { ok: true, sess: { phoneE164, role: 'attendant', outlet: 'TestOutlet', code: 'ATT001', state: 'MENU' } } as any;
-                try { console.info('[WA] DRY AUTH FALLBACK applied', { phone: phoneE164 }); } catch {}
+              const dryModeEnabled = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
+              if (!auth.ok && dryModeEnabled) {
+                // Only apply the DRY auth fallback if there is no explicit in-memory session
+                // or if that in-memory session is not already in a login-like state.
+                try {
+                  const existingDry = _getDrySession(phoneE164);
+                  if (!existingDry || (String(existingDry.state || "").toUpperCase() !== "LOGIN" && String(existingDry.state || "").toUpperCase() !== "SPLASH")) {
+                    auth = { ok: true, sess: { phoneE164, role: 'attendant', outlet: 'TestOutlet', code: 'ATT001', state: 'MENU' } } as any;
+                    try { console.info('[WA] DRY AUTH FALLBACK applied', { phone: phoneE164 }); } catch {}
+                  } else {
+                    try { console.info('[WA] DRY AUTH: existing session login-like, skipping fallback', { phone: phoneE164, state: existingDry.state }); } catch {}
+                  }
+                } catch {
+                  auth = { ok: true, sess: { phoneE164, role: 'attendant', outlet: 'TestOutlet', code: 'ATT001', state: 'MENU' } } as any;
+                }
               }
             } catch {}
 
