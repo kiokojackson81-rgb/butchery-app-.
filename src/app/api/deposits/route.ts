@@ -3,7 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-import { parseMpesaText } from "@/server/deposits";
+import { parseMpesaText, addDeposit } from "@/server/deposits";
+import { listDryDeposits } from "@/lib/dev_dry";
 import { getPeriodState } from "@/server/trading_period";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
@@ -41,38 +42,31 @@ export async function POST(req: Request) {
     if (state !== "OPEN") return NextResponse.json({ ok: false, error: `Day is locked for ${outletName} (${date}).` }, { status: 409 });
 
     let savedCount = 0;
-    await withRetry(() => prisma.$transaction(async (tx) => {
-      await tx.attendantDeposit.deleteMany({ where: { date, outletName } });
-      const data = (entries || [])
-        .map((e) => {
-          // Auto-extract from pasted M-Pesa SMS if code/amount missing
-          let code = (e.code ?? "").trim();
-          let amountRaw = Number(e.amount ?? NaN);
-          if ((!code || !Number.isFinite(amountRaw)) && (e.rawMessage || e.note)) {
-            const parsed = parseMpesaText(String(e.rawMessage || e.note || ""));
-            if (parsed) {
-              if (!code) code = parsed.ref;
-              if (!Number.isFinite(amountRaw)) amountRaw = parsed.amount;
-            }
+    // Use addDeposit helper for each entry so DRY/dev fallback works when DB is not available
+    const processed: Array<any> = [];
+    for (const e of (entries || [])) {
+      try {
+        let code = (e.code ?? "").trim();
+        let amountRaw = Number(e.amount ?? NaN);
+        if ((!code || !Number.isFinite(amountRaw)) && (e.rawMessage || e.note)) {
+          const parsed = parseMpesaText(String(e.rawMessage || e.note || ""));
+          if (parsed) {
+            if (!code) code = parsed.ref;
+            if (!Number.isFinite(amountRaw)) amountRaw = parsed.amount;
           }
-          const amount = Number.isFinite(amountRaw) ? Math.max(0, amountRaw) : 0;
-          const status = ((e.status as DepositStatus) || "PENDING") as DepositStatus;
-          const note = (e.note ?? null) as string | null;
-          return {
-            date,
-            outletName,
-            code: code || null,
-            note,
-            amount,
-            status,
-          };
-        })
-        .filter((d) => d.amount > 0 || (d.code && d.code !== ""));
-      if (data.length) {
-        const res = await tx.attendantDeposit.createMany({ data });
-        savedCount = (res as any)?.count ?? data.length;
+        }
+        const amount = Number.isFinite(amountRaw) ? Math.max(0, amountRaw) : 0;
+        const note = (e.note ?? null) as string | null;
+        // Only attempt to create meaningful deposits
+        if (amount > 0 || (code && code !== "")) {
+          const res = await addDeposit({ date, outletName, amount, note: note || undefined, code: code || undefined });
+          processed.push(res);
+          savedCount += 1;
+        }
+      } catch (err) {
+        // best-effort: continue processing other entries
       }
-    }, { timeout: 15000, maxWait: 10000 }));
+    }
 
     // Best-effort verification stub: mark as VALID if env flag is set
     try {
@@ -84,7 +78,7 @@ export async function POST(req: Request) {
       }
     } catch {}
 
-    return NextResponse.json({ ok: true, savedCount });
+  return NextResponse.json({ ok: true, savedCount, processed });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }
@@ -96,13 +90,22 @@ export async function GET(req: Request) {
     const date = (searchParams.get("date") || "").slice(0, 10);
     const outlet = (searchParams.get("outlet") || "").trim();
     if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
-
-    const rows = await (prisma as any).attendantDeposit.findMany({
-      where: { date, outletName: outlet },
-      select: { code: true, amount: true, note: true, status: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-    });
-    return NextResponse.json({ ok: true, rows });
+    try {
+      const rows = await (prisma as any).attendantDeposit.findMany({
+        where: { date, outletName: outlet },
+        select: { code: true, amount: true, note: true, status: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      });
+      return NextResponse.json({ ok: true, rows });
+    } catch (e) {
+      // Fallback to in-memory DRY store when DB unavailable (dev mode)
+      try {
+  const rows = listDryDeposits(outlet, date, 50).map((r: any) => ({ id: r.id, code: null, amount: r.amount, note: r.note, status: r.status, createdAt: r.createdAt }));
+        return NextResponse.json({ ok: true, rows });
+      } catch {
+        return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
+      }
+    }
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }

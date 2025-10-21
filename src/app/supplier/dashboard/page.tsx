@@ -4,6 +4,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
+import { notifyToast, registerAdminToast } from '@/lib/toast';
+import { promptSync, confirmSync } from '@/lib/ui';
 
 /* =========================
    Types (aligned with Admin)
@@ -170,6 +172,11 @@ export default function SupplierDashboard(): JSX.Element {
 
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  useEffect(() => { if (!toastMsg) return; const id = setTimeout(()=>setToastMsg(null), 3500); return ()=>clearTimeout(id); }, [toastMsg]);
+  useEffect(() => { try { registerAdminToast((m) => setToastMsg(m)); } catch {} ; return () => { try { registerAdminToast(null); } catch {} } }, []);
+  // Local alias for compatibility
+  const _localNotify = (msg: string|null) => { try { setToastMsg(msg); } catch {} };
 
   /* Quick maps */
   const productByKey = useMemo(() => {
@@ -383,7 +390,7 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
     // Persist to server (non-blocking)
     try { await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows }); } catch {}
-    alert("Saved.");
+  notifyToast("Saved.");
   };
 
   /* ===== Submit (lock) ===== */
@@ -391,14 +398,14 @@ export default function SupplierDashboard(): JSX.Element {
     if (!selectedOutletName) return;
     // For supplier per requirements: do NOT lock because multiple suppliers may submit same item.
     await saveDraft();
-    alert("Submitted. Day remains open for additional supplies.");
+  notifyToast("Submitted. Day remains open for additional supplies.");
   };
 
   /* ===== Request modification to Supervisor ===== */
   const requestModification = (): void => {
     if (!selectedOutletName) return;
 
-    const note = window.prompt("Describe what needs to be corrected:", "");
+  const note = promptSync("Describe what needs to be corrected:", "") || "";
     if (!note) return;
 
     const req: AnyAmend = {
@@ -417,7 +424,7 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(AMEND_REQUESTS_KEY, next);
     setAmends(next.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
       ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName))));
-    alert("Modification request sent to Supervisor.");
+  notifyToast("Modification request sent to Supervisor.");
   };
 
   // Per-row submit (one item at a time) with duplicate prompt
@@ -426,7 +433,7 @@ export default function SupplierDashboard(): JSX.Element {
     const exists = rows.some((x) => x.itemKey === r.itemKey && x.id !== r.id);
     let mode: "add" | "replace" = "add";
     if (exists) {
-      const confirm = window.confirm(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
+  const confirm = confirmSync(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
       mode = confirm ? "add" : "replace";
     }
     try {
@@ -448,19 +455,19 @@ export default function SupplierDashboard(): JSX.Element {
       const minimal = toMinimal(nextFull);
       saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
       setRows(nextFull);
-      alert(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
+  notifyToast(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
     } catch (e: any) {
-      alert(e?.message || "Submit failed");
+  notifyToast(e?.message || "Submit failed");
     }
   };
 
   // Per-row: request modification (new weight + reason)
   const requestRowModification = async (r: SupplyRow) => {
-    const newQtyStr = window.prompt(`Enter new weight/qty for ${r.itemKey}:`, String(r.qty));
+  const newQtyStr = promptSync(`Enter new weight/qty for ${r.itemKey}:`, String(r.qty)) || "";
     if (!newQtyStr) return;
     const newQty = Number(newQtyStr);
-    if (!(newQty > 0)) { alert("Invalid number"); return; }
-    const reason = window.prompt("Reason for adjustment:", "");
+  if (!(newQty > 0)) { notifyToast("Invalid number"); return; }
+  const reason = promptSync("Reason for adjustment:", "") || "";
     if (!reason) return;
     try {
       const res = await fetch("/api/supply/adjustment/request", {
@@ -471,15 +478,15 @@ export default function SupplierDashboard(): JSX.Element {
       });
       const j = await res.json().catch(()=>({ ok: false }));
       if (!j?.ok) throw new Error(j?.error || "Failed");
-      alert("Adjustment requested; pending supervisor approval.");
+  notifyToast("Adjustment requested; pending supervisor approval.");
     } catch (e: any) {
-      alert(e?.message || "Request failed");
+  notifyToast(e?.message || "Request failed");
     }
   };
 
   /* ===== Add supplier comment on outlet-raised disputes ===== */
   const addAmendComment = (amendId: string) => {
-    const text = window.prompt("Add a short comment/reason (visible to Supervisor):", "");
+  const text = promptSync("Add a short comment/reason (visible to Supervisor):", "") || "";
     if (!text) return;
     const code = sessionStorage.getItem("supplier_code") || "supplier";
     const list = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
@@ -510,21 +517,21 @@ export default function SupplierDashboard(): JSX.Element {
     const fromName = (outletById[txFromId]?.name ?? "").trim();
     const toName = (outletById[txToId]?.name ?? "").trim();
     if (!fromName || !toName) {
-      alert("Please select valid outlets.");
+  notifyToast("Please select valid outlets.");
       return;
     }
     if (fromName === toName) {
-      alert("From and To outlets must be different.");
+  notifyToast("From and To outlets must be different.");
       return;
     }
     const p = productByKey[txProductKey];
     if (!p) {
-      alert("Please select a product to transfer.");
+  notifyToast("Please select a product to transfer.");
       return;
     }
     const qtyNum = toNumStr(txQty);
     if (qtyNum <= 0) {
-      alert("Quantity must be greater than 0.");
+  notifyToast("Quantity must be greater than 0.");
       return;
     }
 
@@ -551,7 +558,7 @@ export default function SupplierDashboard(): JSX.Element {
     // 4) Persist transfer to server (non-blocking)
     try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
 
-    alert("Transfer saved and applied to both outlets’ opening.");
+  notifyToast("Transfer saved and applied to both outlets’ opening.");
     setTxQty("");
   };
 

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { promptSync } from '@/lib/ui';
 
 type Deposit = {
   id: string;
@@ -113,7 +114,7 @@ export default function AdminDepositsPage() {
                   {r.status === 'PENDING' ? (
                     <div className="flex gap-2">
                       <button className="px-2 py-1 bg-green-600 rounded" onClick={async ()=>{ try { await fetch('/api/admin/edit/deposit', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ id: r.id, status: 'VALID' }) }); await load(); } catch(e){ console.error(e); } }}>Mark VALID</button>
-                      <button className="px-2 py-1 bg-red-600 rounded" onClick={async ()=>{ try { const reason = prompt('Reason for invalidation (optional)') || undefined; await fetch('/api/admin/edit/deposit', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ id: r.id, status: 'INVALID', note: reason }) }); await load(); } catch(e){ console.error(e); } }}>Mark INVALID</button>
+                      <button className="px-2 py-1 bg-red-600 rounded" onClick={async ()=>{ try { const reason = promptSync('Reason for invalidation (optional)') || undefined; await fetch('/api/admin/edit/deposit', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ id: r.id, status: 'INVALID', note: reason }) }); await load(); } catch(e){ console.error(e); } }}>Mark INVALID</button>
                     </div>
                   ) : (<span className="text-slate-400">—</span>)}
                 </td>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor.notifications";
 import { computeDayTotals } from "@/server/finance";
+import { listDryDeposits, recordDryDeposit, getDryDepositById, updateDryDeposit } from "@/lib/dev_dry";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
@@ -24,9 +25,41 @@ export async function POST(req: Request) {
     if (typeof body.status === "string") data.status = body.status;
     if (Object.keys(data).length === 0) return NextResponse.json({ ok: false, error: "no fields to update" }, { status: 400 });
 
-    const before = await (prisma as any).attendantDeposit.findUnique({ where: { id } }).catch(()=>null);
+    let before: any = null;
+    try { before = await (prisma as any).attendantDeposit.findUnique({ where: { id } }).catch(()=>null); } catch {}
+    // If id references a dry deposit, load it from the dry store
+    if (!before && String(id || '').startsWith('dry:')) {
+      before = getDryDepositById(id) as any;
+    }
     if (!before) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
-  const after = await (prisma as any).attendantDeposit.update({ where: { id }, data });
+    let after: any = null;
+    try {
+      after = await (prisma as any).attendantDeposit.update({ where: { id }, data });
+    } catch (e) {
+      // DRY/dev: if id is a dry id, update dry deposit directly
+      if (String(id || '').startsWith('dry:')) {
+        const updated = updateDryDeposit(id, data as any);
+        if (updated) {
+          after = updated;
+        }
+      }
+      // If not updated, fall back to naive update by matching outlet/date
+      if (!after) {
+        try {
+          const outlet = (data && (data.outletName || data.outlet)) || before?.outletName || null;
+          const date = (data && (data.date || null)) || before?.date || null;
+          if (outlet && date) {
+            const rows = listDryDeposits(outlet, date, 50);
+            if (rows && rows.length) {
+              const r = rows[0];
+              const upd = updateDryDeposit(r.id!, data as any) || r;
+              after = upd;
+            }
+          }
+        } catch {}
+      }
+      if (!after) throw e;
+    }
 
     try {
       const key = `admin_edit:${Date.now()}:deposit:${id}`;

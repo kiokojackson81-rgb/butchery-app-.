@@ -133,8 +133,8 @@ export async function addDeposit(args: { date?: string; outletName: string; amou
     return created;
   } catch {
     // DRY/dev: store in memory so TXNS view works in tests
-    recordDryDeposit({ outletName: args.outletName, date, amount: args.amount, note: args.note });
-    return { date, outletName: args.outletName, amount: args.amount, note: args.note || null, status: "RECORDED", createdAt: new Date() } as any;
+    const item = recordDryDeposit({ outletName: args.outletName, date, amount: args.amount, note: args.note });
+    return { date, outletName: args.outletName, amount: args.amount, note: args.note || null, status: "RECORDED", createdAt: new Date(), id: item?.id } as any;
   }
 }
 

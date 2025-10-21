@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
 import { canonFull } from "@/lib/codeNormalize";
+import { notifyToast, registerAdminToast } from '@/lib/toast';
 
 // ===== Types kept exactly as your original =====
 type Outlet = "Bright" | "Baraka A" | "Baraka B" | "Baraka C";
@@ -146,6 +147,8 @@ export default function AdminStaffPage() {
     })();
   }, [fetchSetting, persistScopeSetting, persistStaffToServer]);
 
+  useEffect(() => { try { registerAdminToast((m) => notifyToast(m)); } catch {} ; return () => { try { registerAdminToast(null); } catch {} } }, []);
+
   // CRUD staff (unchanged)
   const addStaff = () => {
     const s: Staff = { id: uid(), name: "", code: "", outlet: "Bright", products: [], active: true };
@@ -183,24 +186,24 @@ export default function AdminStaffPage() {
   // ===== Scope helpers (do not touch login flow) =====
   const applyScope = (s: Staff) => {
     const canonical = canonFull(s.code);
-    if (!canonical) return alert("Set a login code first.");
+  if (!canonical) return notifyToast("Set a login code first.");
     const scopeValue: ScopeValue = { outlet: s.outlet, productKeys: s.products };
     const next = { ...scope, [canonical]: scopeValue };
     setScope(next); writeScope(next); persistScopeSetting(next);
     // Write-through to server (best-effort)
     (async () => {
       try {
-        const scopeRes = await fetch("/api/admin/scope", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ [canonical]: scopeValue }),
+        const scopeRes = await fetch(`/api/admin/scope/${encodeURIComponent(canonical)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ outlet: scopeValue.outlet, productKeys: scopeValue.productKeys }),
         });
         if (!scopeRes.ok) throw new Error(await scopeRes.text());
 
         const payload = {
           people: [{
-            role: "attendant",
+            role: 'attendant',
             code: canonical,
             name: s.name || s.code || canonical,
             outlet: s.outlet,
@@ -208,18 +211,19 @@ export default function AdminStaffPage() {
             active: s.active,
           }],
         };
-        const attendantRes = await fetch("/api/admin/attendants/upsert", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
+        const attendantRes = await fetch('/api/admin/attendants/upsert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
           body: JSON.stringify(payload),
         });
         if (!attendantRes.ok) throw new Error(await attendantRes.text());
 
-        alert(`Scope saved for ${s.name || s.code} \u2705`);
-      } catch (err) {
+  // non-blocking toast feedback
+  try { notifyToast('Scope saved for ' + (s.name || s.code) + ' ✅'); } catch {}
+        } catch (err) {
         console.error(err);
-        alert(`Saved locally, but failed to sync scope/login for ${s.name || s.code}.`);
+        try { notifyToast('Saved locally, but failed to sync scope/login for ' + (s.name || s.code)); } catch {}
       }
     })();
   };
@@ -274,12 +278,12 @@ export default function AdminStaffPage() {
       });
       const ok = res.ok;
       if (!ok) throw new Error(await res.text());
-      setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
-      alert("Commission settings saved \u2705");
+    setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
+  notifyToast("Commission settings saved ✅");
     } catch (e) {
       console.error(e);
-      setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
-      alert("Failed to save commission settings");
+    setCommissionByCode((m) => ({ ...m, [canonical]: { ...cur, loading: false } }));
+  notifyToast("Failed to save commission settings");
     }
   }
 
@@ -312,10 +316,10 @@ export default function AdminStaffPage() {
     (async () => {
       try {
         const requests: Promise<Response>[] = [
-          fetch("/api/admin/scope", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            cache: "no-store",
+          fetch('/api/admin/scope', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
             body: JSON.stringify(payload),
           }),
         ];
@@ -336,10 +340,10 @@ export default function AdminStaffPage() {
           const attendantRes = responses[1];
           if (!attendantRes.ok) throw new Error(await attendantRes.text());
         }
-        alert("All active staff scopes synced to server \u2705");
+  notifyToast("All active staff scopes synced to server ✅");
       } catch (err) {
         console.error(err);
-        alert("Scopes saved locally, but failed to sync all to server.");
+  notifyToast("Scopes saved locally, but failed to sync all to server.");
       }
     })();
   };

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { notifyToast, registerAdminToast } from '@/lib/toast';
 
 type Log = {
   id: string;
@@ -13,6 +14,9 @@ type Log = {
 };
 
 export default function WALogsPage() {
+  // Local helper to use admin toast if available
+  // Register centralized toast setter
+  useEffect(() => { try { registerAdminToast((m) => notifyToast(m)); } catch {} ; return () => { try { registerAdminToast(null); } catch {} } }, []);
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -257,7 +261,7 @@ export default function WALogsPage() {
         <div className="mt-3">
           <div className="flex items-center gap-2">
             <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{
-              if (!diagResult) return alert('Select a row first');
+              if (!diagResult) return notifyToast('Select a row first');
               // If selected row is inbound, attempt to extract text for GPT dry-run
               let text = '';
               try {
@@ -267,7 +271,7 @@ export default function WALogsPage() {
                 else if (p?.interactive?.button_reply?.title) text = p.interactive.button_reply.title;
               } catch {}
               const phone = diagResult.payload?.from || diagResult.payload?.meta?.phoneE164 || diagResult.payload?.phone || '';
-              if (!phone) return alert('Cannot determine phone from selected row');
+              if (!phone) return notifyToast('Cannot determine phone from selected row');
               const ok = confirm(`Re-run GPT dry-run for ${phone} using text: "${text || '<empty>'}"?`);
               if (!ok) return;
               try {
@@ -278,7 +282,7 @@ export default function WALogsPage() {
               } catch (e:any) { setDiagResult({ error: String(e?.message || e) }); }
               finally { setDiagLoading(false); }
             }}>Re-run GPT dry-run for selected</button>
-            <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{ if (!diagResult) return alert('Select a row first'); setDiagResult(diagResult); }}>Show raw</button>
+            <button className="border rounded px-2 py-1 text-sm" onClick={async ()=>{ if (!diagResult) return notifyToast('Select a row first'); setDiagResult(diagResult); }}>Show raw</button>
           </div>
         </div>
       </div>
@@ -322,9 +326,9 @@ export default function WALogsPage() {
                 }
                 setSendText("");
                 await load();
-                alert("Sent ✅");
+                notifyToast("Sent ✅");
               } catch (e: any) {
-                alert("Send failed: " + String(e?.message || e));
+                notifyToast("Send failed: " + String(e?.message || e));
               } finally {
                 setSending(false);
               }
@@ -413,9 +417,9 @@ export default function WALogsPage() {
                   fetch("/api/settings/wa_flow_supplier", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: supplierCfg }) }),
                   fetch("/api/settings/wa_flow_supervisor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: supervisorCfg }) }),
                 ]);
-                alert("Saved ✅");
+                notifyToast("Saved ✅");
               } catch (e:any) {
-                alert("Save failed: " + String(e?.message || e));
+                notifyToast("Save failed: " + String(e?.message || e));
               } finally {
                 setCfgSaving(false);
               }
