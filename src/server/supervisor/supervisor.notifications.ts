@@ -37,3 +37,15 @@ export async function notifySupplier(outlet: string, msg: string) {
   if (!tos.length) return;
   await Promise.all(tos.map((to: string) => sendOpsMessage(to, { kind: "free_text", text: msg })));
 }
+
+// Notify supervisors and admins (by role) for an outlet
+export async function notifySupervisorsAndAdmins(outlet: string, msg: string) {
+  try {
+    const rows = await (prisma as any).phoneMapping.findMany({ where: { outlet, role: { in: ["supervisor", "admin"] }, phoneE164: { not: null } } });
+    const tos = rows.map((r: any) => toGraph(r.phoneE164!)).filter(Boolean) as string[];
+    if (!tos.length) return;
+    await Promise.all(tos.map((to: string) => sendOpsMessage(to, { kind: "free_text", text: msg })));
+  } catch (e) {
+    // best-effort
+  }
+}

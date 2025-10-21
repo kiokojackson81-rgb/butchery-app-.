@@ -7,6 +7,7 @@ import { sendTextSafe } from "@/lib/wa";
 import { getSession } from "@/lib/session";
 import { DepositStatus } from "@prisma/client";
 import { getPeriodState } from "@/server/trading_period";
+import { notifySupervisorsAndAdmins } from "@/server/supervisor/supervisor.notifications";
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastErr: any;
@@ -34,7 +35,8 @@ export async function POST(req: Request) {
     if (!outletName) return NextResponse.json({ ok: false, error: "No outlet" }, { status: 400 });
 
     const date = new Date().toISOString().slice(0, 10);
-  const { entries } = (await req.json()) as { entries: Array<{ code?: string; amount?: number; note?: string; status?: DepositStatus }> };
+    const body = (await req.json()) as { entries?: Array<{ code?: string; amount?: number; note?: string; status?: DepositStatus }> };
+    const entries = body.entries || [];
     const data = (entries || [])
       .map((e) => ({
         date,
@@ -64,7 +66,7 @@ export async function POST(req: Request) {
     const savedRows: any[] = await withRetry(() => (prisma as any).attendantDeposit.findMany({ where: { date, outletName } }));
     const total = savedRows.reduce((s, r) => s + Number(r.amount || 0), 0);
 
-    // Try to notify the submitting attendant(s) if we can resolve their phone(s)
+  // Try to notify the submitting attendant(s) if we can resolve their phone(s)
     try {
       const maps: Array<{ code: string; phoneE164: string | null }> = await withRetry(() => (prisma as any).phoneMapping.findMany({ where: { role: "attendant", outlet: outletName } }));
       const codes = maps.map((m) => m.code).filter(Boolean) as string[];
@@ -76,8 +78,25 @@ export async function POST(req: Request) {
         if (a?.loginCode) nameByCode.set(a.loginCode, a.name || a.loginCode);
       }
       await Promise.allSettled(
-        maps.map((m) => sendTextSafe(m.phoneE164 || "", `Deposits submitted for ${outletName}. Total: Ksh ${total}.`, "AI_DISPATCH_TEXT"))
+        maps.map((m) => sendTextSafe(m.phoneE164 || "", `Deposits submitted for ${outletName}. Total: Ksh ${total}. Pending admin approval.`, "AI_DISPATCH_TEXT"))
       );
+      // Notify supervisors/admins to speed up approval. Prefer per-deposit details up to a limit to avoid spam.
+      try {
+  const entriesLocal: Array<any> = Array.isArray(body?.entries) ? body.entries : [];
+        const maxPerDepositNotify = 10;
+        if (entriesLocal.length > 0 && entriesLocal.length <= maxPerDepositNotify) {
+          for (const e of entriesLocal) {
+            const amt = Number(e.amount || 0);
+            const note = (e.note || '').trim();
+            if (amt > 0) {
+              const codePart = e.code ? ` code: ${String(e.code)}` : '';
+              await notifySupervisorsAndAdmins(outletName, `New pending deposit at ${outletName}: KSh ${amt}${note ? ` (ref ${note})` : ''}${codePart}. Please review.`);
+            }
+          }
+        } else {
+          await notifySupervisorsAndAdmins(outletName, `New pending deposit(s) at ${outletName}: Total KSh ${total}. ${entriesLocal.length > maxPerDepositNotify ? `(First ${maxPerDepositNotify} suppressed)` : ''} Please review.`);
+        }
+      } catch {}
     } catch {}
 
   return NextResponse.json({ ok: true, total });

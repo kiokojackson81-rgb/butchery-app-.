@@ -20,6 +20,18 @@ export async function GET(req: NextRequest) {
     if (date) where.date = date;
     if (outlet) where.outletName = outlet;
 
+    const statsOnly = url.searchParams.get('stats') === 'true' || url.searchParams.get('stats') === '1';
+    if (statsOnly) {
+      // Count pending deposits total and by outlet (respect optional date/outlet filters)
+      const pendingWhere = { ...where, status: 'PENDING' } as any;
+      const totalPending = await (prisma as any).attendantDeposit.count({ where: pendingWhere });
+      // pending by outlet
+      const group = await (prisma as any).attendantDeposit.groupBy({ by: ['outletName'], where: pendingWhere, _count: { _all: true } }).catch(() => [] as any[]);
+      const byOutlet: Record<string, number> = {};
+      for (const g of group || []) byOutlet[g.outletName] = Number((g as any)._count?._all || 0);
+      return new Response(JSON.stringify({ ok: true, stats: { totalPending, byOutlet } }), { status: 200 });
+    }
+
     const rows = await (prisma as any).attendantDeposit.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
     return new Response(JSON.stringify({ ok: true, deposits: rows }), { status: 200 });
   } catch (e: any) {
