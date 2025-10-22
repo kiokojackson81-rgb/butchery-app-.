@@ -7,6 +7,7 @@ import { warmUpSession, logOutbound } from "@/lib/wa";
 import { markLastMsg, touchWaSession } from "@/lib/waSession";
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 import { setDrySession, updateDrySession } from "@/lib/dev_dry";
+import { createSession, serializeSessionCookie } from "@/lib/session";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -193,7 +194,55 @@ export async function POST(req: Request) {
     try {
       const result = await finalizeLoginDirect(phoneE164, code);
       const status = (result as any)?.ok ? 200 : 400;
-      return NextResponse.json(result as any, { status });
+
+      // If a supplier finalized via the web flow, create a server-backed session
+      // so suppliers can call server endpoints that rely on getSession(). We
+      // create or find a minimal Attendant (loginCode) record and then call
+      // createSession to produce a bk_sess cookie. This mirrors the attendant
+      // login behaviour but keeps suppliers scoped to their outlet.
+      let sessionHeader: string | undefined = undefined;
+      try {
+        if ((result as any)?.ok && (result as any)?.role === "supplier") {
+          const code0 = String((result as any)?.code || "").trim();
+          // Ensure we have an Attendant row to own the session. Prefer finding an existing one.
+          let att: any = null;
+          try {
+            att = await (prisma as any).attendant.findFirst({ where: { loginCode: { equals: code0, mode: "insensitive" } }, select: { id: true } }).catch(() => null);
+            if (!att) {
+              const name = code0 || "supplier";
+              const created = await (prisma as any).attendant.create({ data: { name, loginCode: code0 } }).catch(() => null);
+              att = created || null;
+            }
+          } catch {}
+
+          if (att?.id) {
+            // Resolve outlet code if present in result
+            let outletCode: string | undefined = undefined;
+            try {
+              const outName = (result as any)?.outlet;
+              if (outName) {
+                const out = await (prisma as any).outlet.findFirst({ where: { name: { equals: String(outName), mode: "insensitive" } }, select: { code: true } }).catch(() => null);
+                outletCode = out?.code ?? undefined;
+              }
+            } catch {}
+
+            try {
+              const created = await createSession(att.id, outletCode);
+              sessionHeader = serializeSessionCookie(created.token);
+            } catch (err) {
+              // Non-fatal: session creation failing shouldn't block finalize
+              console.error('supplier session create failed', err);
+            }
+          }
+        }
+      } catch (e) {
+        // swallow session creation errors to avoid breaking finalize
+        try { console.error('session creation step failed', e); } catch {}
+      }
+
+      const res = NextResponse.json(result as any, { status });
+      if (sessionHeader) res.headers.append("Set-Cookie", sessionHeader);
+      return res;
     } catch (e) {
       // DRY fallback: allow login to succeed without DB so GPT-only tests can proceed
       const dry = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
