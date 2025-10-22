@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 import { notifyToast, registerAdminToast } from '@/lib/toast';
@@ -806,6 +807,9 @@ export default function SupplierDashboard(): JSX.Element {
             >
               Pricebook
             </button>
+            <Link href="/supplier/history" className="btn-mobile border rounded-xl px-3 py-2 text-sm">
+              Supply history
+            </Link>
           </div>
 
           <div className="flex-1" />
