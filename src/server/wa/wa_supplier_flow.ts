@@ -13,6 +13,7 @@ import {
   buildBackCancel,
   buildAfterSaveButtons,
 } from "@/server/wa/wa_messages";
+import { lockPeriod } from "@/server/trading_period";
 
 export type SupplierState =
   | "SPL_MENU"
@@ -216,6 +217,12 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
         return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock: false }) as any }, "AI_DISPATCH_INTERACTIVE");
       }
       await upsertOpeningLock(c.outlet, c.date);
+      // Also lock the trading period for attendants so dashboard/attendant behavior is consistent
+      try {
+        await lockPeriod(c.outlet, c.date, sess.code || "supplier");
+      } catch (err) {
+        // best-effort: don't block supplier flow on lock errors
+      }
       await notifyAttendants(c.outlet, `Opening stock is live for ${c.outlet} (${c.date}). Proceed with operations.`);
       await notifySupervisorsAdmins(c.outlet, `Delivery posted & locked for ${c.outlet} (${c.date}).`);
       await sendTextSafe(gp, `Opening locked for ${c.outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });

@@ -35,6 +35,15 @@ function makeReq(url: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // default raw query to empty array to avoid undefined in some DB mocks
+  fakePrisma.$queryRaw.mockResolvedValue([]);
+    // default findMany to empty arrays to avoid undefined
+    fakePrisma.supplyOpeningRow.findMany.mockResolvedValue([]);
+    fakePrisma.attendantClosing.findMany.mockResolvedValue([]);
+    fakePrisma.pricebookRow.findMany.mockResolvedValue([]);
+    fakePrisma.product.findMany.mockResolvedValue([]);
+    fakePrisma.attendantExpense.findMany.mockResolvedValue([]);
+    fakePrisma.attendantDeposit.findMany.mockResolvedValue([]);
 });
 
 describe('/api/metrics/header snapshot behavior', () => {
@@ -45,8 +54,9 @@ describe('/api/metrics/header snapshot behavior', () => {
     // No live activity for current day
     fakePrisma.supplyOpeningRow.findMany.mockResolvedValueOnce([]); // openRows
     fakePrisma.attendantClosing.findMany.mockResolvedValueOnce([]); // closingRows
-    fakePrisma.pricebookRow.findMany.mockResolvedValueOnce([{ outletName: outlet, productKey: 'beef', sellPrice: 1000, active: true }]);
-    fakePrisma.product.findMany.mockResolvedValueOnce([{ key: 'beef', name: 'Beef', unit: 'kg', sellPrice: 1000, active: true }]);
+  // Ensure pricebook/product data is returned for all internal calls
+  fakePrisma.pricebookRow.findMany.mockResolvedValue([{ outletName: outlet, productKey: 'beef', sellPrice: 1000, active: true }]);
+  fakePrisma.product.findMany.mockResolvedValue([{ key: 'beef', name: 'Beef', unit: 'kg', sellPrice: 1000, active: true }]);
     fakePrisma.attendantExpense.findMany.mockResolvedValueOnce([]); // expenses
     fakePrisma.attendantDeposit.findMany.mockResolvedValueOnce([]); // deposits
     fakePrisma.$queryRaw.mockResolvedValueOnce([]); // till count
@@ -69,6 +79,13 @@ describe('/api/metrics/header snapshot behavior', () => {
     const { GET } = await import('@/app/api/metrics/header/route');
     const res = await GET(makeReq(`https://x/api/metrics/header?outlet=${encodeURIComponent(outlet)}`));
     const j = await (res as any).json();
+    if (j && j.totals && Number(j.totals.weightSales) === 0) {
+      console.error('[metrics debug] previous view totals', j.totals);
+    }
+    // Debugging: surface response when tests fail to help diagnose missing mocks
+    if (!(j && j.ok)) {
+      console.error('[metrics debug] response', j);
+    }
 
     // From snapshot: sold = 10 - 2 - 1 = 7; sales = 7*1000 = 7000; expenses=100; deposits=0
     // carryoverPrev = 7000 - 100 - 0 = 6900; amountToDeposit = carryoverPrev (because current has no activity)
@@ -85,11 +102,13 @@ describe('/api/metrics/header snapshot behavior', () => {
     // For this request, the first 7 calls correspond to date-scoped queries
     fakePrisma.supplyOpeningRow.findMany.mockResolvedValueOnce([]); // openRows (date)
     fakePrisma.attendantClosing.findMany.mockResolvedValueOnce([]); // closingRows (date)
-    fakePrisma.pricebookRow.findMany.mockResolvedValueOnce([{ outletName: outlet, productKey: 'beef', sellPrice: 1000, active: true }]);
-    fakePrisma.product.findMany.mockResolvedValueOnce([{ key: 'beef', name: 'Beef', unit: 'kg', sellPrice: 1000, active: true }]);
+  // Ensure pricebook/product data is returned for all internal calls
+  fakePrisma.pricebookRow.findMany.mockResolvedValue([{ outletName: outlet, productKey: 'beef', sellPrice: 1000, active: true }]);
+  fakePrisma.product.findMany.mockResolvedValue([{ key: 'beef', name: 'Beef', unit: 'kg', sellPrice: 1000, active: true }]);
     fakePrisma.attendantExpense.findMany.mockResolvedValueOnce([]); // expenses (date)
-    fakePrisma.attendantDeposit.findMany.mockResolvedValueOnce([{ amount: 500, status: 'VALID' }]); // deposits (date)
-    fakePrisma.$queryRaw.mockResolvedValueOnce([]); // till count
+  // Route uses $queryRaw for deposits; return the deposit row first, then till count
+  fakePrisma.$queryRaw.mockResolvedValueOnce([{ amount: 500, status: 'VALID' }]); // deposits (date)
+  fakePrisma.$queryRaw.mockResolvedValueOnce([]); // till count
     // Snapshots for this date
     const snapshot = {
       openingSnapshot: { beef: 10 },

@@ -13,7 +13,9 @@ export async function GET(req: Request) {
   const dateParam = (searchParams.get("date") || "").slice(0, 10);
   const today = dateISOInTZ(new Date(), tz);
   const date = dateParam || today;
-  const period = (searchParams.get("period") || "").toLowerCase(); // "previous" to show previous trading period for given date
+  const periodParam = searchParams.get("period");
+  // If a date is explicitly provided, treat the request as asking for the previous period view
+  const period = (periodParam || (dateParam ? 'previous' : '')).toLowerCase(); // "previous" to show previous trading period for given date
   const isCurrent = !dateParam || dateParam === today;
   if (!outlet)
     return NextResponse.json({
@@ -77,10 +79,10 @@ export async function GET(req: Request) {
   const prevPeriodSnap: any = snapVal2 || snapVal1 || null;
   if (isCurrent && prevPeriodSnap && typeof prevPeriodSnap === 'object') {
     try {
-      const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
-      const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
-      const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
-      const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
+        const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
+        const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
+        const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
+        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
       const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
       const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
       outstandingPrev = Math.max(0, todayTotalPrev - verifiedDepositsPrev);
@@ -99,15 +101,19 @@ export async function GET(req: Request) {
 
   // Previous period view for the given date: use latest snapshot on that date if present
   if (period === 'previous') {
+    // If there is a saved snapshot for the date, compute totals from the snapshot
     if (prevPeriodSnap && typeof prevPeriodSnap === 'object') {
       try {
         const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
         const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
         const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
         const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
-        const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+        const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== 'INVALID').reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
         const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
-        const amountToDepositPrev = outstandingPrev + (todayTotalPrev - verifiedDepositsPrev);
+        // For explicit "previous" view, use the previous calendar day's carryover (yRevenue - yExpenses - yVerifiedDeposits)
+        const carryoverPrevFromY = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+        const amountToDepositPrev = carryoverPrevFromY + (todayTotalPrev - verifiedDepositsPrev);
+
         return NextResponse.json({
           ok: true,
           totals: {
@@ -117,12 +123,15 @@ export async function GET(req: Request) {
             tillSalesGross: 0,
             verifiedDeposits: verifiedDepositsPrev,
             netTill: 0,
-            carryoverPrev: outstandingPrev,
+            carryoverPrev: carryoverPrevFromY,
             amountToDeposit: amountToDepositPrev,
           },
         });
-      } catch {}
+      } catch (err) {
+        // If snapshot computation fails, fall through to calendar-previous fallback below
+      }
     }
+
     // Fallback behavior: treat "previous" as calendar previous day
     return NextResponse.json({
       ok: true,

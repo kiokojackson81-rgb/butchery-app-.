@@ -1679,6 +1679,7 @@ export default function AdminPage() {
         <section className="rounded-2xl border p-4">
           <OpsCombined
             outlets={outlets}
+            products={products}
             supply={{ supDate, setSupDate, supOutletName, setSupOutletName, ALL, supplyItems, supTotals }}
             reports={{ repDate, setRepDate, repMode, setRepMode, repRows, repTotals, salesByItem, expensesMonitor, profitEstimate, raiseExpenseDispute }}
             initialOpsTab={opsTabFromURL}
@@ -2716,6 +2717,7 @@ function AdminEditOpeningList() {
  */
 function OpsCombined(props: {
   outlets: Outlet[];
+  products: Product[];
   supply: {
     supDate: string;
     setSupDate: (v: string) => void;
@@ -2739,7 +2741,7 @@ function OpsCombined(props: {
   };
   initialOpsTab?: "supply" | "reports" | "history" | "deposits";
 }) {
-  const { outlets, supply, reports, initialOpsTab } = props;
+  const { outlets, products, supply, reports, initialOpsTab } = props;
   const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history" | "deposits">(initialOpsTab || "supply");
 
   return (
@@ -2770,9 +2772,64 @@ function OpsCombined(props: {
                 <option value={supply.ALL}>All outlets</option>
                 {outlets.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
               </select>
+              {/* Admin helper: create a sample supply row via admin API (mirrors WA supplier write) */}
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    // Check lock
+                    try {
+                      const lk = await fetch(`/api/admin/supply/lock?date=${encodeURIComponent(supply.supDate)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' });
+                      if (lk.ok) {
+                        const lj = await lk.json().catch(()=>({ ok:false }));
+                        if (lj?.ok && lj.locked) { alert(`Opening is locked for ${outlet} (${supply.supDate}).`); return; }
+                      }
+                    } catch {}
+                    const prod = products[0];
+                    if (!prod) { alert('No product defined'); return; }
+                    const payload = { rows: [{ date: supply.supDate, outletName: outlet, itemKey: prod.key, qty: 1, buyPrice: 1, unit: prod.unit }] };
+                    const r = await fetch('/api/admin/supply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert('Sample supply row created');
+                    // trigger a reload of the page to pick up changes
+                    window.location.reload();
+                  } catch (e:any) { alert(e?.message || 'Failed'); }
+                }}
+                title="Create sample supply row (admin only)"
+              >Create sample supply</button>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    const r = await fetch('/api/admin/supply/lock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: supply.supDate, outlet, lock: true }) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert(`Locked opening for ${outlet} (${supply.supDate})`);
+                  } catch (e:any) { alert(e?.message || 'Failed to lock'); }
+                }}
+                title="Lock opening for this outlet/date"
+              >Lock opening</button>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    const r = await fetch('/api/admin/supply/lock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: supply.supDate, outlet, lock: false }) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert(`Unlocked opening for ${outlet} (${supply.supDate})`);
+                  } catch (e:any) { alert(e?.message || 'Failed to unlock'); }
+                }}
+                title="Unlock opening for this outlet/date"
+              >Unlock opening</button>
             </div>
           </div>
-
           <div className="table-wrap">
             <table className="w-full text-sm">
               <thead>

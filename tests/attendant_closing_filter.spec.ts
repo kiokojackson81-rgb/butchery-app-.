@@ -56,6 +56,9 @@ describe('attendant closing product filtering', () => {
     });
   ;(prisma as any).waSession.update.mockResolvedValue({ id: 'sess2' });
   ;(prisma as any).attendantClosing.findMany.mockResolvedValue([]); // nothing closed yet today
+    // Ensure webhook/flow runs in non-DRY mode so interactive payloads are produced
+    (process as any).env.NODE_ENV = 'production';
+    process.env.WA_DRY_RUN = 'false';
   });
   afterEach(() => { vi.restoreAllMocks(); });
 

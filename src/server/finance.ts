@@ -74,7 +74,12 @@ export async function computeDayTotals(args: { date: string; outletName: string 
   const netTill = tillSalesGross - verifiedDeposits;
   const expectedDeposit = todayTotalSales - netTill;
 
-  return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
+  const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
+  try {
+    // eslint-disable-next-line no-console
+    console.error('[computeSnapshotTotals debug] result:', JSON.stringify(result));
+  } catch (e) {}
+  return result;
 }
 
 // Compute totals for a closed period from a saved snapshot (used after first close when live rows were cleared)
@@ -91,6 +96,8 @@ export async function computeSnapshotTotals(args: {
     (prisma as any).pricebookRow.findMany({ where: { outletName } }),
     (prisma as any).product.findMany(),
   ]);
+
+  // Debug: surface what's being used during tests when weightSales is unexpectedly zero
 
   const pb = new Map<any, any>(pbRows.map((r: any) => [`${r.productKey}`, r] as const));
   const prod = new Map<any, any>(products.map((p: any) => [p.key, p] as const));
@@ -130,5 +137,5 @@ export async function computeSnapshotTotals(args: {
   const netTill = tillSalesGross - verifiedDeposits;
   const expectedDeposit = todayTotalSales - netTill;
 
-  return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
+    return { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit };
 }
