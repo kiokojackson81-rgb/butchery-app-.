@@ -831,6 +831,18 @@ export default function SupplierDashboard(): JSX.Element {
 
           <div className="flex items-center gap-2" role="tablist" aria-label="Supplier menu" onKeyDown={handleTabKeyDown}>
             <button
+              id="tab-supply"
+              ref={(el) => { tabRefs.current[0] = el; }}
+              role="tab"
+              aria-selected={tab === 'supply'}
+              aria-controls="panel-supply"
+              tabIndex={tab === 'supply' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'supply' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
+              onClick={() => setTab('supply')}
+            >
+              Record Supply
+            </button>
+            <button
               id="tab-pricebook"
               ref={(el) => { tabRefs.current[1] = el; }}
               role="tab"
@@ -869,17 +881,6 @@ export default function SupplierDashboard(): JSX.Element {
             <Link href="/supplier/history" className="btn-mobile border rounded-2xl px-3 py-2 text-sm text-gray-300">
               History
             </Link>
-            {/* supply tab button (hidden from menu but focusable) */}
-            <button
-              id="tab-supply"
-              ref={(el) => { tabRefs.current[0] = el; }}
-              role="tab"
-              aria-selected={tab === 'supply'}
-              aria-controls="panel-supply"
-              tabIndex={tab === 'supply' ? 0 : -1}
-              className="sr-only"
-              onClick={() => setTab('supply')}
-            />
           </div>
 
           <div className="flex-1" />
