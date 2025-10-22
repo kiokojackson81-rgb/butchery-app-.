@@ -171,6 +171,40 @@ export default function SupplierDashboard(): JSX.Element {
   const sellPriceByKey = useMemo(() => Object.fromEntries(prices.map(p => [p.key, Number(p.price) || 0])), [prices]);
   const [showPricebook, setShowPricebook] = useState<boolean>(false);
   const [tab, setTab] = useState<'supply' | 'pricebook' | 'transfers' | 'disputes'>('supply');
+  // Refs for tab buttons to support keyboard navigation
+  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const tabOrder: ('supply' | 'pricebook' | 'transfers' | 'disputes')[] = ['supply', 'pricebook', 'transfers', 'disputes'];
+
+  const focusTabAt = (idx: number) => {
+    const el = tabRefs.current[idx];
+    if (el) el.focus();
+  };
+
+  const handleTabKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key;
+    const activeIndex = tabRefs.current.findIndex((el) => el === document.activeElement);
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      e.preventDefault();
+      const next = (activeIndex + 1 + tabOrder.length) % tabOrder.length;
+      focusTabAt(next);
+      setTab(tabOrder[next]);
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = (activeIndex - 1 + tabOrder.length) % tabOrder.length;
+      focusTabAt(prev);
+      setTab(tabOrder[prev]);
+    } else if (key === 'Home') {
+      e.preventDefault();
+      focusTabAt(0);
+      setTab(tabOrder[0]);
+    } else if (key === 'End') {
+      e.preventDefault();
+      focusTabAt(tabOrder.length - 1);
+      setTab(tabOrder[tabOrder.length - 1]);
+    } else if (key === 'Enter' || key === ' ') {
+      // Activate (already handled by setTab on focus changes)
+    }
+  };
 
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
@@ -795,28 +829,57 @@ export default function SupplierDashboard(): JSX.Element {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" role="tablist" aria-label="Supplier menu" onKeyDown={handleTabKeyDown}>
             <button
-              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'pricebook' ? 'bg-white/5' : ''}`}
+              id="tab-pricebook"
+              ref={(el) => { tabRefs.current[1] = el; }}
+              role="tab"
+              aria-selected={tab === 'pricebook'}
+              aria-controls="panel-pricebook"
+              tabIndex={tab === 'pricebook' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'pricebook' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
               onClick={() => setTab('pricebook')}
             >
               Pricebook
             </button>
             <button
-              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'transfers' ? 'bg-white/5' : ''}`}
+              id="tab-transfers"
+              ref={(el) => { tabRefs.current[2] = el; }}
+              role="tab"
+              aria-selected={tab === 'transfers'}
+              aria-controls="panel-transfers"
+              tabIndex={tab === 'transfers' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'transfers' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
               onClick={() => setTab('transfers')}
             >
               Transfers
             </button>
             <button
-              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'disputes' ? 'bg-white/5' : ''}`}
+              id="tab-disputes"
+              ref={(el) => { tabRefs.current[3] = el; }}
+              role="tab"
+              aria-selected={tab === 'disputes'}
+              aria-controls="panel-disputes"
+              tabIndex={tab === 'disputes' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'disputes' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
               onClick={() => setTab('disputes')}
             >
               Disputes
             </button>
-            <Link href="/supplier/history" className="btn-mobile border rounded-xl px-3 py-2 text-sm">
+            <Link href="/supplier/history" className="btn-mobile border rounded-2xl px-3 py-2 text-sm text-gray-300">
               History
             </Link>
+            {/* supply tab button (hidden from menu but focusable) */}
+            <button
+              id="tab-supply"
+              ref={(el) => { tabRefs.current[0] = el; }}
+              role="tab"
+              aria-selected={tab === 'supply'}
+              aria-controls="panel-supply"
+              tabIndex={tab === 'supply' ? 0 : -1}
+              className="sr-only"
+              onClick={() => setTab('supply')}
+            />
           </div>
 
           <div className="flex-1" />
