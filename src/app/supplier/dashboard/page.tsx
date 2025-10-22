@@ -170,6 +170,7 @@ export default function SupplierDashboard(): JSX.Element {
   const [pricesError, setPricesError] = useState<string | null>(null);
   const sellPriceByKey = useMemo(() => Object.fromEntries(prices.map(p => [p.key, Number(p.price) || 0])), [prices]);
   const [showPricebook, setShowPricebook] = useState<boolean>(false);
+  const [tab, setTab] = useState<'supply' | 'pricebook' | 'transfers' | 'disputes'>('supply');
 
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
@@ -796,19 +797,25 @@ export default function SupplierDashboard(): JSX.Element {
 
           <div className="flex items-center gap-2">
             <button
-              className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-              onClick={() => {
-                setShowPricebook(true);
-                setTimeout(() => {
-                  const el = document.getElementById("supplier-pricebook");
-                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 0);
-              }}
+              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'pricebook' ? 'bg-white/5' : ''}`}
+              onClick={() => setTab('pricebook')}
             >
               Pricebook
             </button>
+            <button
+              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'transfers' ? 'bg-white/5' : ''}`}
+              onClick={() => setTab('transfers')}
+            >
+              Transfers
+            </button>
+            <button
+              className={`btn-mobile border rounded-xl px-3 py-2 text-sm ${tab === 'disputes' ? 'bg-white/5' : ''}`}
+              onClick={() => setTab('disputes')}
+            >
+              Disputes
+            </button>
             <Link href="/supplier/history" className="btn-mobile border rounded-xl px-3 py-2 text-sm">
-              Supply history
+              History
             </Link>
           </div>
 
@@ -822,8 +829,9 @@ export default function SupplierDashboard(): JSX.Element {
 
       
 
-      {/* Supply Editor */}
-      <section className="rounded-2xl border p-4 mb-6">
+      {/* Conditional content area: show only the selected tab's content */}
+      {tab === 'supply' && (
+        <section className="rounded-2xl border p-4 mb-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Opening Supply — {selectedOutletName || "—"} ({dateStr})</h2>
           <div className="flex gap-2">
@@ -1022,10 +1030,11 @@ export default function SupplierDashboard(): JSX.Element {
             Submitted and locked. Supervisor can adjust later if needed.
           </p>
         )}
-      </section>
+        </section>
+      )}
 
-      {/* Outlet Pricebook (info) - moved below Opening Supply; hidden until clicked */}
-      {showPricebook && (
+      {/* Pricebook tab */}
+      {tab === 'pricebook' && (
         <section id="supplier-pricebook" className="rounded-2xl border p-4 mb-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Outlet Pricebook — {selectedOutletName || "—"}</h2>
@@ -1062,8 +1071,9 @@ export default function SupplierDashboard(): JSX.Element {
         </section>
       )}
 
-      {/* Transfers */}
-      <section className="rounded-2xl border p-4 mb-6">
+      {/* Transfers tab */}
+      {tab === 'transfers' && (
+        <section className="rounded-2xl border p-4 mb-6">
         <h2 className="font-semibold mb-2">Transfers (Between Outlets) — {dateStr}</h2>
 
         <div className="grid md:grid-cols-5 gap-2 mb-3 mobile-scroll-x">
@@ -1167,10 +1177,12 @@ export default function SupplierDashboard(): JSX.Element {
         <p className="text-xs text-gray-600 mt-2">
           Transfers update the “Opening Supply” of both outlets for this date. Attendants will see the effect when they record closing.
         </p>
-      </section>
+        </section>
+      )}
 
-      {/* Disputes (read + comment) */}
-      <section className="rounded-2xl border p-4">
+      {/* Disputes tab */}
+      {tab === 'disputes' && (
+        <section className="rounded-2xl border p-4">
         <h2 className="font-semibold mb-2">Disputes for {selectedOutletName || "—"}</h2>
         <div className="table-wrap">
           <table className="w-full text-sm">
@@ -1211,7 +1223,8 @@ export default function SupplierDashboard(): JSX.Element {
         <p className="text-xs text-gray-600 mt-2">
           You can add comments/reasons. Only the Supervisor can approve/reject disputes.
         </p>
-      </section>
+        </section>
+      )}
 
       <footer className="mt-6 text-xs text-gray-600">
         Tip: Complete supplies and transfers <span className="font-medium">before</span> attendants start closing. Use
