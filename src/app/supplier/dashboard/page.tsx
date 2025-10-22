@@ -558,18 +558,19 @@ export default function SupplierDashboard(): JSX.Element {
     // 4) Persist transfer to server (non-blocking)
     try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
 
-  // Normalize display in the input so user sees canonical value (e.g., "3.5" not "3,5")
-    const normalizeForInput = (val: number, unit: Unit) => {
-      if (!Number.isFinite(val)) return "";
-      if (unit === "pcs") return String(Math.round(val));
-      // For kg use 2 decimal places but trim trailing zeros and trailing dot
-      const s = val.toFixed(2);
-      return s.replace(/\.00$/, '').replace(/(\.\d[1-9]?)0$/, '$1');
-    };
-    const finalQtyStr = normalizeForInput(qtyNum, p.unit);
-
-  notifyToast("Transfer saved and applied to both outlets’ opening.");
+    // Show a toast and keep the input value (we normalize via onBlur handler too)
+    notifyToast("Transfer saved and applied to both outlets’ opening.");
+    // Normalize input immediately so user sees canonical value
+    const finalQtyStr = normalizeQtyForInput(qtyNum, p.unit);
     setTxQty(finalQtyStr);
+  };
+
+  // Normalize formatting helper (pcs -> integer, kg -> up to 2dp trimmed)
+  const normalizeQtyForInput = (val: number, unit: Unit) => {
+    if (!Number.isFinite(val)) return "";
+    if (unit === "pcs") return String(Math.round(val));
+    const s = val.toFixed(2);
+    return s.replace(/\.00$/, "").replace(/(\.\d[1-9]?)0$/, "$1");
   };
 
   function adjOutletOpening(outletName: string, itemKey: string, delta: number, unit: Unit) {
@@ -1108,6 +1109,12 @@ export default function SupplierDashboard(): JSX.Element {
             placeholder="Qty"
             value={txQty}
             onChange={(e) => setTxQty(e.target.value)}
+            onBlur={() => {
+              const p = productByKey[txProductKey];
+              const unit = p?.unit ?? "kg";
+              const n = toNumStr(txQty);
+              setTxQty(normalizeQtyForInput(n, unit));
+            }}
           />
 
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addTransfer}>
