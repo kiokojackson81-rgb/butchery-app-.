@@ -18,17 +18,20 @@ type TransferRow = { id: string; date: string; fromOutletName: string; toOutletN
 export default function SupplierHistoryPage(): JSX.Element {
   const [fromDate, setFromDate] = useState<string>(ymd());
   const [toDate, setToDate] = useState<string>(ymd());
-  const [outletName, setOutletName] = useState<string>((sessionStorage.getItem("supplier_outlet") || "").trim());
+  // Initialize empty on server; populate from sessionStorage on client in useEffect
+  const [outletName, setOutletName] = useState<string>("");
   const [rows, setRows] = useState<SupplyRow[]>([]);
   const [transfers, setTransfers] = useState<TransferRow[]>([]);
   const [filterType, setFilterType] = useState<"all" | "supply" | "transfer">("all");
   const [filterItemKey, setFilterItemKey] = useState<string>("");
 
   useEffect(() => {
-    // try a handful of candidate outlet names if sessionStorage not set
-    const candidates = [outletName, sessionStorage.getItem("supplier_name") || "", ""].map(s => (s || "").trim()).filter(Boolean);
-    const name = candidates[0] || "";
-    setOutletName(name);
+    // Populate outletName from client-only storage (sessionStorage) — avoid touching it during SSR
+    if (typeof window === "undefined") return;
+    const outletFromStorage = (sessionStorage.getItem("supplier_outlet") || "").trim();
+    const supplierName = (sessionStorage.getItem("supplier_name") || "").trim();
+    const candidates = [outletFromStorage, supplierName].map(s => (s || "").trim()).filter(Boolean);
+    setOutletName(candidates[0] || "");
   }, []);
 
   // Load across a date range
