@@ -94,7 +94,7 @@ async function saveSession(phone: string, patch: SessionPatch) {
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
   const s = await loadSession(phoneE164);
   const prevCursor = (s.cursor as any) || {};
-  const cursorPatch: any = {};
+  const cursorPatch: Partial<Cursor> = {};
   if ("date" in patch) cursorPatch.date = (patch as any).date;
   if ("rows" in patch) cursorPatch.rows = (patch as any).rows;
   if ("currentItem" in patch) cursorPatch.currentItem = (patch as any).currentItem;
@@ -619,11 +619,26 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
 
   // Enter MENU and send menu
   const tradingDate = today();
-  await (prisma as any).waSession.upsert({
-    where: { phoneE164 },
-    update: { code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: tradingDate, rows: [] } },
-    create: { phoneE164, code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: tradingDate, rows: [] } },
-  });
+  // Preserve any existing cursor (resume position) if present. Some flows set state=LOGIN
+  // and we don't want to wipe the attendant's work-in-progress when they re-login.
+  try {
+    const existing = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+    const cursorToUse = (existing && existing.cursor) ? existing.cursor : { date: tradingDate, rows: [] };
+    if (existing) {
+      await (prisma as any).waSession.update({ where: { phoneE164 }, data: { code: pc.code, role: finalRole, outlet, state: "MENU", cursor: cursorToUse } });
+    } else {
+      await (prisma as any).waSession.create({ data: { phoneE164, code: pc.code, role: finalRole, outlet, state: "MENU", cursor: cursorToUse } });
+    }
+  } catch (e) {
+    // Best-effort: if DB update fails, attempt an upsert as fallback
+    try {
+      await (prisma as any).waSession.upsert({
+        where: { phoneE164 },
+        update: { code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: tradingDate, rows: [] } },
+        create: { phoneE164, code: pc.code, role: finalRole, outlet, state: "MENU", cursor: { date: tradingDate, rows: [] } },
+      });
+    } catch {}
+  }
 
   await updateWaState(phoneE164, {
     waId: phoneE164,
@@ -633,6 +648,50 @@ async function bindPhoneAndEnterMenu({ phoneE164, code, role }: { phoneE164: str
     closingDraft: undefined,
     lastMessageAt: new Date().toISOString(),
   });
+
+  // If there is an existing cursor (work-in-progress), attempt to resume that flow
+  try {
+    // Fetch current session to get the cursor (preserved earlier)
+    const existingSession = await (prisma as any).waSession.findUnique({ where: { phoneE164 } }).catch(() => null);
+    const cursor = (existingSession && existingSession.cursor) ? existingSession.cursor : null;
+    const toPhone = phoneE164.replace(/^\+/, "");
+    const resumeNeeded = Boolean(cursor && ((cursor.currentItem && cursor.currentItem.key) || (Array.isArray(cursor.rows) && cursor.rows.length > 0) || cursor.expenseName));
+    if (resumeNeeded) {
+      // Prefer to resume the most specific state: currentItem -> quantity prompt
+      if (cursor.currentItem && cursor.currentItem.key) {
+        // Re-open the closing qty prompt for the selected product
+        const promptText = buildQuantityPromptText(String(cursor.currentItem.name || cursor.currentItem.key));
+  await saveSession(phoneE164, { state: "CLOSING_QTY", ...cursor });
+  // Resume by sending a plain text prompt (user can reply with number)
+  await sendText(phoneE164, promptText, "AI_DISPATCH_TEXT");
+        return true;
+      }
+      // If there are draft rows, show the review summary so attendant can continue review
+      if (Array.isArray(cursor.rows) && cursor.rows.length > 0) {
+        const reviewLines = (cursor.rows || []).map((r: any) => {
+          const closingQty = Number(r.closing ?? 0);
+          const wasteQty = Number(r.waste ?? 0);
+          const wasteText = wasteQty ? ` (waste ${fmtQty(wasteQty)})` : "";
+          return `- ${r.name}: ${fmtQty(closingQty)}${wasteText}`;
+        });
+        const summaryText = buildReviewSummaryText(outlet || "Outlet", reviewLines);
+        const summaryButtons = buildClosingReviewButtons();
+  await saveSession(phoneE164, { state: "SUMMARY", ...cursor });
+  // Send summary as plain text so user can review and reply naturally
+  await sendText(phoneE164, summaryText, "AI_DISPATCH_TEXT");
+        return true;
+      }
+      // Expense-in-progress: if expenseName present, ask for amount; else prompt for name
+      if (cursor.expenseName) {
+        await saveSession(phoneE164, { state: "EXPENSE_AMOUNT", ...cursor });
+        await sendText(phoneE164, `Enter amount for ${cursor.expenseName}. Numbers only, e.g. 250`, "AI_DISPATCH_TEXT");
+        return true;
+      }
+      // Fallback: send the regular menu if nothing obvious to resume
+    }
+  } catch (e) {
+    // swallow errors and fall back to menu
+  }
 
   await safeSendGreetingOrMenu({
     phone: phoneE164,
@@ -986,7 +1045,7 @@ export async function handleInboundText(phone: string, text: string) {
     try {
       await (prisma as any).waSession.update({
         where: { id: s.id },
-        data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
+        data: { code: null, outlet: null, state: "LOGIN" },
       });
     } catch {}
     // Send a single consolidated logout message with the login link
@@ -1397,7 +1456,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       try {
         await (prisma as any).waSession.update({
           where: { id: s.id },
-          data: { code: null, outlet: null, state: "LOGIN", cursor: {} as any },
+          data: { code: null, outlet: null, state: "LOGIN" },
         });
       } catch {}
       // After logout, include a fresh login link so attendants can re-login anytime.
