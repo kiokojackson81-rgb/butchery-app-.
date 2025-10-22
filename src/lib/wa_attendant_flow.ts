@@ -2046,6 +2046,16 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     const nextButtons = buildClosingNextActionsButtons();
     const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
     await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+    // Prompt attendant to add expenses or proceed after successful submission
+    try {
+      const notifyButtons = buildClosingNotifyButtons();
+      const notifyPayload = buildButtonPayload(
+        phone.replace(/^\+/, ""),
+        "All products captured. Would you like to add expenses or proceed?",
+        notifyButtons
+      );
+      await sendInteractive(notifyPayload as any, "AI_DISPATCH_INTERACTIVE");
+    } catch {}
     return true;
   }
   if (id === "SUMMARY_SUBMIT_CONFIRM") {
@@ -2113,6 +2123,16 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       }
     } catch {}
     await sendText(phone, `Closing submitted. Expected deposit: KSh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
+    // After confirmed submit, prompt for expenses or next actions
+    try {
+      const notifyButtons = buildClosingNotifyButtons();
+      const notifyPayload = buildButtonPayload(
+        phone.replace(/^\+/, ""),
+        "All products captured. Would you like to add expenses or proceed?",
+        notifyButtons
+      );
+      await sendInteractive(notifyPayload as any, "AI_DISPATCH_INTERACTIVE");
+    } catch {}
     return true;
   }
   if (id === "SUMMARY_MODIFY") {
@@ -2198,16 +2218,9 @@ async function nextPickOrSummary(phone: string, s: any, cur: Cursor) {
     if (closingDraftPatch) patch.closingDraft = closingDraftPatch;
     await updateWaState(phoneE164, patch);
     await sendInteractive(summaryPayload as any, "AI_DISPATCH_INTERACTIVE");
-    // Nudge: after finishing the last product, suggest adding expenses or other actions
-    try {
-      const notifyButtons = buildClosingNotifyButtons();
-      const notifyPayload = buildButtonPayload(
-        phone.replace(/^\+/, ""),
-        "All products captured. Would you like to add expenses or proceed?",
-        notifyButtons
-      );
-      await sendInteractive(notifyPayload as any, "AI_DISPATCH_INTERACTIVE");
-    } catch {}
+    // (Previously nudged here to add expenses immediately after the summary.)
+    // The expense prompt is shown after the attendant confirms and submits the closing
+    // so we don't prompt prematurely while the attendant is still reviewing the draft.
   } else {
     await saveSession(phone, { state: "CLOSING_PICK", ...cur });
     await sendInteractive(listProducts(phone, remaining, s.outlet || "Outlet"), "AI_DISPATCH_INTERACTIVE");
