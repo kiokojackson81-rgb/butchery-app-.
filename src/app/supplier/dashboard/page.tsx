@@ -1093,9 +1093,8 @@ export default function SupplierDashboard(): JSX.Element {
 
           <input
             className="input-mobile border rounded-xl p-2 text-sm"
-            type="number"
-            min={0}
-            step={productByKey[txProductKey]?.unit === "kg" ? 0.01 : 1}
+            type="text"
+            inputMode={productByKey[txProductKey]?.unit === "kg" ? "decimal" : "numeric"}
             placeholder="Qty"
             value={txQty}
             onChange={(e) => setTxQty(e.target.value)}
