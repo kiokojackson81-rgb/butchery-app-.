@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { notifyToast, registerAdminToast } from '@/lib/toast';
 
 type CommissionRow = {
   id: string;
@@ -73,6 +74,8 @@ export default function AdminCommissionsPage() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => { try { registerAdminToast((m) => notifyToast(m)); } catch {} ; return () => { try { registerAdminToast(null); } catch {} } }, []);
 
   async function refresh() {
     try {
@@ -286,7 +289,9 @@ export default function AdminCommissionsPage() {
                             const json = await res.json();
                             if (!json?.ok) throw new Error(json?.error || 'Failed');
                             await refresh();
-                          } catch (e) { alert('Failed to update note'); }
+                          } catch (e) {
+                            try { notifyToast('Failed to update note'); } catch {}
+                          }
                         }}
                       >Edit</button>
                     </div>

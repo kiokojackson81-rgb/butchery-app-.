@@ -1304,7 +1304,12 @@ export async function handleInboundText(phone: string, text: string) {
       }
   await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
   await notifySupAdm(`Deposit recorded at ${s.outlet} (${cur.date}): KSh ${parsed.amount} (ref ${parsed.ref}).`);
-  await sendText(phone, `Deposit recorded: Ksh ${parsed.amount} (ref ${parsed.ref}). Send TXNS to view.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+  await sendText(
+    phone,
+    `Deposit recorded and is pending admin approval: KSh ${parsed.amount} (ref ${parsed.ref}). This will NOT be deducted until an admin verifies and marks it VALID. Send TXNS to view current deposits.`,
+    "AI_DISPATCH_TEXT",
+    { gpt_sent: true }
+  );
       await sendInteractive({
         messaging_product: "whatsapp",
         to: phone.replace(/^\+/, ""),
@@ -1323,7 +1328,12 @@ export async function handleInboundText(phone: string, text: string) {
       } as any, "AI_DISPATCH_INTERACTIVE");
       return;
     }
-    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    await sendText(
+      phone,
+      "Paste the original M-Pesa SMS (no edits). Deposits will remain pending until an admin approves them.",
+      "AI_DISPATCH_TEXT",
+      { gpt_sent: true }
+    );
     return;
   }
 

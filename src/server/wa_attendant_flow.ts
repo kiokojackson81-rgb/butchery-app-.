@@ -14,6 +14,10 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
     const DRY = (process.env.WA_DRY_RUN || "").toLowerCase() === "true" || process.env.NODE_ENV !== "production";
     if (DRY) {
       const dry = getDrySess(phoneE164);
+      // If the in-memory DRY session is already in a login-like state, treat it as unauthenticated
+      if (dry && (String(dry.state || "").toUpperCase() === "LOGIN" || String(dry.state || "").toUpperCase() === "SPLASH")) {
+        return { ok: false, reason: "expired" } as any;
+      }
       if (dry) {
         return { ok: true, sess: { phoneE164, role: dry.role || "attendant", code: dry.code || "ATT001", outlet: dry.outlet || "TestOutlet", state: dry.state || "MENU", cursor: dry.cursor || { date: new Date().toISOString().slice(0,10), rows: [], status: "ACTIVE" }, updatedAt: new Date() } } as any;
       }

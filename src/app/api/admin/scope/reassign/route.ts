@@ -14,7 +14,7 @@ type Body = {
   fromCode?: string; // optional hint; server will resolve authoritative owner
 };
 
-export async function POST(req: Request) {
+export async function PUT(req: Request) {
   try {
     const { outlet, productKey, toCode, fromCode }: Body = await req.json();
     const outletName = typeof outlet === "string" ? outlet.trim() : "";

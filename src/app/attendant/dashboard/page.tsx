@@ -5,6 +5,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON } from "@/utils/safeStorage";
+import { promptSync, confirmSync } from '@/lib/ui';
+import { notifyToast, registerAdminToast } from '@/lib/toast';
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -49,10 +51,10 @@ function id() { return Math.random().toString(36).slice(2); }
 /** ========= Waste helper ========= */
 function askWaste(unit: Unit, current: number | string | ""): number | null {
   const init = current === "" ? "" : String(current);
-  const raw = window.prompt(`Enter waste in ${unit}`, init) ?? "";
+  const raw = promptSync(`Enter waste in ${unit}`, init) ?? "";
   if (raw.trim() === "") return null;
   const n = Number(raw);
-  if (Number.isNaN(n) || n < 0) { alert("Enter a non-negative number"); return null; }
+  if (Number.isNaN(n) || n < 0) { try { notifyToast("Enter a non-negative number"); } catch {} ; return null; }
   return n;
 }
 
@@ -98,6 +100,16 @@ export default function AttendantDashboardPage() {
   const [submittingStock, setSubmittingStock] = useState(false);
   const [invalidByKey, setInvalidByKey] = useState<Record<ItemKey, string>>({} as any);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toastMsg) return;
+    const id = setTimeout(() => setToastMsg(null), 3500);
+    return () => clearTimeout(id);
+  }, [toastMsg]);
+
+  function _localNotify(msg: string|null) { try { setToastMsg(msg); } catch {} }
+
+  useEffect(() => { registerAdminToast((m) => _localNotify(m)); return () => { try { registerAdminToast(null); } catch {} } }, []);
 
   // Products tab state
   const [products, setProducts] = useState<Array<{ key: string; name: string; price: number; updatedAt?: string }>>([]);
@@ -700,7 +712,7 @@ export default function AttendantDashboardPage() {
       setLocked(prev => ({ ...prev, [r.key]: true }));
     } catch (e: any) {
       const msg = typeof e?.message === "string" ? e.message : "Failed to submit";
-      alert(msg);
+      notifyToast(msg);
     }
   }
 
@@ -728,7 +740,7 @@ export default function AttendantDashboardPage() {
         messages.push("No expenses entered for today. It will be assumed to be Ksh 0.");
       }
       if (messages.length > 0) {
-        const ok = window.confirm(`${messages.join("\n\n")}\n\nProceed and submit with these values assumed as 0?`);
+  const ok = confirmSync(`${messages.join("\n\n")}\n\nProceed and submit with these values assumed as 0?`);
         if (!ok) return;
       }
     } catch {}
@@ -755,7 +767,7 @@ export default function AttendantDashboardPage() {
           }
         }
       } catch {}
-      alert(msg);
+  notifyToast(msg);
       setSubmitError(msg || "Submission failed");
       setSubmittingStock(false);
       // Do not proceed to period rotation or summary when stock submission fails
@@ -795,7 +807,7 @@ export default function AttendantDashboardPage() {
     } catch (e: any) {
       // We no longer forbid third+ submissions; surface other errors only
       const msg = typeof e?.message === 'string' ? e.message : '';
-      if (msg) { alert(msg); setSubmitError(msg); setSubmittingStock(false); return; }
+      if (msg) { notifyToast(msg); setSubmitError(msg); setSubmittingStock(false); return; }
     }
 
     // Fire low-stock notifications (non-blocking)
@@ -923,7 +935,7 @@ export default function AttendantDashboardPage() {
         setExpenses(prev => prev.map(x => x.id === e.id ? { ...x, saved: true } : x));
       } catch (e: any) {
         const msg = typeof e?.message === "string" ? e.message : "Failed to submit expense";
-        alert(msg);
+        notifyToast(msg);
       }
     }
     if (outlet) await refreshPeriodAndHeader(outlet);
@@ -1393,9 +1405,9 @@ export default function AttendantDashboardPage() {
                     <td>{catalog[r.itemKey]?.unit ?? "kg"}</td>
                     <td>
                       <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={()=>{
-                        const reason = window.prompt(`Raise a dispute for ${catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()} (qty ${r.qty}). Describe the issue:`, "");
+                        const reason = promptSync(`Raise a dispute for ${catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()} (qty ${r.qty}). Describe the issue:`, "") || "";
                         if (!reason) return;
-                        alert("Dispute submitted to Supervisor.");
+                        notifyToast("Dispute submitted to Supervisor.");
                       }}>
                         Raise Dispute
                       </button>
@@ -1566,10 +1578,10 @@ export default function AttendantDashboardPage() {
                   className="btn-mobile text-xs border rounded-xl px-3 py-1"
                   onClick={async()=>{
                     if (!outlet) return;
-                    const raw = window.prompt("Recount till: enter counted cash amount (Ksh)", countedTill === "" ? "" : String(countedTill));
+                    const raw = promptSync("Recount till: enter counted cash amount (Ksh)", countedTill === "" ? "" : String(countedTill));
                     if (raw == null) return;
                     const n = Number(raw);
-                    if (!isFinite(n) || n < 0) { alert("Enter a non-negative number"); return; }
+                    if (!isFinite(n) || n < 0) { notifyToast("Enter a non-negative number"); return; }
                     try {
                       setCountedTill(n);
                       await postJSON('/api/tillcount', { date: dateStr, outlet, counted: n });

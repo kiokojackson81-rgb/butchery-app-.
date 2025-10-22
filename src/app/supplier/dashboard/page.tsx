@@ -2,8 +2,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
+import { notifyToast, registerAdminToast } from '@/lib/toast';
+import { promptSync, confirmSync } from '@/lib/ui';
 
 /* =========================
    Types (aligned with Admin)
@@ -167,9 +170,49 @@ export default function SupplierDashboard(): JSX.Element {
   const [pricesError, setPricesError] = useState<string | null>(null);
   const sellPriceByKey = useMemo(() => Object.fromEntries(prices.map(p => [p.key, Number(p.price) || 0])), [prices]);
   const [showPricebook, setShowPricebook] = useState<boolean>(false);
+  const [tab, setTab] = useState<'supply' | 'pricebook' | 'transfers' | 'disputes'>('supply');
+  // Refs for tab buttons to support keyboard navigation
+  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const tabOrder: ('supply' | 'pricebook' | 'transfers' | 'disputes')[] = ['supply', 'pricebook', 'transfers', 'disputes'];
+
+  const focusTabAt = (idx: number) => {
+    const el = tabRefs.current[idx];
+    if (el) el.focus();
+  };
+
+  const handleTabKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key;
+    const activeIndex = tabRefs.current.findIndex((el) => el === document.activeElement);
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      e.preventDefault();
+      const next = (activeIndex + 1 + tabOrder.length) % tabOrder.length;
+      focusTabAt(next);
+      setTab(tabOrder[next]);
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = (activeIndex - 1 + tabOrder.length) % tabOrder.length;
+      focusTabAt(prev);
+      setTab(tabOrder[prev]);
+    } else if (key === 'Home') {
+      e.preventDefault();
+      focusTabAt(0);
+      setTab(tabOrder[0]);
+    } else if (key === 'End') {
+      e.preventDefault();
+      focusTabAt(tabOrder.length - 1);
+      setTab(tabOrder[tabOrder.length - 1]);
+    } else if (key === 'Enter' || key === ' ') {
+      // Activate (already handled by setTab on focus changes)
+    }
+  };
 
   /* Welcome name */
   const [welcomeName, setWelcomeName] = useState<string>("");
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  useEffect(() => { if (!toastMsg) return; const id = setTimeout(()=>setToastMsg(null), 3500); return ()=>clearTimeout(id); }, [toastMsg]);
+  useEffect(() => { try { registerAdminToast((m) => setToastMsg(m)); } catch {} ; return () => { try { registerAdminToast(null); } catch {} } }, []);
+  // Local alias for compatibility
+  const _localNotify = (msg: string|null) => { try { setToastMsg(msg); } catch {} };
 
   /* Quick maps */
   const productByKey = useMemo(() => {
@@ -383,7 +426,7 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
     // Persist to server (non-blocking)
     try { await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows }); } catch {}
-    alert("Saved.");
+  notifyToast("Saved.");
   };
 
   /* ===== Submit (lock) ===== */
@@ -391,14 +434,14 @@ export default function SupplierDashboard(): JSX.Element {
     if (!selectedOutletName) return;
     // For supplier per requirements: do NOT lock because multiple suppliers may submit same item.
     await saveDraft();
-    alert("Submitted. Day remains open for additional supplies.");
+  notifyToast("Submitted. Day remains open for additional supplies.");
   };
 
   /* ===== Request modification to Supervisor ===== */
   const requestModification = (): void => {
     if (!selectedOutletName) return;
 
-    const note = window.prompt("Describe what needs to be corrected:", "");
+  const note = promptSync("Describe what needs to be corrected:", "") || "";
     if (!note) return;
 
     const req: AnyAmend = {
@@ -417,7 +460,7 @@ export default function SupplierDashboard(): JSX.Element {
     saveLS(AMEND_REQUESTS_KEY, next);
     setAmends(next.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
       ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName))));
-    alert("Modification request sent to Supervisor.");
+  notifyToast("Modification request sent to Supervisor.");
   };
 
   // Per-row submit (one item at a time) with duplicate prompt
@@ -426,7 +469,7 @@ export default function SupplierDashboard(): JSX.Element {
     const exists = rows.some((x) => x.itemKey === r.itemKey && x.id !== r.id);
     let mode: "add" | "replace" = "add";
     if (exists) {
-      const confirm = window.confirm(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
+  const confirm = confirmSync(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
       mode = confirm ? "add" : "replace";
     }
     try {
@@ -448,19 +491,19 @@ export default function SupplierDashboard(): JSX.Element {
       const minimal = toMinimal(nextFull);
       saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
       setRows(nextFull);
-      alert(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
+  notifyToast(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
     } catch (e: any) {
-      alert(e?.message || "Submit failed");
+  notifyToast(e?.message || "Submit failed");
     }
   };
 
   // Per-row: request modification (new weight + reason)
   const requestRowModification = async (r: SupplyRow) => {
-    const newQtyStr = window.prompt(`Enter new weight/qty for ${r.itemKey}:`, String(r.qty));
+  const newQtyStr = promptSync(`Enter new weight/qty for ${r.itemKey}:`, String(r.qty)) || "";
     if (!newQtyStr) return;
     const newQty = Number(newQtyStr);
-    if (!(newQty > 0)) { alert("Invalid number"); return; }
-    const reason = window.prompt("Reason for adjustment:", "");
+  if (!(newQty > 0)) { notifyToast("Invalid number"); return; }
+  const reason = promptSync("Reason for adjustment:", "") || "";
     if (!reason) return;
     try {
       const res = await fetch("/api/supply/adjustment/request", {
@@ -471,15 +514,15 @@ export default function SupplierDashboard(): JSX.Element {
       });
       const j = await res.json().catch(()=>({ ok: false }));
       if (!j?.ok) throw new Error(j?.error || "Failed");
-      alert("Adjustment requested; pending supervisor approval.");
+  notifyToast("Adjustment requested; pending supervisor approval.");
     } catch (e: any) {
-      alert(e?.message || "Request failed");
+  notifyToast(e?.message || "Request failed");
     }
   };
 
   /* ===== Add supplier comment on outlet-raised disputes ===== */
   const addAmendComment = (amendId: string) => {
-    const text = window.prompt("Add a short comment/reason (visible to Supervisor):", "");
+  const text = promptSync("Add a short comment/reason (visible to Supervisor):", "") || "";
     if (!text) return;
     const code = sessionStorage.getItem("supplier_code") || "supplier";
     const list = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
@@ -510,21 +553,21 @@ export default function SupplierDashboard(): JSX.Element {
     const fromName = (outletById[txFromId]?.name ?? "").trim();
     const toName = (outletById[txToId]?.name ?? "").trim();
     if (!fromName || !toName) {
-      alert("Please select valid outlets.");
+  notifyToast("Please select valid outlets.");
       return;
     }
     if (fromName === toName) {
-      alert("From and To outlets must be different.");
+  notifyToast("From and To outlets must be different.");
       return;
     }
     const p = productByKey[txProductKey];
     if (!p) {
-      alert("Please select a product to transfer.");
+  notifyToast("Please select a product to transfer.");
       return;
     }
     const qtyNum = toNumStr(txQty);
     if (qtyNum <= 0) {
-      alert("Quantity must be greater than 0.");
+  notifyToast("Quantity must be greater than 0.");
       return;
     }
 
@@ -551,8 +594,19 @@ export default function SupplierDashboard(): JSX.Element {
     // 4) Persist transfer to server (non-blocking)
     try { await postJSON("/api/supply/transfer", { date: dateStr, fromOutletName: fromName, toOutletName: toName, itemKey: txProductKey, qty: qtyNum, unit: p.unit }); } catch {}
 
-    alert("Transfer saved and applied to both outlets’ opening.");
-    setTxQty("");
+    // Show a toast and keep the input value (we normalize via onBlur handler too)
+    notifyToast("Transfer saved and applied to both outlets’ opening.");
+    // Normalize input immediately so user sees canonical value
+    const finalQtyStr = normalizeQtyForInput(qtyNum, p.unit);
+    setTxQty(finalQtyStr);
+  };
+
+  // Normalize formatting helper (pcs -> integer, kg -> up to 2dp trimmed)
+  const normalizeQtyForInput = (val: number, unit: Unit) => {
+    if (!Number.isFinite(val)) return "";
+    if (unit === "pcs") return String(Math.round(val));
+    const s = val.toFixed(2);
+    return s.replace(/\.00$/, "").replace(/(\.\d[1-9]?)0$/, "$1");
   };
 
   function adjOutletOpening(outletName: string, itemKey: string, delta: number, unit: Unit) {
@@ -775,19 +829,57 @@ export default function SupplierDashboard(): JSX.Element {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" role="tablist" aria-label="Supplier menu" onKeyDown={handleTabKeyDown}>
             <button
-              className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-              onClick={() => {
-                setShowPricebook(true);
-                setTimeout(() => {
-                  const el = document.getElementById("supplier-pricebook");
-                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 0);
-              }}
+              id="tab-pricebook"
+              ref={(el) => { tabRefs.current[1] = el; }}
+              role="tab"
+              aria-selected={tab === 'pricebook'}
+              aria-controls="panel-pricebook"
+              tabIndex={tab === 'pricebook' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'pricebook' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
+              onClick={() => setTab('pricebook')}
             >
               Pricebook
             </button>
+            <button
+              id="tab-transfers"
+              ref={(el) => { tabRefs.current[2] = el; }}
+              role="tab"
+              aria-selected={tab === 'transfers'}
+              aria-controls="panel-transfers"
+              tabIndex={tab === 'transfers' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'transfers' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
+              onClick={() => setTab('transfers')}
+            >
+              Transfers
+            </button>
+            <button
+              id="tab-disputes"
+              ref={(el) => { tabRefs.current[3] = el; }}
+              role="tab"
+              aria-selected={tab === 'disputes'}
+              aria-controls="panel-disputes"
+              tabIndex={tab === 'disputes' ? 0 : -1}
+              className={`btn-mobile border rounded-2xl px-3 py-2 text-sm ${tab === 'disputes' ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-300'}`}
+              onClick={() => setTab('disputes')}
+            >
+              Disputes
+            </button>
+            <Link href="/supplier/history" className="btn-mobile border rounded-2xl px-3 py-2 text-sm text-gray-300">
+              History
+            </Link>
+            {/* supply tab button (hidden from menu but focusable) */}
+            <button
+              id="tab-supply"
+              ref={(el) => { tabRefs.current[0] = el; }}
+              role="tab"
+              aria-selected={tab === 'supply'}
+              aria-controls="panel-supply"
+              tabIndex={tab === 'supply' ? 0 : -1}
+              className="sr-only"
+              onClick={() => setTab('supply')}
+            />
           </div>
 
           <div className="flex-1" />
@@ -800,8 +892,9 @@ export default function SupplierDashboard(): JSX.Element {
 
       
 
-      {/* Supply Editor */}
-      <section className="rounded-2xl border p-4 mb-6">
+      {/* Conditional content area: show only the selected tab's content */}
+      {tab === 'supply' && (
+        <section className="rounded-2xl border p-4 mb-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Opening Supply — {selectedOutletName || "—"} ({dateStr})</h2>
           <div className="flex gap-2">
@@ -1000,10 +1093,11 @@ export default function SupplierDashboard(): JSX.Element {
             Submitted and locked. Supervisor can adjust later if needed.
           </p>
         )}
-      </section>
+        </section>
+      )}
 
-      {/* Outlet Pricebook (info) - moved below Opening Supply; hidden until clicked */}
-      {showPricebook && (
+      {/* Pricebook tab */}
+      {tab === 'pricebook' && (
         <section id="supplier-pricebook" className="rounded-2xl border p-4 mb-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Outlet Pricebook — {selectedOutletName || "—"}</h2>
@@ -1040,8 +1134,9 @@ export default function SupplierDashboard(): JSX.Element {
         </section>
       )}
 
-      {/* Transfers */}
-      <section className="rounded-2xl border p-4 mb-6">
+      {/* Transfers tab */}
+      {tab === 'transfers' && (
+        <section className="rounded-2xl border p-4 mb-6">
         <h2 className="font-semibold mb-2">Transfers (Between Outlets) — {dateStr}</h2>
 
         <div className="grid md:grid-cols-5 gap-2 mb-3 mobile-scroll-x">
@@ -1086,12 +1181,17 @@ export default function SupplierDashboard(): JSX.Element {
 
           <input
             className="input-mobile border rounded-xl p-2 text-sm"
-            type="number"
-            min={0}
-            step={productByKey[txProductKey]?.unit === "kg" ? 0.01 : 1}
+            type="text"
+            inputMode={productByKey[txProductKey]?.unit === "kg" ? "decimal" : "numeric"}
             placeholder="Qty"
             value={txQty}
             onChange={(e) => setTxQty(e.target.value)}
+            onBlur={() => {
+              const p = productByKey[txProductKey];
+              const unit = p?.unit ?? "kg";
+              const n = toNumStr(txQty);
+              setTxQty(normalizeQtyForInput(n, unit));
+            }}
           />
 
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={addTransfer}>
@@ -1140,10 +1240,12 @@ export default function SupplierDashboard(): JSX.Element {
         <p className="text-xs text-gray-600 mt-2">
           Transfers update the “Opening Supply” of both outlets for this date. Attendants will see the effect when they record closing.
         </p>
-      </section>
+        </section>
+      )}
 
-      {/* Disputes (read + comment) */}
-      <section className="rounded-2xl border p-4">
+      {/* Disputes tab */}
+      {tab === 'disputes' && (
+        <section className="rounded-2xl border p-4">
         <h2 className="font-semibold mb-2">Disputes for {selectedOutletName || "—"}</h2>
         <div className="table-wrap">
           <table className="w-full text-sm">
@@ -1184,7 +1286,8 @@ export default function SupplierDashboard(): JSX.Element {
         <p className="text-xs text-gray-600 mt-2">
           You can add comments/reasons. Only the Supervisor can approve/reject disputes.
         </p>
-      </section>
+        </section>
+      )}
 
       <footer className="mt-6 text-xs text-gray-600">
         Tip: Complete supplies and transfers <span className="font-medium">before</span> attendants start closing. Use

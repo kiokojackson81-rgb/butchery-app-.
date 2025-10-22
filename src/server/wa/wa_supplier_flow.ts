@@ -94,9 +94,27 @@ async function notifySupervisorsAdmins(outlet: string, text: string) {
 }
 
 function parseQty(t: string): number | null {
-  const m = String(t || "").trim().match(/^\d+(?:\.\d{1,2})?$/);
+  // Accept inputs like "8", "8.5", "8,5", and trim whitespace.
+  // Normalize comma decimal separators to dot, remove thousands separators (spaces or commas in thousands position),
+  // then parse as a float. Allow up to 3 decimal places for flexibility (kg weights sometimes use 0.125 etc.).
+  if (t == null) return null;
+  let s = String(t).trim();
+  if (!s) return null;
+  // Replace comma decimal separators with dot when used like "5,6" (but avoid removing all commas blindly if someone uses thousands)
+  // Heuristic: if there's exactly one comma and no dots, treat comma as decimal separator. Otherwise drop common thousands separators (spaces, or commas between groups).
+  const hasDot = s.indexOf('.') !== -1;
+  const commaCount = (s.match(/,/g) || []).length;
+  if (!hasDot && commaCount === 1) {
+    s = s.replace(',', '.');
+  } else {
+    // remove spaces used as thousand separators and remove commas that look like thousand separators
+    s = s.replace(/\s+/g, '').replace(/,/g, '');
+  }
+  // Allow only digits and a single dot plus up to 3 decimals
+  const m = s.match(/^\d+(?:\.\d{1,3})?$/);
   if (!m) return null;
-  const num = Number(m[0]);
+  const num = Number(s);
+  if (!Number.isFinite(num)) return null;
   if (!(num > 0 && num <= 9999)) return null;
   return num;
 }

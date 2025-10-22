@@ -17,6 +17,7 @@ export type DryDeposit = {
   note?: string;
   status?: string; // e.g., "RECORDED"
   createdAt: string;
+  id?: string;
 };
 
 function getStore(): Map<string, DrySess> {
@@ -70,8 +71,11 @@ export function recordDryDeposit(row: { outletName: string; date: string; amount
     const key = `${row.outletName}@@${row.date}`;
     const store = getDepositStore();
     const list = store.get(key) || [];
-    list.unshift({ outletName: row.outletName, date: row.date, amount: row.amount, note: row.note, status: "RECORDED", createdAt: new Date().toISOString() });
+    const id = `dry:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+    const item: DryDeposit = { outletName: row.outletName, date: row.date, amount: row.amount, note: row.note, status: "RECORDED", createdAt: new Date().toISOString(), id };
+    list.unshift(item);
     store.set(key, list.slice(0, 50)); // keep last 50
+    return item;
   } catch {}
 }
 
@@ -82,4 +86,33 @@ export function listDryDeposits(outletName: string, date: string, limit = 10): D
     const list = store.get(key) || [];
     return list.slice(0, limit);
   } catch { return []; }
+}
+
+export function getDryDepositById(id: string): DryDeposit | null {
+  try {
+    const store = getDepositStore();
+    for (const [k, list] of store.entries()) {
+      for (const it of list) {
+        if (it.id === id) return it;
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+export function updateDryDeposit(id: string, patch: Partial<DryDeposit>): DryDeposit | null {
+  try {
+    const store = getDepositStore();
+    for (const [k, list] of store.entries()) {
+      const idx = list.findIndex((it) => it.id === id);
+      if (idx >= 0) {
+        const existing = list[idx];
+        const updated = { ...existing, ...patch };
+        list[idx] = updated;
+        store.set(k, list);
+        return updated;
+      }
+    }
+    return null;
+  } catch { return null; }
 }

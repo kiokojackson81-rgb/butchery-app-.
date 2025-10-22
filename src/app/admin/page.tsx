@@ -3,7 +3,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Toast from "@/components/Toast";
+import { registerAdminToast, notifyToast as notifyToastImported } from '@/lib/toast';
+import useToast from '@/lib/useToast';
 import { useRouter, useSearchParams } from "next/navigation";
+import { promptSync, confirmSync } from '@/lib/ui';
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 import { canonFull } from "@/lib/codeNormalize";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON, removeItem as lsRemoveItem } from "@/utils/safeStorage";
@@ -169,6 +173,7 @@ export default function AdminPage() {
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
   const [savingOutlets, setSavingOutlets] = useState(false);
+  const [toast, setToast] = useToast(null);
 
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
@@ -327,7 +332,7 @@ export default function AdminPage() {
   /** ----- Explicit save buttons (unchanged) ----- */
   const saveOutletsNow = async () => {
     if (!hydrated) {
-      alert("Still loading outlet data. Please try again in a moment.");
+      setToast("Still loading outlet data. Please try again in a moment.");
       return;
     }
     if (savingOutlets) return;
@@ -344,11 +349,11 @@ export default function AdminPage() {
     });
 
     if (payload.length === 0) {
-      alert("Add at least one outlet before saving.");
+      setToast("Add at least one outlet before saving.");
       return;
     }
     if (payload.some((row) => !row.name)) {
-      alert("Every outlet needs a name before saving.");
+      setToast("Every outlet needs a name before saving.");
       return;
     }
 
@@ -374,17 +379,17 @@ export default function AdminPage() {
       } else {
         await refreshOutletsFromServer().catch(() => {});
       }
-      alert("Outlets & Codes saved ✅");
+  setToast("Outlets & Codes saved ✅");
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "Unknown error";
-      alert(`Failed to save outlets: ${message}`);
+  setToast(`Failed to save outlets: ${message}`);
     } finally {
       setSavingOutlets(false);
     }
   };
-  const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); alert("Products & Prices saved ✅"); };
-  const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); alert("Fixed Expenses saved ✅"); };
+  const saveProductsNow = async () => { saveLS(K_PRODUCTS, products); await pushLocalStorageKeyToDB(K_PRODUCTS as any); setToast("Products & Prices saved ✅"); };
+  const saveExpensesNow = async () => { saveLS(K_EXPENSES, expenses); await pushLocalStorageKeyToDB(K_EXPENSES as any); setToast("Fixed Expenses saved ✅"); };
   const saveCodesNow    = async () => {
     const payload = codes
       .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
@@ -399,7 +404,7 @@ export default function AdminPage() {
         } : {}),
       }));
     if (!payload.length) {
-      alert('Add at least one code before saving.');
+      setToast('Add at least one code before saving.');
       return;
     }
 
@@ -454,10 +459,10 @@ export default function AdminPage() {
       });
       saveLS(K_CODES, normalized);
       try { await refreshScopeFromServer(); } catch {}
-      alert('People & Codes saved ✅');
+  setToast('People & Codes saved ✅');
     } catch (err) {
       console.error('save codes error', err);
-      alert('Failed to sync People & Codes to server');
+  setToast('Failed to sync People & Codes to server');
     }
   };
   // Push assignments to relational store
@@ -515,13 +520,13 @@ export default function AdminPage() {
         const skippedNoPhone = details.filter(d => d.notify?.reason === 'no-phone').length;
         const noChange = details.filter(d => d.notify?.reason === 'no-change').length;
         const other = details.length - sent - skippedNoPhone - noChange;
-        alert(`Assignments saved ✅ (rows: ${r.count})\nNotifications — sent: ${sent}, no-phone: ${skippedNoPhone}, no-change: ${noChange}, other: ${other}`);
+  setToast(`Assignments saved ✅ (rows: ${r.count}) — sent: ${sent}, no-phone: ${skippedNoPhone}`);
       } else {
-        alert(`Assignments saved to server ✅ (rows: ${r.count})`);
+  setToast(`Assignments saved to server ✅ (rows: ${r.count})`);
       }
     } catch (e: any) {
       const msg = e?.message || String(e) || 'Saved locally, but failed to sync assignments to server.';
-      alert(msg);
+  setToast(msg);
     }
   };
 
@@ -529,9 +534,9 @@ export default function AdminPage() {
   const savePhoneFor = async (code: string, role: PersonCode["role"], outletName?: string) => {
     const norm = canonFull(code || "");
     const phone = (phones[norm] || "").trim();
-    if (!code || !phone) { alert("Missing code or phone"); return; }
-    const payload = { code: norm, role, phoneE164: phone, outlet: outletName };
-  const r = await fetch("/api/admin/phones", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify(payload) });
+  if (!code || !phone) { setToast("Missing code or phone"); return; }
+    const payload = { role, phoneE164: phone, outlet: outletName };
+    const r = await fetch(`/api/admin/phones/${encodeURIComponent(norm)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify(payload) });
     if (!r.ok) throw new Error(await r.text());
   };
   const saveAllPhones = async () => {
@@ -550,20 +555,20 @@ export default function AdminPage() {
         if (!phone) continue;
         await savePhoneFor(norm, c.role, codeToOutlet[norm]);
       }
-      alert("Phone mappings saved ✅");
+  setToast("Phone mappings saved ✅");
     } catch {
-      alert("Failed to save one or more phone mappings");
+  setToast("Failed to save one or more phone mappings");
     }
   };
 
   const saveAdminPhone = async () => {
     try {
       const phone = adminPhone.trim();
-      if (!phone) { alert("Enter admin WhatsApp phone"); return; }
-      const r = await fetch("/api/admin/phone", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ role: "admin", code: "ADMIN", phoneE164: phone }) });
+  if (!phone) { setToast("Enter admin WhatsApp phone"); return; }
+      const r = await fetch(`/api/admin/phones/ADMIN`, { method: "PUT", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ role: "admin", phoneE164: phone }) });
       if (!r.ok) throw new Error(await r.text());
-      alert("Admin WhatsApp saved ✅");
-    } catch { alert("Failed to save admin WhatsApp"); }
+      setToast("Admin WhatsApp saved ✅");
+    } catch { setToast("Failed to save admin WhatsApp"); }
   };
   const saveThresholds = async () => {
     try {
@@ -580,19 +585,19 @@ export default function AdminPage() {
         body: JSON.stringify({ thresholds: body }),
       });
       if (!r.ok) throw new Error(await r.text());
-      alert("Thresholds saved ✅");
+  setToast("Thresholds saved ✅");
     } catch {
-      alert("Failed to save thresholds");
+  setToast("Failed to save thresholds");
     }
   };
   const resetThresholdsToSystemDefaults = async () => {
     try {
   const r = await fetch("/api/admin/low-stock-thresholds", { method: "DELETE", cache: "no-store" });
-      if (!r.ok) throw new Error(await r.text());
-      setThresholds({});
-      alert("Reset to system defaults ✅");
+  if (!r.ok) throw new Error(await r.text());
+  setThresholds({});
+  setToast("Reset to system defaults ✅");
     } catch {
-      alert("Failed to reset thresholds");
+    notifyToast("Failed to reset thresholds");
     }
   };
   const importJSON = () => {
@@ -605,17 +610,17 @@ export default function AdminPage() {
         if (K_CODES in obj) saveLS(K_CODES, (obj as any)[K_CODES]);
         if (K_SCOPE in obj) saveLS(K_SCOPE, (obj as any)[K_SCOPE]);
         if (K_PRICEBOOK in obj) saveLS(K_PRICEBOOK, (obj as any)[K_PRICEBOOK]);
-        alert("Imported. Reload to see changes.");
+    notifyToast("Imported. Reload to see changes.");
       }
     } catch {
-      alert("Invalid JSON. Please check and try again.");
+  notifyToast("Invalid JSON. Please check and try again.");
     }
   };
   const savePricebook   = async () => {
     saveLS(K_PRICEBOOK, pricebook);
     try { await pushLocalStorageKeyToDB(K_PRICEBOOK as any); } catch {}
   try { await fetch("/api/admin/save-scope-pricebook", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ scope: {}, pricebook }) }); } catch {}
-    alert("Outlet pricebook saved ✅");
+  notifyToast("Outlet pricebook saved ✅");
   };
 
   /** ----- Autosave so settings persist immediately (guarded) ----- */
@@ -680,12 +685,56 @@ export default function AdminPage() {
   const removeOutlet = async (id: string) => {
     const row = outlets.find(o => o.id === id);
     const name = row?.name || 'this outlet';
-    if (!confirm(`Delete ${name}? It will be removed from the database (or deactivated if referenced).`)) return;
-    const next = outlets.filter(x => x.id !== id);
-    setOutlets(next);
-    try { await persistOutlets(next); } catch (e) {
+  if (!confirmSync(`Delete ${name}? It will be removed from the database (or deactivated if referenced).`)) return;
+
+    // Optimistic snapshot in case we need to rollback
+    const prev = outlets;
+    // Immediately reflect a pending removal for snappy UI (but keep the snapshot)
+    setOutlets(prev.filter(x => x.id !== id));
+    try {
+      const res = await fetch(`/api/admin/outlets/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      });
+      const text = await res.text();
+      let json: any = null; try { json = JSON.parse(text); } catch {}
+      if (!res.ok) {
+        // If 409, the backend deactivated instead of deleting due to references
+        if (res.status === 409) {
+          const message = json?.error || text || 'Outlet referenced — deactivated instead of deleted.';
+          // Refresh list from server canonical list if provided
+          if (Array.isArray(json?.outlets)) {
+            const next = normalizeOutletList(json.outlets);
+            setOutlets(next);
+            saveLS(K_OUTLETS, next);
+          } else {
+            // fallback to previous snapshot
+            setOutlets(prev);
+            saveLS(K_OUTLETS, prev);
+          }
+          notifyToast(`${name} could not be deleted because it is referenced. It has been deactivated instead. Remove references first to permanently delete.`);
+          return;
+        }
+        const message = json?.error || text || 'Failed to delete outlet';
+        // Rollback
+        setOutlets(prev);
+        saveLS(K_OUTLETS, prev);
+        throw new Error(message);
+      }
+
+      // Success — update list from server if provided
+      if (Array.isArray(json?.outlets)) {
+        const next = normalizeOutletList(json.outlets);
+        setOutlets(next);
+        saveLS(K_OUTLETS, next);
+      } else {
+        // nothing returned — keep the already-updated UI
+        setToast(`${name} deleted`);
+        try { saveLS(K_OUTLETS, outlets.filter(x => x.id !== id)); } catch {}
+      }
+    } catch (e) {
       console.error('delete outlet failed', e);
-      alert(`Failed to delete outlet: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  notifyToast(`Failed to delete outlet: ${e instanceof Error ? e.message : 'Unknown error'}`);
     }
   };
   const updateOutlet = (id: string, patch: Partial<Outlet>) =>
@@ -693,7 +742,73 @@ export default function AdminPage() {
 
   // Products
   const addProduct = () => setProducts(v => [...v, { id: rid(), key: "", name: "", unit: "kg", sellPrice: 0, active: true }]);
-  const removeProduct = (id: string) => setProducts(v => v.filter(x => x.id !== id));
+  const removeProduct = async (id: string) => {
+    const row = products.find(p => p.id === id);
+    if (!row) return;
+    const label = row.name || row.key || 'this product';
+
+    // Ask for confirmation first
+    if (!confirmSync(`Delete ${label}? This will remove it from the product list.`)) return;
+
+    // If product has a key, attempt server-side delete first (preferred)
+    if (row.key && row.key.trim()) {
+      try {
+        const r = await fetch(`/api/admin/products/${encodeURIComponent(row.key.trim())}`, { method: 'DELETE', cache: 'no-store' });
+        const txt = await r.text();
+        let j: any = null; try { j = JSON.parse(txt); } catch {}
+        if (r.ok && j?.ok) {
+          // Deleted server-side — remove locally and persist
+          const prev = products;
+          const next = prev.filter(x => x.id !== id);
+          setProducts(next);
+          saveLS(K_PRODUCTS, next);
+          try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+          setToast(`${label} deleted`);
+          return;
+        }
+
+        if (r.status === 409) {
+          // Referenced. Offer soft-deactivate via server
+          const total = j?.total ?? 0;
+          const choice = confirmSync(`${label} has ${total} referencing records and cannot be deleted. Deactivate instead?`);
+          if (!choice) return;
+          const s = await fetch(`/api/admin/products/${encodeURIComponent(row.key.trim())}?soft=true`, { method: 'DELETE', cache: 'no-store' });
+          const stxt = await s.text(); let sj: any = null; try { sj = JSON.parse(stxt); } catch {}
+          if (s.ok && sj?.ok) {
+            // Reflect deactivation locally
+            const next = products.map(p => p.id === id ? { ...p, active: false } : p);
+            setProducts(next);
+            saveLS(K_PRODUCTS, next);
+            try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+            setToast(`${label} deactivated`);
+            return;
+          }
+          notifyToast(`Failed to deactivate: ${sj?.error || stxt}`);
+          return;
+        }
+
+        // Other server error — fall back to local behavior below
+      } catch (e) {
+        // ignore and fall back to local behavior
+      }
+    }
+
+    // Fallback: proceed with local removal and persist change
+    const prev = products;
+    const next = prev.filter(x => x.id !== id);
+    setProducts(next);
+    try {
+      saveLS(K_PRODUCTS, next);
+      try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+      setToast(`${label} deleted`);
+    } catch (e:any) {
+      console.error('delete product failed', e);
+      // Rollback locally
+      setProducts(prev);
+      saveLS(K_PRODUCTS, prev);
+      notifyToast(`Failed to delete product: ${e?.message || 'Unknown error'}`);
+    }
+  };
   const updateProduct = (id: string, patch: Partial<Product>) =>
     setProducts(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
 
@@ -709,21 +824,23 @@ export default function AdminPage() {
   const removeCode = async (id: string) => {
     const row = codes.find(c => c.id === id);
     const label = row?.code ? `${row.code} (${row?.name || ''})` : 'this code';
-    if (!confirm(`Delete ${label}? This removes the code from database and related mappings.`)) return;
-    // Server-side single delete
+  if (!confirmSync(`Delete ${label}? This removes the code from database and related mappings.`)) return;
+    // Server-side single delete (RESTful DELETE)
     try {
-      const res = await fetch('/api/admin/attendants/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const codeVal = encodeURIComponent(String(row?.code || ''));
+      const res = await fetch(`/api/admin/attendants/${codeVal}`, {
+        method: 'DELETE',
         cache: 'no-store',
-        body: JSON.stringify({ code: row?.code || '' }),
       });
       const txt = await res.text();
       let j: any = null; try { j = JSON.parse(txt); } catch {}
-      if (!res.ok || !j?.ok) throw new Error(j?.error || txt || 'Failed');
+      if (!res.ok || !j?.ok) {
+        const message = j?.error || txt || 'Failed';
+        throw new Error(message);
+      }
     } catch (e) {
       console.error('delete code failed', e);
-      alert(`Failed to delete code: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  notifyToast(`Failed to delete code: ${e instanceof Error ? e.message : 'Unknown error'}`);
       return;
     }
     // Local update after server success
@@ -946,7 +1063,7 @@ export default function AdminPage() {
   }, [salesByItem, supplyCost, expensesMonitor]);
 
   const raiseExpenseDispute = (outletName: string) => {
-    const reason = window.prompt(`Dispute/adjust expenses for ${outletName}. Reason:`, "");
+  const reason = promptSync(`Dispute/adjust expenses for ${outletName}. Reason:`, "") || "";
     if (!reason) return;
     const req = {
       id: rid(),
@@ -960,7 +1077,7 @@ export default function AdminPage() {
     };
     const list = readJSON<any[]>(AMEND_REQUESTS_KEY, []);
     saveLS(AMEND_REQUESTS_KEY, [req, ...list]);
-    alert("Expense dispute sent to Supervisor.");
+  notifyToast("Expense dispute sent to Supervisor.");
   };
 
   /** ----- Supply view (read-only) ----- */
@@ -1000,6 +1117,7 @@ export default function AdminPage() {
   /** ----- Render ----- */
   return (
     <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
+  <Toast message={toast} />
   <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
           <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
@@ -1153,8 +1271,8 @@ export default function AdminPage() {
                               try {
                                 const outletName = scope[normCode(c.code)]?.outlet;
                                 await savePhoneFor(c.code, c.role, outletName);
-                                alert("Saved ✅");
-                              } catch { alert("Failed to save"); }
+                                notifyToast("Saved ✅");
+                              } catch { notifyToast("Failed to save"); }
                             }}
                           >Save</button>
                         </div>
@@ -1218,7 +1336,7 @@ export default function AdminPage() {
                           onClick={async ()=>{
                             const role = c.role;
                             const codeVal = (c.code || '').trim();
-                            if (!codeVal) { alert('No code'); return; }
+                            if (!codeVal) { notifyToast('No code'); return; }
                             const outletName = role === 'attendant' ? (scope[canonFull(codeVal)]?.outlet || '') : '';
                             try {
                               const r = await fetch(`/api/admin/impersonate`, {
@@ -1238,10 +1356,14 @@ export default function AdminPage() {
                                   sessionStorage.setItem('supplier_name', rj.code || 'Supplier');
                                 }
                               } catch {}
-                              // slight delay to ensure cookies are applied
-                              setTimeout(()=>{ window.location.href = to; }, 200);
+                              // Open impersonation in a new tab so admin stays on dashboard
+                              const w = window.open(to, '_blank', 'noopener,noreferrer');
+                              if (!w) {
+                                // Fallback: navigate current tab
+                                setTimeout(()=>{ window.location.href = to; }, 200);
+                              }
                             } catch (e: any) {
-                              alert(e?.message || 'Failed to impersonate');
+                              notifyToast(e?.message || 'Failed to impersonate');
                             }
                           }}
                         >Login as</button>
@@ -1323,11 +1445,11 @@ export default function AdminPage() {
                             if (!taken) { toggleScopeProduct(displayCode, p.key); return; }
                             // Taken by another attendant in this outlet — offer reassignment
                             const confirmMsg = `Reassign ${p.name} to ${ac.name || displayCode} for outlet ${entry.outlet}? This will remove it from the current attendant.`;
-                            const ok = window.confirm(confirmMsg);
+                            const ok = confirmSync(confirmMsg);
                             if (!ok) return;
                             try {
                               const res = await fetch('/api/admin/scope/reassign', {
-                                method: 'POST',
+                        method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
                                 cache: 'no-store',
                                 body: JSON.stringify({ outlet: entry.outlet, productKey: p.key, toCode: displayCode })
@@ -1338,9 +1460,9 @@ export default function AdminPage() {
                               // Locally reflect the change
                               toggleScopeProduct(displayCode, p.key);
                               try { await refreshScopeFromServer(); } catch {}
-                              alert('Reassigned successfully ✅');
+                              setToast('Reassigned successfully ✅');
                             } catch (err: any) {
-                              alert(err?.message || 'Failed to reassign');
+                              setToast(err?.message || 'Failed to reassign');
                             }
                           }}
                         >
@@ -1746,6 +1868,12 @@ function rid() { return Math.random().toString(36).slice(2); }
 function n(v: string) { return v === "" ? 0 : Number(v); }
 function fmt(v: number) { return (v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 
+// Non-blocking toast helper (uses global admin toast setter exposed by AdminPage)
+// Delegate to centralized toast helper
+function notifyToast(msg: string) {
+  try { notifyToastImported(msg as any); } catch {}
+}
+
 function getWeekDates(dateStr: string): string[] {
   const d = new Date(`${dateStr}T00:00:00`);
   const day = d.getDay();
@@ -1787,11 +1915,11 @@ function resetDefaults() {
   saveLS(K_OUTLETS,   seedDefaultOutlets());
   saveLS(K_PRODUCTS,  seedDefaultProducts());
   saveLS(K_EXPENSES,  seedDefaultExpenses());
-  alert("Defaults restored. Reload to see them.");
+  notifyToast("Defaults restored. Reload to see them.");
 }
 function clearAll() {
   [K_OUTLETS, K_PRODUCTS, K_EXPENSES, K_CODES, K_SCOPE, K_PRICEBOOK].forEach(k => lsRemoveItem(k));
-  alert("All admin data cleared from this browser.");
+  notifyToast("All admin data cleared from this browser.");
 }
 function readJSON<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
 
@@ -1834,7 +1962,7 @@ function ClearOutletData() {
         : scope === 'yesterday'
           ? `Clear YESTERDAY for ${outlet}?`
           : `Clear ${date} for ${outlet}?`;
-    if (!confirm(warn)) return;
+  if (!confirmSync(warn)) return;
     setBusy(true); setMsg("");
     try {
       const body: any = { outletName: outlet, scope, preventCarryForward, resetActivePeriod };
@@ -1976,7 +2104,7 @@ function QuickAdminTools() {
 
   const clearDayData = async () => {
     if (!outlet || !date) { setMsg("Pick outlet and date"); return; }
-    if (!confirm(`Clear data for ${outlet} — ${date}? This deletes opening, closings, expenses, deposits, till and resets locks.`)) return;
+  if (!confirmSync(`Clear data for ${outlet} — ${date}? This deletes opening, closings, expenses, deposits, till and resets locks.`)) return;
     setBusy(true); setMsg("");
     try {
       const r = await fetch(`/api/admin/data/clear` , {
@@ -2343,7 +2471,7 @@ function QuickAdminTools() {
                               className="btn-mobile border rounded-lg px-2 py-1 text-[11px]"
                               title="Restore to BEFORE snapshot"
                               onClick={async ()=>{
-                                const rsn = window.prompt('Reason for restore (optional):', '');
+                                const rsn = promptSync('Reason for restore (optional):', '') || '';
                                 try {
                                   const r = await fetch('/api/admin/history/edits/restore', {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2354,14 +2482,14 @@ function QuickAdminTools() {
                                   setHistBanner('Restored to BEFORE snapshot ✅');
                                   refreshEdits();
                                   setTimeout(()=>setHistBanner(''), 2000);
-                                } catch (err:any) { alert(err?.message || 'Failed'); }
+                                } catch (err:any) { notifyToast(err?.message || 'Failed'); }
                               }}
                             >Restore (Before)</button>
                             <button
                               className="btn-mobile border rounded-lg px-2 py-1 text-[11px]"
                               title="Restore to AFTER snapshot"
                               onClick={async ()=>{
-                                const rsn = window.prompt('Reason for restore (optional):', '');
+                                const rsn = promptSync('Reason for restore (optional):', '') || '';
                                 try {
                                   const r = await fetch('/api/admin/history/edits/restore', {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2372,7 +2500,7 @@ function QuickAdminTools() {
                                   setHistBanner('Restored to AFTER snapshot ✅');
                                   refreshEdits();
                                   setTimeout(()=>setHistBanner(''), 2000);
-                                } catch (err:any) { alert(err?.message || 'Failed'); }
+                                } catch (err:any) { notifyToast(err?.message || 'Failed'); }
                               }}
                             >Restore (After)</button>
                           </div>
@@ -2470,7 +2598,7 @@ function AdminEditList(props: { kind: 'deposit'|'expense'|'closing' }) {
       const j = await r.json().catch(()=>({ ok:false }));
       if (!j?.ok) throw new Error(j?.error || 'Failed');
       setTick(x=>x+1);
-    } catch (e:any) { alert(e?.message || 'Failed'); }
+  } catch (e:any) { notifyToast(e?.message || 'Failed'); }
   };
 
   if (!rows || rows.length === 0) return <div className="text-xs text-gray-500">No entries loaded yet.</div>;
@@ -2549,7 +2677,7 @@ function AdminEditOpeningList() {
       const j = await r.json().catch(()=>({ ok:false }));
       if (!j?.ok) throw new Error(j?.error || 'Failed');
       setTick(x=>x+1);
-    } catch (e:any) { alert(e?.message || 'Failed'); }
+  } catch (e:any) { notifyToast(e?.message || 'Failed'); }
   };
 
   if (!rows || rows.length === 0) return <div className="text-xs text-gray-500">No entries loaded yet.</div>;
@@ -3114,7 +3242,7 @@ function DepositsVerifyEmbed() {
       const j = await r.json(); if (!j?.ok) throw new Error(j?.error || "Failed");
       await load();
     } catch (e: any) {
-      alert(e?.message || "Failed to update status");
+  notifyToast(e?.message || "Failed to update status");
     }
   }
 
