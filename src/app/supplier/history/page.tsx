@@ -65,8 +65,22 @@ export default function SupplierHistoryPage(): JSX.Element {
         setRows(accRows);
       }
 
-      // Transfers: only fetch when range is small to avoid many requests
+      // Transfers: try server-backed range endpoint first, fall back to per-day or local cache
       const accTx: TransferRow[] = [];
+      try {
+        const qs2 = new URLSearchParams({ from: days[0], to: days[days.length - 1], outlet: outletName });
+        const rRange = await fetch(`/api/supply/transfer/range?${qs2.toString()}`, { cache: "no-store" });
+        if (rRange.ok) {
+          const jRange = await rRange.json();
+          if (jRange?.ok && Array.isArray(jRange.rows)) {
+            setTransfers(jRange.rows as any[]);
+            return;
+          }
+        }
+      } catch (e) {
+        // If range fetch fails (or returns 401), fall back to existing behavior below
+      }
+
       if (days.length <= 7) {
         for (const d of days) {
           try {
