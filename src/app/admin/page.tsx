@@ -742,7 +742,73 @@ export default function AdminPage() {
 
   // Products
   const addProduct = () => setProducts(v => [...v, { id: rid(), key: "", name: "", unit: "kg", sellPrice: 0, active: true }]);
-  const removeProduct = (id: string) => setProducts(v => v.filter(x => x.id !== id));
+  const removeProduct = async (id: string) => {
+    const row = products.find(p => p.id === id);
+    if (!row) return;
+    const label = row.name || row.key || 'this product';
+
+    // Ask for confirmation first
+    if (!confirmSync(`Delete ${label}? This will remove it from the product list.`)) return;
+
+    // If product has a key, attempt server-side delete first (preferred)
+    if (row.key && row.key.trim()) {
+      try {
+        const r = await fetch(`/api/admin/products/${encodeURIComponent(row.key.trim())}`, { method: 'DELETE', cache: 'no-store' });
+        const txt = await r.text();
+        let j: any = null; try { j = JSON.parse(txt); } catch {}
+        if (r.ok && j?.ok) {
+          // Deleted server-side — remove locally and persist
+          const prev = products;
+          const next = prev.filter(x => x.id !== id);
+          setProducts(next);
+          saveLS(K_PRODUCTS, next);
+          try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+          setToast(`${label} deleted`);
+          return;
+        }
+
+        if (r.status === 409) {
+          // Referenced. Offer soft-deactivate via server
+          const total = j?.total ?? 0;
+          const choice = confirmSync(`${label} has ${total} referencing records and cannot be deleted. Deactivate instead?`);
+          if (!choice) return;
+          const s = await fetch(`/api/admin/products/${encodeURIComponent(row.key.trim())}?soft=true`, { method: 'DELETE', cache: 'no-store' });
+          const stxt = await s.text(); let sj: any = null; try { sj = JSON.parse(stxt); } catch {}
+          if (s.ok && sj?.ok) {
+            // Reflect deactivation locally
+            const next = products.map(p => p.id === id ? { ...p, active: false } : p);
+            setProducts(next);
+            saveLS(K_PRODUCTS, next);
+            try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+            setToast(`${label} deactivated`);
+            return;
+          }
+          notifyToast(`Failed to deactivate: ${sj?.error || stxt}`);
+          return;
+        }
+
+        // Other server error — fall back to local behavior below
+      } catch (e) {
+        // ignore and fall back to local behavior
+      }
+    }
+
+    // Fallback: proceed with local removal and persist change
+    const prev = products;
+    const next = prev.filter(x => x.id !== id);
+    setProducts(next);
+    try {
+      saveLS(K_PRODUCTS, next);
+      try { await pushLocalStorageKeyToDB(K_PRODUCTS as any); } catch {}
+      setToast(`${label} deleted`);
+    } catch (e:any) {
+      console.error('delete product failed', e);
+      // Rollback locally
+      setProducts(prev);
+      saveLS(K_PRODUCTS, prev);
+      notifyToast(`Failed to delete product: ${e?.message || 'Unknown error'}`);
+    }
+  };
   const updateProduct = (id: string, patch: Partial<Product>) =>
     setProducts(v => v.map(x => x.id === id ? { ...x, ...patch } : x));
 
