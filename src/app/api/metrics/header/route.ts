@@ -35,7 +35,8 @@ export async function GET(req: Request) {
     prisma.pricebookRow.findMany({ where: { outletName: outlet } }),
     prisma.product.findMany(),
     prisma.attendantExpense.findMany({ where: { date, outletName: outlet } }),
-    prisma.attendantDeposit.findMany({ where: { date, outletName: outlet } }),
+    // Use raw SQL to avoid selecting a column that might be missing in some DB states (verifyPayload)
+    prisma.$queryRaw`SELECT "id", "date", "outletName", "code", "note", "amount", "status", "createdAt" FROM "AttendantDeposit" WHERE "date"=${date} AND "outletName"=${outlet}` as any,
     // Till count (optional) — use raw to avoid Prisma client mismatches on some environments
     prisma.$queryRaw`SELECT "counted" FROM "AttendantTillCount" WHERE "date"=${date} AND "outletName"=${outlet} LIMIT 1` as any,
     // Period snapshots saved by /api/period/start on first/second close
@@ -53,7 +54,7 @@ export async function GET(req: Request) {
     prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet } }),
     prisma.attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
     prisma.attendantExpense.findMany({ where: { date: y, outletName: outlet } }),
-    prisma.attendantDeposit.findMany({ where: { date: y, outletName: outlet } }),
+    prisma.$queryRaw`SELECT "id", "date", "outletName", "code", "note", "amount", "status", "createdAt" FROM "AttendantDeposit" WHERE "date"=${y} AND "outletName"=${outlet}` as any,
   ]);
   const yClosingMap = new Map(yClosingRows.map((r) => [r.itemKey, r] as const));
   let yRevenue = 0;
@@ -67,7 +68,7 @@ export async function GET(req: Request) {
     yRevenue += soldQty * price;
   }
   const yExpensesSum = yExpenses.reduce((a, e) => a + (e.amount || 0), 0);
-  const yVerifiedDeposits = yDeposits.filter((d) => d.status !== "INVALID").reduce((a, d) => a + (d.amount || 0), 0);
+  const yVerifiedDeposits = (yDeposits as any[]).filter((d) => d?.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0)), 0);
   let outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
   // If there is a snapshot for the same date (today), treat that snapshot as the previous trading period when viewing Current.
   // This makes carryover available immediately after the first close.
@@ -176,7 +177,7 @@ export async function GET(req: Request) {
 
   const expensesSum = expenses.reduce((a, e) => a + (e.amount || 0), 0);
   const tillSalesGross = 0; // hook up to POS later if needed
-  const verifiedDeposits = deposits.filter((d) => d.status !== "INVALID").reduce((a, d) => a + (d.amount || 0), 0);
+  const verifiedDeposits = (deposits as any[]).filter((d) => d?.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0)), 0);
 
   const todayTotalSales = weightSales - expensesSum;
   const netTill = tillSalesGross - verifiedDeposits;
