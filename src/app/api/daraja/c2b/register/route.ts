@@ -8,7 +8,7 @@ function env(name: string, soft = false) {
 }
 
 async function getAccessToken() {
-  const base = env("DARAJA_BASE_URL") || "https://sandbox.safaricom.co.ke";
+  const base = env("DARAJA_BASE_URL") || "https://api.safaricom.co.ke";
   const key = env("DARAJA_CONSUMER_KEY");
   const secret = env("DARAJA_CONSUMER_SECRET");
   const cred = Buffer.from(`${key}:${secret}`).toString("base64");
@@ -39,7 +39,7 @@ export async function POST() {
   try {
     const PUBLIC_BASE_URL = env("PUBLIC_BASE_URL");
     const SHORTCODE = env("DARAJA_C2B_SHORTCODE");
-    const base = env("DARAJA_BASE_URL") || "https://sandbox.safaricom.co.ke";
+  const base = env("DARAJA_BASE_URL") || "https://api.safaricom.co.ke";
 
     const token = await getAccessToken();
 
@@ -50,7 +50,7 @@ export async function POST() {
       ValidationURL: `${PUBLIC_BASE_URL}/api/daraja/c2b/validate`,
     };
 
-    const res = await fetch(`${base}/mpesa/c2b/v2/registerurl`, {
+  const res = await fetch(`${base}/mpesa/c2b/v1/registerurl`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,

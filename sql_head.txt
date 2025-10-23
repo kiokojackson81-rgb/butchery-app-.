@@ -1,0 +1,8 @@
+-- Combined attendant-related migrations (chronological)
+-- Generated: 2025-10-23
+-- Run in production only after taking a DB backup/snapshot.
+
+-- ========== migration: 20250925192406_init/migration.sql ==========
+-- (initial schema: creates Outlet, Product, PersonCode, AttendantClosing, AttendantDeposit, AttendantExpense, etc.)
+
+CREATE TYPE IF NOT EXISTS "public"."PersonRole" AS ENUM ('att

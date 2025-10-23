@@ -38,6 +38,11 @@
     "postinstall": "prisma generate",
     "verify:all": "bash scripts/verify-all.sh"
   },
+  "darajaScripts": {
+    "token": "tsx scripts/daraja/token-fetch.ts",
+    "register-c2b": "tsx scripts/daraja/register-c2b.ts",
+    "stk-test": "tsx scripts/daraja/stk-test.ts"
+  },
   "scriptsExtra2": {
     "test:playwright:stk": "npx playwright test playwright/stk-reconciliation.spec.ts --project=chromium"
   },
