@@ -1161,7 +1161,12 @@ export default function AdminPage() {
     <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
     {/* Data tab contains Backup/Restore and admin tools */}
     <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
-  {/* Quick links removed — these areas now have their own menus */}
+  {/* Reintroduced top-level quick links as pills (navigate to their dedicated pages) */}
+  <a href="/admin" className="px-3 py-2 rounded-2xl text-sm border">Dashboard</a>
+  <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border">Commissions</a>
+  <a href="/admin/payments" className="px-3 py-2 rounded-2xl text-sm border">Payments</a>
+  <a href="/admin/settings/tills" className="px-3 py-2 rounded-2xl text-sm border">Tills</a>
+  <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border">WhatsApp</a>
   </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
