@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import Toast from "@/components/Toast";
 import { registerAdminToast, notifyToast as notifyToastImported } from '@/lib/toast';
 import useToast from '@/lib/useToast';
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { promptSync, confirmSync } from '@/lib/ui';
 import { hydrateLocalStorageFromDB, pushLocalStorageKeyToDB, pushAllToDB } from "@/lib/settingsBridge";
 import { canonFull } from "@/lib/codeNormalize";
@@ -1115,10 +1115,34 @@ export default function AdminPage() {
   }), [supplyItems]);
 
   /** ----- Render ----- */
+  const pathname = usePathname();
+
+  const isActivePath = (p: string) => {
+    if (!pathname) return false;
+    if (p === "/admin") return pathname === "/admin" || pathname.startsWith("/admin/");
+    return pathname === p || pathname.startsWith(p + "/");
+  };
+
   return (
     <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
-  <Toast message={toast} />
-  <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
+      <Toast message={toast} />
+      <div className="md:flex md:gap-6">
+        {/* Left sidebar - visible on md+ */}
+        <aside className="hidden md:block w-56 shrink-0">
+          <div className="sticky top-6">
+            <div className="mb-4 text-sm font-semibold">Admin</div>
+            <nav className="flex flex-col gap-2">
+              <a href="/admin" className={`block px-3 py-2 rounded ${isActivePath('/admin') ? 'bg-black text-white' : 'border'}`}>Dashboard</a>
+              <a href="/admin/commissions" className={`block px-3 py-2 rounded ${isActivePath('/admin/commissions') ? 'bg-black text-white' : 'border'}`}>Commissions</a>
+              <a href="/admin/payments" className={`block px-3 py-2 rounded ${isActivePath('/admin/payments') ? 'bg-black text-white' : 'border'}`}>Payments</a>
+              <a href="/admin/settings/tills" className={`block px-3 py-2 rounded ${isActivePath('/admin/settings/tills') ? 'bg-black text-white' : 'border'}`}>Tills</a>
+              <a href="/admin/wa-logs" className={`block px-3 py-2 rounded ${isActivePath('/admin/wa-logs') ? 'bg-black text-white' : 'border'}`}>WhatsApp</a>
+            </nav>
+          </div>
+        </aside>
+
+        <div className="flex-1">
+          <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
           <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
           {welcome && (
@@ -1139,7 +1163,7 @@ export default function AdminPage() {
         </button>
       </header>
 
-      <nav className="flex gap-2 mb-6 mobile-scroll-x">
+  <nav className="flex gap-2 mb-6 mobile-scroll-x">
         <TabBtn active={tab==="outlets"}   onClick={() => setTab("outlets")}>Outlets & Codes</TabBtn>
   <TabBtn active={tab==="pricing"}  onClick={() => setTab("pricing")}>Pricing</TabBtn>
         {/* Combined Ops: Supply View, Reports, Supply History */}
@@ -1155,7 +1179,7 @@ export default function AdminPage() {
   <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
   {/* Direct link to Tills settings */}
   <a href="/admin/settings/tills" className="px-3 py-2 rounded-2xl text-sm border" title="Tills (Daraja/STK mappings)">Tills</a>
-      </nav>
+  </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
       {tab === "outlets" && (
@@ -1842,6 +1866,8 @@ export default function AdminPage() {
           </div>
         </section>
       )}
+        </div>
+      </div>
     </main>
   );
 }
