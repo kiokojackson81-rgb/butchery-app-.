@@ -45,7 +45,11 @@ type AdminTab =
   | "ops"
   | "expenses"
   | "performance"
-  | "data";
+  | "data"
+  | "commissions"
+  | "payments"
+  | "tills"
+  | "wa-logs";
 
 /** People & Codes */
 type PersonCode = {
@@ -1161,12 +1165,11 @@ export default function AdminPage() {
     <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
     {/* Data tab contains Backup/Restore and admin tools */}
     <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
-  {/* Reintroduced top-level quick links as pills (navigate to their dedicated pages) */}
-  <a href="/admin" className="px-3 py-2 rounded-2xl text-sm border">Dashboard</a>
-  <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border">Commissions</a>
-  <a href="/admin/payments" className="px-3 py-2 rounded-2xl text-sm border">Payments</a>
-  <a href="/admin/settings/tills" className="px-3 py-2 rounded-2xl text-sm border">Tills</a>
-  <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border">WhatsApp</a>
+  {/* Quick links as in-page tabs (open inline in admin page) */}
+  <TabBtn active={tab==="commissions"} onClick={() => setTab("commissions")}>Commissions</TabBtn>
+  <TabBtn active={tab==="payments"} onClick={() => setTab("payments")}>Payments</TabBtn>
+  <TabBtn active={tab==="tills"} onClick={() => setTab("tills")}>Tills</TabBtn>
+  <TabBtn active={tab==="wa-logs"} onClick={() => setTab("wa-logs")}>WhatsApp</TabBtn>
   </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
@@ -1517,6 +1520,42 @@ export default function AdminPage() {
                 </div>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {tab === "commissions" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">Supervisor Commissions</h2>
+          <div className="w-full h-[700px]">
+            <iframe src="/admin/commissions" className="w-full h-full rounded-2xl border" title="Commissions" />
+          </div>
+        </section>
+      )}
+
+      {tab === "payments" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">Payments</h2>
+          <div className="w-full h-[700px]">
+            <iframe src="/admin/payments" className="w-full h-full rounded-2xl border" title="Payments" />
+          </div>
+        </section>
+      )}
+
+      {tab === "tills" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">Tills</h2>
+          <div className="w-full h-[700px]">
+            <iframe src="/admin/settings/tills" className="w-full h-full rounded-2xl border" title="Tills" />
+          </div>
+        </section>
+      )}
+
+      {tab === "wa-logs" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">WhatsApp</h2>
+          <div className="w-full h-[700px]">
+            <iframe src="/admin/wa-logs" className="w-full h-full rounded-2xl border" title="WhatsApp Logs" />
           </div>
         </section>
       )}
