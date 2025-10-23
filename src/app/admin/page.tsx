@@ -1124,24 +1124,12 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="mobile-container sticky-safe p-6 max-w-7xl mx-auto">
+    <main className="mobile-container p-6 mx-auto">
       <Toast message={toast} />
-      <div className="md:flex md:gap-6">
-        {/* Left sidebar - visible on md+ */}
-        <aside className="hidden md:block w-56 shrink-0">
-          <div className="sticky top-6">
-            <div className="mb-4 text-sm font-semibold">Admin</div>
-            <nav className="flex flex-col gap-2">
-              <a href="/admin" className={`block px-3 py-2 rounded ${isActivePath('/admin') ? 'bg-black text-white' : 'border'}`}>Dashboard</a>
-              <a href="/admin/commissions" className={`block px-3 py-2 rounded ${isActivePath('/admin/commissions') ? 'bg-black text-white' : 'border'}`}>Commissions</a>
-              <a href="/admin/payments" className={`block px-3 py-2 rounded ${isActivePath('/admin/payments') ? 'bg-black text-white' : 'border'}`}>Payments</a>
-              <a href="/admin/settings/tills" className={`block px-3 py-2 rounded ${isActivePath('/admin/settings/tills') ? 'bg-black text-white' : 'border'}`}>Tills</a>
-              <a href="/admin/wa-logs" className={`block px-3 py-2 rounded ${isActivePath('/admin/wa-logs') ? 'bg-black text-white' : 'border'}`}>WhatsApp</a>
-            </nav>
-          </div>
-        </aside>
+      <div>
+        {/* Sidebar removed; single-column flow on all sizes */}
 
-        <div className="flex-1">
+        <div>
           <header className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
           <h1 className="text-2xl font-semibold">Administrator Dashboard</h1>
@@ -1173,12 +1161,7 @@ export default function AdminPage() {
     <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
     {/* Data tab contains Backup/Restore and admin tools */}
     <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
-  {/* Quick link to WhatsApp management */}
-  <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
-  {/* Commissions management */}
-  <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
-  {/* Direct link to Tills settings */}
-  <a href="/admin/settings/tills" className="px-3 py-2 rounded-2xl text-sm border" title="Tills (Daraja/STK mappings)">Tills</a>
+  {/* Quick links removed — these areas now have their own menus */}
   </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
