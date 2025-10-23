@@ -25,7 +25,7 @@ export default async function Page() {
           <div><button type="submit" className="bg-green-600 text-white px-3 py-1 rounded">Create Till</button></div>
         </form>
 
-        <form action="/admin/settings/tills/route" method="post">
+        <form action="/api/admin/tills/seed" method="post">
           <button type="submit" className="mt-4 inline-block bg-blue-600 text-white px-3 py-2 rounded">Seed default tills</button>
         </form>
 
