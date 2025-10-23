@@ -154,6 +154,17 @@ async function ensureLoginProvision(loginCode: string) {
   return login;
 }
 
+function prismaIsSchemaError(err: any) {
+  // PrismaKnownRequestError uses `code` like 'P2021' for missing table
+  try {
+    if (!err) return false;
+    const code = err.code || (err?.meta && err.meta.code) || null;
+    return String(code) === 'P2021';
+  } catch (_) {
+    return false;
+  }
+}
+
 export async function POST(req: Request) {
   try {
     if (!process.env.DATABASE_URL && !process.env.DATABASE_URL_UNPOOLED) {
@@ -177,6 +188,9 @@ export async function POST(req: Request) {
     }
   } catch (err) {
     console.error("loginCode lookup failed", err);
+    if (prismaIsSchemaError(err)) {
+      return NextResponse.json({ ok: false, error: "DB_SCHEMA_MISSING" }, { status: 503 });
+    }
   }
 
     if (!row && (loose || full)) {
@@ -236,6 +250,9 @@ export async function POST(req: Request) {
         }
       } catch (err) {
         console.error('admin_codes lookup failed', err);
+        if (prismaIsSchemaError(err)) {
+          return NextResponse.json({ ok: false, error: 'DB_SCHEMA_MISSING' }, { status: 503 });
+        }
         return NextResponse.json({ ok: false, error: 'SESSION_STORE_UNAVAILABLE' }, { status: 503 });
       }
     }
@@ -283,6 +300,9 @@ export async function POST(req: Request) {
       }
     } catch (err) {
       console.error("attendant lookup failed", err);
+      if (prismaIsSchemaError(err)) {
+        return NextResponse.json({ ok: false, error: "DB_SCHEMA_MISSING" }, { status: 503 });
+      }
       return NextResponse.json({ ok: false, error: "SESSION_STORE_UNAVAILABLE" }, { status: 503 });
     }
 

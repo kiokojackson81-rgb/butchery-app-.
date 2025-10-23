@@ -1,3 +1,33 @@
+Scripts for DB migrations and local Postgres for development
+
+Files
+- `prod-migrate.ps1` - helper to run production migrations safely. Requires `ALLOW_PROD_MIGRATE='true'` and `DATABASE_URL` set. Attempts a `pg_dump` backup (if `pg_dump` is available) before running `npx prisma migrate deploy`.
+- `start-dev-db.ps1` - spins up a local Postgres container (Docker) and prints a recommended `DATABASE_URL` to use in `.env.local`.
+
+Recommended usage
+
+Local dev DB
+1. Start Docker Postgres (from project root):
+   pwsh ./scripts/start-dev-db.ps1
+2. Export DATABASE_URL in your shell or create `.env.local`:
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/butchery?schema=public
+3. Apply migrations locally and generate client:
+   npx prisma migrate dev --schema=prisma/schema.prisma
+   npx prisma generate
+4. Start the dev server (example):
+   $env:PORT="3002"; npm run dev
+
+Production migrations (CAUTION)
+1. Ensure you have a tested backup of the production DB.
+2. Set the following env vars in the shell where you run the script:
+   $env:ALLOW_PROD_MIGRATE = 'true'
+   $env:DATABASE_URL = '<production-database-url>'
+3. Run (from project root):
+   pwsh ./scripts/prod-migrate.ps1
+
+Notes
+- `prod-migrate.ps1` is a convenience script. If you have a CI/CD process for migrations, prefer that.
+- Always test restores from backups in a staging environment before touching production.
 Staging smoke-run script
 
 This script simulates a subset of the WhatsApp webhook flows by POSTing realistic inbound webhook payloads to a running staging server and polling `/api/wa/diag` for quick verification.
