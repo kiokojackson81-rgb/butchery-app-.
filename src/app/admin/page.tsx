@@ -1149,10 +1149,12 @@ export default function AdminPage() {
     <TabBtn active={tab==="performance"} onClick={() => setTab("performance")}>Performance</TabBtn>
     {/* Data tab contains Backup/Restore and admin tools */}
     <TabBtn active={tab==="data"}      onClick={() => setTab("data")}>Data</TabBtn>
-        {/* Quick link to WhatsApp management */}
-        <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
-        {/* Commissions management */}
-        <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
+  {/* Quick link to WhatsApp management */}
+  <a href="/admin/wa-logs" className="px-3 py-2 rounded-2xl text-sm border" title="Open WhatsApp logs & sender">WhatsApp</a>
+  {/* Commissions management */}
+  <a href="/admin/commissions" className="px-3 py-2 rounded-2xl text-sm border" title="Supervisor commissions management & PDF">Commissions</a>
+  {/* Direct link to Tills settings */}
+  <a href="/admin/settings/tills" className="px-3 py-2 rounded-2xl text-sm border" title="Tills (Daraja/STK mappings)">Tills</a>
       </nav>
 
       {/* ---------- OUTLETS & CODES ---------- */}
