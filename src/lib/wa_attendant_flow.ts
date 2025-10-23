@@ -1396,6 +1396,47 @@ export async function handleInboundText(phone: string, text: string) {
     return;
   }
 
+  // Collect partial amount for STK push
+  if (s.state === 'DEP_ENTER_PARTIAL') {
+    if (!isNumericText(t)) {
+      await sendText(phone, 'Numbers only, e.g. 500', 'AI_DISPATCH_TEXT');
+      return;
+    }
+    const amount = Number(t);
+    await saveSession(phone, { state: 'DEP_CONFIRM_PHONE', pendingAmount: amount, ...cur } as any);
+    await sendText(phone, `We'll push STK for KSh ${amount}. Reply with your phone in 2547XXXXXXXX format or type CHANGE to enter another number.`, 'AI_DISPATCH_TEXT');
+    return;
+  }
+
+  // Confirm phone and trigger STK
+  if (s.state === 'DEP_CONFIRM_PHONE') {
+    const entered = t.trim();
+    if (/^CHANGE$/i.test(entered)) {
+      await saveSession(phone, { state: 'DEP_ENTER_PHONE', ...cur } as any);
+      await sendText(phone, 'Enter phone number in 2547XXXXXXXX format', 'AI_DISPATCH_TEXT');
+      return;
+    }
+    if (!/^2547\d{8}$/.test(entered)) {
+      await sendText(phone, 'Invalid phone format. Use 2547XXXXXXXX', 'AI_DISPATCH_TEXT');
+      return;
+    }
+    const pendingAmount = (cur as any).pendingAmount || 0;
+    // Call internal STK route
+    try {
+      const res = await fetch(`${process.env.PUBLIC_BASE_URL || ''}/api/pay/stk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outletCode: s.outlet, phone: entered, amount: pendingAmount }) });
+      const j = await res.json();
+      if (j.ok) {
+        await sendText(phone, `STK push initiated. You should receive a prompt on ${entered}. If you complete payment, it will be reconciled automatically.`, 'AI_DISPATCH_TEXT');
+      } else {
+        await sendText(phone, `STK initiation failed: ${j.error || 'unknown'}`, 'AI_DISPATCH_TEXT');
+      }
+    } catch (e) {
+      await sendText(phone, 'STK initiation failed. Try again later.', 'AI_DISPATCH_TEXT');
+    }
+    await saveSession(phone, { state: 'MENU', pendingAmount: undefined, ...cur } as any);
+    return;
+  }
+
   // Default: compact help
   if (!s.code) await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
   else await sendText(phone, "Try MENU or HELP.", "AI_DISPATCH_TEXT", { gpt_sent: true });
@@ -1449,6 +1490,37 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       sessionLike: s,
     });
     return true;
+  }
+
+  // Deposit STK options
+  if (id === 'DEP_FULL' || id === 'DEP_PARTIAL' || id === 'DEP_PASTE') {
+    // DEP_PASTE: ask user to paste SMS (same as WAIT_DEPOSIT)
+    if (id === 'DEP_PASTE') {
+      await saveSession(phone, { state: 'WAIT_DEPOSIT', ...cur });
+      await sendText(phone, 'Paste the original M-Pesa SMS (no edits). Deposits will remain pending until an admin approves them.', 'AI_DISPATCH_TEXT');
+      return true;
+    }
+    // DEP_FULL -> attempt STK push for expected deposit
+    try {
+      const totals = await computeDayTotals({ date: cur.date, outletName: s.outlet });
+      const amount = id === 'DEP_FULL' ? Number(totals.expectedDeposit || 0) : 0;
+      if (id === 'DEP_PARTIAL') {
+        // ask for partial amount
+        await saveSession(phone, { state: 'DEP_ENTER_PARTIAL', ...cur });
+        await sendText(phone, 'Enter partial deposit amount (numbers only), e.g. 500 or 150.50', 'AI_DISPATCH_TEXT');
+        return true;
+      }
+      // For full deposit, prompt to confirm phone number or change
+      await saveSession(phone, { state: 'DEP_CONFIRM_PHONE', pendingAmount: amount, ...cur } as any);
+      // pick default phone from session lookup if available, else use phone
+      const defaultPhone = (s.code && (s as any).phone) || phone.replace(/^\+/, '');
+      const body = `We'll push STK for KSh ${amount}. Reply with your phone in format 2547XXXXXXXX or type CHANGE to enter another number.`;
+      await sendText(phone, body, 'AI_DISPATCH_TEXT');
+      return true;
+    } catch (e) {
+      await sendText(phone, 'Unable to initiate deposit flow. Try again later.', 'AI_DISPATCH_TEXT');
+      return true;
+    }
   }
 
   if (id === "LOGOUT") {
@@ -2088,9 +2160,16 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     const successLines = [
       `Closing submitted for ${s.outlet} (${cur.date}).`,
       `Expected deposit: KSh ${totals.expectedDeposit}.`,
-      `Paste the M-Pesa SMS when ready.`,
     ];
     await sendText(phone, successLines.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
+    // Offer STK push options: deposit full, partial, or paste M-Pesa SMS
+    const depButtons = [
+      { type: 'reply', reply: { id: 'DEP_FULL', title: `Deposit full KSh ${totals.expectedDeposit}` } },
+      { type: 'reply', reply: { id: 'DEP_PARTIAL', title: 'Deposit partial' } },
+      { type: 'reply', reply: { id: 'DEP_PASTE', title: 'I already pasted M-Pesa SMS' } },
+    ];
+    const depPayload = buildButtonPayload(phone.replace(/^\+/, ''), 'How would you like to record the deposit?', depButtons as any);
+    await sendInteractive(depPayload as any, 'AI_DISPATCH_INTERACTIVE');
     // Update close count and seed tomorrow's opening on second close;
     // Third+ submissions: allow save but do not rotate/bump.
     try {
@@ -2102,9 +2181,9 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
         await bumpCloseCountAndMaybeSeed(s.outlet, cur.date);
       }
     } catch {}
-    const nextButtons = buildClosingNextActionsButtons();
-    const payload = buildButtonPayload(phone.replace(/^\+/, ""), "Next action?", nextButtons);
-    await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+  const nextButtons = buildClosingNextActionsButtons();
+  const nextPayload = buildButtonPayload(phone.replace(/^\+/, ''), 'Next action?', nextButtons);
+  await sendInteractive(nextPayload as any, 'AI_DISPATCH_INTERACTIVE');
     // Prompt attendant to add expenses or proceed after successful submission
     try {
       const notifyButtons = buildClosingNotifyButtons();
@@ -2182,6 +2261,14 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       }
     } catch {}
     await sendText(phone, `Closing submitted. Expected deposit: KSh ${totals.expectedDeposit}.`, "AI_DISPATCH_TEXT");
+    // Offer STK push options (same as above)
+    const depButtons2 = [
+      { type: 'reply', reply: { id: 'DEP_FULL', title: `Deposit full KSh ${totals.expectedDeposit}` } },
+      { type: 'reply', reply: { id: 'DEP_PARTIAL', title: 'Deposit partial' } },
+      { type: 'reply', reply: { id: 'DEP_PASTE', title: 'I already pasted M-Pesa SMS' } },
+    ];
+    const payload2 = buildButtonPayload(phone.replace(/^\+/, ''), 'How would you like to record the deposit?', depButtons2 as any);
+    await sendInteractive(payload2 as any, 'AI_DISPATCH_INTERACTIVE');
     // After confirmed submit, prompt for expenses or next actions
     try {
       const notifyButtons = buildClosingNotifyButtons();

@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://neondb_owner:npg_IZ6fEVNF8GvP@ep-nameless-grass-ad162epj-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
+}
+
+// Minimal schema for adding Till and Payment models
+
+model Till {
+  id               String   @id @default(cuid())
+  label            String
+  tillNumber       String   @unique
+  storeNumber      String
+  headOfficeNumber String
+  outletCode       OutletCode
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  outletCode        OutletCode
+  amount            Int
+  msisdn            String
+  status            PaymentStatus @default(PENDING)
+  merchantRequestId String?
+  checkoutRequestId String?        @unique
+  mpesaReceipt      String?
+  businessShortCode String
+  partyB            String
+  storeNumber       String
+  headOfficeNumber  String
+  accountReference  String?
+  description       String?
+  rawPayload        Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum OutletCode {
+  BRIGHT
+  BARAKA_A
+  BARAKA_B
+  BARAKA_C
+  GENERAL
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REVERSED
+}

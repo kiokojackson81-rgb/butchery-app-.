@@ -1,7 +1,7 @@
 // src/server/deposits.ts
 import { prisma } from "@/lib/prisma";
 import { recordDryDeposit } from "@/lib/dev_dry";
-import { getAccessToken, darajaPost } from "@/lib/daraja";
+import { DarajaClient } from "@/lib/daraja_client";
 import { notifyAttendants, notifySupplier } from "@/server/supervisor/supervisor.notifications";
 import { computeDayTotals } from "@/server/finance";
 
@@ -162,10 +162,10 @@ async function tryAutoVerifyDeposit(opts: { amount: number; ref?: string | null;
   }
 
   try {
-    const token = await getAccessToken();
+  const token = await DarajaClient.fetchToken();
     // Caller must provide DARAJA_VERIFY_PATH to a compatible endpoint that accepts { ref } and returns { ok:true, amount?:number }
     const body = { ref, amount: Number(opts.amount || 0) };
-    const res = await darajaPost(DARAJA_VERIFY_PATH, token, body).catch((e:any) => { throw e; });
+  const res = await DarajaClient.darajaPost(DARAJA_VERIFY_PATH, token, body).catch((e:any) => { throw e; });
     // Expected response shape: { ok: boolean, amount?: number }
     if (res && (res.ok === true || Number(res.amount) === Number(opts.amount || 0))) return { verified: true, payload: res };
     return { verified: false, payload: res };

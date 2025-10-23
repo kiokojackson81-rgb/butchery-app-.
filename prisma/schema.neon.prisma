@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://neondb_owner:npg_IZ6fEVNF8GvP@ep-nameless-grass-ad162epj-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
+}
+
+// --- rest of schema copied from schema.prisma ---
+
+model Outlet {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  code       String? @unique
+  active     Boolean     @default(true)
+  attendants Attendant[]
+}
+
+model Product {
+  id        String  @id @default(cuid())
+  key       String  @unique
+  name      String
+  unit      String
+  sellPrice Int
+  active    Boolean @default(true)
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model PersonCode {
+  id     String     @id @default(cuid())
+  name   String?
+  code   String     @unique
+  role   PersonRole
+  active Boolean    @default(true)
+}
+
+model AttendantScope {
+  id         String         @id @default(cuid())
+  codeNorm   String         @unique
+  outletName String
+  products   ScopeProduct[]
+}
+
+model ScopeProduct {
+  id         String         @id @default(cuid())
+  scopeId    String
+  productKey String
+  scope      AttendantScope @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeId, productKey])
+}
+
+model PricebookRow {
+  id         String  @id @default(cuid())
+  outletName String
+  productKey String
+  sellPrice  Int
+  active     Boolean @default(true)
+
+  @@unique([outletName, productKey])
+}
+
+model SupplyOpeningRow {
+  id         String @id @default(cuid())
+  date       String
+  outletName String
+  itemKey    String
+  qty        Float
+  buyPrice   Float  @default(0)
+  unit       String
+
+  @@unique([date, outletName, itemKey])
+}
+
+model SupplyTransfer {
+  id             String   @id @default(cuid())
+  date           String
+  fromOutletName String
+  toOutletName   String
+  itemKey        String
+  qty            Float
+  unit           String
+  createdAt      DateTime @default(now())
+}
+
+model AttendantClosing {
+  id         String @id @default(cuid())
+  date       String
+  outletName String
+  itemKey    String
+  closingQty Float
+  wasteQty   Float  @default(0)
+
+  @@unique([date, outletName, itemKey])
+}
+
+model AttendantDeposit {
+  id         String        @id @default(cuid())
+  date       String
+  outletName String
+  code       String?
+  note       String?
+  amount     Int
+  status     DepositStatus @default(PENDING)
+  verifyPayload Json?
+  createdAt  DateTime      @default(now())
+}
+
+/// Payment and Till models for Daraja integration
+model Till {
+  id              String    @id @default(cuid())
+  label           String
+  tillNumber      String    @unique
+  storeNumber     String
+  headOfficeNumber String
+  outletCode      OutletCode
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Payment {
+  id                 String      @id @default(cuid())
+  outletCode         OutletCode
+  amount             Int
+  msisdn             String
+  status             PaymentStatus @default(PENDING)
+  merchantRequestId  String?
+  checkoutRequestId  String?     @unique
+  mpesaReceipt       String?
+  businessShortCode  String
+  partyB             String
+  storeNumber        String
+  headOfficeNumber   String
+  accountReference   String?
+  description        String?
+  rawPayload         Json?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
+model AttendantExpense {
+  id         String   @id @default(cuid())
+  date       String
+  outletName String
+  name       String
+  amount     Int
+  createdAt  DateTime @default(now())
+}
+
+enum OutletCode {
+  BRIGHT
+  BARAKA_A
+  BARAKA_B
+  BARAKA_C
+  GENERAL
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+/// Manual counted till per day/outlet
+model AttendantTillCount {
+  id         String   @id @default(cuid())
+  date       String
+  outletName String
+  counted    Float    @default(0)
+
+  @@unique([date, outletName])
+}
+
+model ActivePeriod {
+  id            String   @id @default(cuid())
+  outletName    String   @unique
+  periodStartAt DateTime
+}
+
+/// Settings store for mirroring localStorage JSON
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Tiny table for attendant assignments (code → outlet + products)
+model AttendantAssignment {
+  code        String   @unique
+  outlet      String
+  updatedAt   DateTime @updatedAt
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  productKeys Json
+
+  @@map("AttendantAssignment")
+}
