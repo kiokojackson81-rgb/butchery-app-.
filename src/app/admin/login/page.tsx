@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const ADMIN_EMAIL = "kiokojackson81@gmail.com";
-const ADMIN_PASSWORD = "Ads0k015@#"; // no spaces
+// Credentials are validated on the server. The server route will compare against
+// environment variables ADMIN_EMAIL and ADMIN_PASSWORD. This client file no
+// longer contains truthy credential constants.
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -24,32 +25,30 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError("");
 
-    const okEmail = email.trim().toLowerCase() === ADMIN_EMAIL;
-    const okPw = pw === ADMIN_PASSWORD;
-
-    if (!okEmail || !okPw) {
-      setError("Invalid email or password.");
-      return;
-    }
-
-    // Set client sessionStorage immediately for this tab
-    sessionStorage.setItem("admin_auth", "true");
-    sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
-
-    // Also persist to the server-backed AppState so other tabs can hydrate
-    // Do not block navigation on failure, but attempt to save.
+    // Call the server-side login endpoint which validates credentials and
+    // creates the server-backed session (HTTP-only cookie). On success we
+    // set the client sessionStorage for immediate UX in this tab and
+    // navigate to /admin. Errors come from the server.
     try {
-      await fetch("/api/state/bulk-set", {
+      const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items: [{ key: "admin_auth", value: "true" }, { key: "admin_welcome", value: "Welcome boss 👑 — systems are green and ready!" }] }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password: pw }),
       });
-    } catch (err) {
-      // swallow - we already set sessionStorage for this tab
-      console.warn("Failed to persist admin_auth to server:", err);
-    }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) {
+        setError(j?.error || "Invalid email or password.");
+        return;
+      }
 
-    router.replace("/admin");
+      // Success: set client flag for current tab and navigate. The server has
+      // already set the HTTP-only cookie so other tabs will see the session.
+      sessionStorage.setItem("admin_auth", "true");
+      sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+      router.replace("/admin");
+    } catch (err: any) {
+      setError(String(err?.message ?? err));
+    }
   };
 
   return (
