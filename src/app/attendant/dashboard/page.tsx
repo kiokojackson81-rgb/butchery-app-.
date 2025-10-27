@@ -1465,7 +1465,8 @@ export default function AttendantDashboardPage() {
             outletCode={outletCodeState ?? (typeof outlet === 'string' ? outlet : 'GENERAL')}
             defaultPhone={attendantPhone ?? undefined}
             attendantName={attendantName ?? undefined}
-            onSuccess={async () => {
+            defaultAmount={Number(kpi.amountToDeposit) || null}
+            onSuccessAction={async () => {
               if (!outlet) return;
               // Show a small toast while we refresh the dashboard data
               try {
@@ -1487,36 +1488,6 @@ export default function AttendantDashboardPage() {
           />
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
-            <button className="border rounded-xl px-3 py-1 text-xs" onClick={()=>setDeposits([{ id: id(), code: "", amount: "", note: "" }])}>Paste SMS</button>
-          </div>
-          <div className="table-wrap mt-2">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2">Paste full M-Pesa SMS</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {deposits.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={2}>Paste a full M-Pesa SMS to submit.</td></tr>}
-                {deposits.map((d)=>(
-                  <tr key={d.id} className="border-b">
-                    <td className="py-2" colSpan={2}>
-                      <input className="input-mobile border rounded-xl p-2 w-full" placeholder="Paste full M-Pesa SMS"
-                        value={d.note || ""} onChange={(e)=>upDeposit(d.id,{note:e.target.value})}/>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td className="py-2 font-semibold"></td>
-                  <td className="text-right">
-                    <button className="btn-mobile px-3 py-2 rounded-xl border" onClick={submitDeposits}>Submit</button>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
           </div>
 
           {/* Server-verified deposits for today */}

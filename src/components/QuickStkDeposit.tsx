@@ -6,7 +6,8 @@ type Props = {
   outletCode: string;          // e.g. "BRIGHT"
   defaultPhone?: string;       // e.g. "2547XXXXXXXX"
   attendantName?: string;      // for UX only
-  onSuccess?: () => void | Promise<void>;
+  defaultAmount?: number | null; // amount picked from summary (optional)
+  onSuccessAction?: () => void | Promise<void>;
 };
 
 type StkResponse =
@@ -37,12 +38,13 @@ export default function QuickStkDeposit({
   outletCode,
   defaultPhone,
   attendantName,
-  onSuccess,
+  defaultAmount,
+  onSuccessAction,
 }: Props) {
   const [phone, setPhone] = React.useState(defaultPhone ?? "");
-  const [amount, setAmount] = React.useState<string>("");
-  const [accountRef, setAccountRef] = React.useState<string>(outletCode ?? "GENERAL");
-  const [desc, setDesc] = React.useState<string>("Attendant deposit");
+  const [amount, setAmount] = React.useState<string>(defaultAmount ? String(defaultAmount) : "");
+  const [editingAmount, setEditingAmount] = React.useState<boolean>(false);
+  const [editingPhone, setEditingPhone] = React.useState<boolean>(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [result, setResult] = React.useState<{
     ok: boolean;
@@ -78,13 +80,11 @@ export default function QuickStkDeposit({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          outletCode,                  // server chooses till/passkey based on outlet
-          phone: msisdn,               // normalized
-          amount: amt,
-          accountRef,                  // optional; shows in M-PESA Mini-Statement
-          description: desc,           // optional
-          category: "DEPOSIT",       // optional hint your route already accepts
-        }),
+            outletCode,                  // server chooses till/passkey based on outlet
+            phone: msisdn,               // normalized
+            amount: amt,
+            category: "DEPOSIT",       // optional hint your route already accepts
+          }),
       });
 
       const json: StkResponse = await res.json();
@@ -98,9 +98,10 @@ export default function QuickStkDeposit({
           merchant: json.data?.MerchantRequestID,
           checkout: json.data?.CheckoutRequestID,
         });
-        setAmount("");
-        if (onSuccess) {
-          try { await onSuccess(); } catch {}
+          // Reset only if amount was not user-edited
+          if (!editingAmount) setAmount("");
+        if (onSuccessAction) {
+          try { await onSuccessAction(); } catch {}
         }
       } else {
         setResult({
@@ -127,47 +128,43 @@ export default function QuickStkDeposit({
       </div>
 
       <form onSubmit={handleSubmit} className="grid gap-3 md:grid-cols-2">
-        <div className="grid gap-1">
+        <div className="grid gap-1 md:col-span-2">
           <label className="text-sm text-zinc-300">Phone</label>
-          <input
-            className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700"
-            placeholder="2547XXXXXXXX"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              {editingPhone ? (
+                <input
+                  className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700 w-full"
+                  placeholder="2547XXXXXXXX"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+              ) : (
+                <div className="rounded-xl bg-zinc-800 px-3 py-2 border border-zinc-700 text-sm">{phone || "No phone assigned"}</div>
+              )}
+            </div>
+            <button type="button" className="text-xs rounded-xl px-3 py-2 border" onClick={() => setEditingPhone((s) => !s)}>{editingPhone ? "Use assigned" : "Change"}</button>
+          </div>
         </div>
 
-        <div className="grid gap-1">
-          <label className="text-sm text-zinc-300">Amount (KES)</label>
-          <input
-            type="number"
-            min={1}
-            step="1"
-            className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700"
-            placeholder="e.g. 500"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </div>
-
-        <div className="grid gap-1">
-          <label className="text-sm text-zinc-300">Account Ref (optional)</label>
-          <input
-            className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700"
-            placeholder={outletCode}
-            value={accountRef}
-            onChange={(e) => setAccountRef(e.target.value)}
-          />
-        </div>
-
-        <div className="grid gap-1">
-          <label className="text-sm text-zinc-300">Description (optional)</label>
-          <input
-            className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700"
-            placeholder="Attendant deposit"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-          />
+        <div className="grid gap-1 md:col-span-2">
+          <label className="text-sm text-zinc-300">Amount to deposit (KES)</label>
+          <div className="flex items-center gap-2">
+            {editingAmount ? (
+              <input
+                type="number"
+                min={1}
+                step="1"
+                className="rounded-xl bg-zinc-800 px-3 py-2 outline-none border border-zinc-700 w-full"
+                placeholder="Enter amount"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            ) : (
+              <div className="rounded-xl bg-zinc-800 px-3 py-2 border border-zinc-700 text-sm w-full">Ksh {amount || "0"}</div>
+            )}
+            <button type="button" className="text-xs rounded-xl px-3 py-2 border" onClick={() => setEditingAmount((s) => !s)}>{editingAmount ? "Lock" : "Change amount"}</button>
+          </div>
         </div>
 
         <div className="md:col-span-2 flex gap-3 pt-2">
@@ -182,9 +179,9 @@ export default function QuickStkDeposit({
             type="button"
             onClick={() => {
               setPhone(defaultPhone ?? "");
-              setAmount("");
-              setAccountRef(outletCode ?? "GENERAL");
-              setDesc("Attendant deposit");
+              setAmount(defaultAmount ? String(defaultAmount) : "");
+              setEditingAmount(false);
+              setEditingPhone(false);
               setResult(null);
             }}
             className="rounded-2xl px-4 py-2 bg-zinc-800 hover:bg-zinc-700"
