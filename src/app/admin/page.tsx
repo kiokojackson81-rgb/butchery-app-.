@@ -1149,14 +1149,17 @@ export default function AdminPage() {
               // Local-first
               sessionStorage.removeItem("admin_auth");
               sessionStorage.removeItem("admin_welcome");
-              // Also clear server AppState so other tabs hydrate logout
-              await fetch("/api/state/bulk-set", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ items: [{ key: "admin_auth", value: null }, { key: "admin_welcome", value: null }] }),
-              });
+              // Also clear server admin session
+              await fetch('/api/admin/session', { method: 'DELETE' });
             } catch (err) {
-              // ignore network errors — ensure we still navigate away
+              try {
+                // Fallback: clear legacy AppState flags
+                await fetch("/api/state/bulk-set", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ items: [{ key: "admin_auth", value: null }, { key: "admin_welcome", value: null }] }),
+                });
+              } catch {}
               console.warn("Failed to clear admin AppState during logout:", err);
             }
             router.replace("/admin/login");

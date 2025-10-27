@@ -8,16 +8,19 @@ export default function AdminLogoutButton() {
     // Only admin flags (local-first)
     sessionStorage.removeItem("admin_auth");
     sessionStorage.removeItem("admin_welcome");
-    // Also attempt to clear server-backed AppState so other tabs hydrate logout
+    // Also clear server-side admin session
     try {
-      await fetch("/api/state/bulk-set", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items: [{ key: "admin_auth", value: null }, { key: "admin_welcome", value: null }] }),
-      });
+      await fetch('/api/admin/session', { method: 'DELETE' });
     } catch (err) {
-      // swallow — user will still be logged out in this tab
-      console.warn("Failed to clear admin_auth from AppState:", err);
+      try {
+        // Fallback: clear legacy AppState flags
+        await fetch("/api/state/bulk-set", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ items: [{ key: "admin_auth", value: null }, { key: "admin_welcome", value: null }] }),
+        });
+      } catch {}
+      console.warn("Failed to clear admin session on server:", err);
     }
 
     // If you added cookie-based admin middleware, also clear cookie via API:
