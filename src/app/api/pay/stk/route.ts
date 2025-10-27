@@ -47,8 +47,8 @@ export async function POST(req: Request) {
     const partyB = storeShortcode; // funds go to store till
 
     // Create PENDING payment row
-  const payment = await (localPrisma as any).payment.create({ data: {
-      outletCode: outletCode,
+    const payment = await (localPrisma as any).payment.create({ data: {
+      outletCode: finalOutlet,
       amount: Number(amount),
       msisdn: phone,
       status: 'PENDING',
