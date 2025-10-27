@@ -36,7 +36,7 @@ async function main() {
     ValidationURL: `${pub.replace(/\/$/, '')}/api/daraja/c2b/validate`,
   };
 
-  const url = `${base.replace(/\/$/, '')}/mpesa/c2b/v1/registerurl`;
+  const url = `${base.replace(/\/$/, '')}/mpesa/c2b/v2/registerurl`;
   console.log('[daraja:register] POST', url);
   const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const txt = await r.text();

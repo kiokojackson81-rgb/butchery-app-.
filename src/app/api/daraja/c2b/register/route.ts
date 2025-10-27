@@ -40,8 +40,30 @@ export async function POST() {
     const PUBLIC_BASE_URL = env("PUBLIC_BASE_URL");
     const SHORTCODE = env("DARAJA_C2B_SHORTCODE");
   const base = env("DARAJA_BASE_URL") || "https://api.safaricom.co.ke";
+    // --- OAuth (explicit fetch so we can log headers/x-request-id) ---
+    const tokenRes = await fetch(
+      `${process.env.DARAJA_BASE_URL || base}/oauth/v1/generate?grant_type=client_credentials`,
+      {
+        method: "GET",
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${process.env.DARAJA_CONSUMER_KEY}:${process.env.DARAJA_CONSUMER_SECRET}`
+            ).toString("base64"),
+        },
+        cache: "no-store",
+      }
+    );
 
-    const token = await getAccessToken();
+    console.log("OAuth status:", tokenRes.status, "x-request-id:", tokenRes.headers.get("x-request-id"));
+    let tokenJson: any = null;
+    try {
+      tokenJson = await tokenRes.json();
+    } catch (e) {
+      // ignore parse errors
+    }
+    console.log("OAuth has token?", Boolean(tokenJson?.access_token));
 
     const body = {
       ShortCode: SHORTCODE,
@@ -50,14 +72,22 @@ export async function POST() {
       ValidationURL: `${PUBLIC_BASE_URL}/api/daraja/c2b/validate`,
     };
 
-  const res = await fetch(`${base}/mpesa/c2b/v1/registerurl`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    // --- Register ---
+    const regRes = await fetch(
+      `${process.env.DARAJA_BASE_URL || base}/mpesa/c2b/v2/registerurl`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenJson?.access_token ?? ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    console.log("Register status:", regRes.status, "x-request-id:", regRes.headers.get("x-request-id"));
+
+    const res = regRes;
 
     const raw = await res.text();
     let data: any;
