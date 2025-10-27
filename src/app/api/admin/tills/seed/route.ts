@@ -7,8 +7,9 @@ export async function POST(req: Request) {
       { label: 'Bright', tillNumber: '3574877', storeNumber: '3574841', headOfficeNumber: '3574813', outletCode: 'BRIGHT' },
       { label: 'Baraka A', tillNumber: '3574875', storeNumber: '3574839', headOfficeNumber: '3574813', outletCode: 'BARAKA_A' },
       { label: 'Baraka B', tillNumber: '3574873', storeNumber: '3574837', headOfficeNumber: '3574813', outletCode: 'BARAKA_B' },
-      { label: 'Baraka C', tillNumber: '3574947', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'BARAKA_C' },
-      { label: 'General', tillNumber: '3574871', storeNumber: '3574835', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
+  // swapped: assign 3574871 to Baraka C and 3574947 to General
+  { label: 'Baraka C', tillNumber: '3574871', storeNumber: '3574835', headOfficeNumber: '3574813', outletCode: 'BARAKA_C' },
+  { label: 'General', tillNumber: '3574947', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
     ];
     for (const t of seed) {
       const existing = await (prisma as any).till.findUnique({ where: { tillNumber: t.tillNumber } });
