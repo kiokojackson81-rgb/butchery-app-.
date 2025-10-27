@@ -20,7 +20,7 @@ export default function AdminLoginPage() {
     }
   }, [router]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -32,8 +32,23 @@ export default function AdminLoginPage() {
       return;
     }
 
+    // Set client sessionStorage immediately for this tab
     sessionStorage.setItem("admin_auth", "true");
     sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+
+    // Also persist to the server-backed AppState so other tabs can hydrate
+    // Do not block navigation on failure, but attempt to save.
+    try {
+      await fetch("/api/state/bulk-set", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ items: [{ key: "admin_auth", value: "true" }, { key: "admin_welcome", value: "Welcome boss 👑 — systems are green and ready!" }] }),
+      });
+    } catch (err) {
+      // swallow - we already set sessionStorage for this tab
+      console.warn("Failed to persist admin_auth to server:", err);
+    }
+
     router.replace("/admin");
   };
 
