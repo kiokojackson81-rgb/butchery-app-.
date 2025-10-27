@@ -430,6 +430,17 @@ export default function AttendantDashboardPage() {
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet, dateStr]);
 
+  // When deposits list changes (e.g., a deposit becomes VERIFIED), refresh KPIs so Amount to Deposit updates immediately
+  useEffect(() => {
+    if (!outlet) return;
+    // Debounce quick successive updates
+    let t: any = null;
+    t = setTimeout(() => {
+      try { refreshPeriodAndHeader(outlet).catch(() => {}); } catch {}
+    }, 300);
+    return () => { if (t) clearTimeout(t); };
+  }, [depositsFromServer.length, depositsFromServer.map(d => d.status).join('|') , outlet]);
+
   // Auto-refresh Expenses when expenses tab is active
   useEffect(() => {
     if (!outlet || tab !== "expenses") return;
