@@ -3,13 +3,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import logger from '@/lib/logger';
 import { lockPeriod, APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
+
+function fail(msg: string, code = 500) { return NextResponse.json({ ok: false, error: msg }, { status: code }); }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const outlet = searchParams.get("outlet") || "";
   if (!outlet) return NextResponse.json({ ok: true, active: null });
 
+  try {
   // Lazy auto-rotation logic:
   // - Always ensure an ActivePeriod row exists for the outlet (starts "immediately").
   // - If a new calendar day has started and there was NO attendant activity yesterday,
@@ -121,4 +125,13 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({ ok: true, active: { periodStartAt: active?.periodStartAt || todayMidnight } });
+  } catch (e: any) {
+    // Handle missing table (Prisma P2021) gracefully and give actionable message
+    const code = e?.code || (e?.name === 'PrismaClientKnownRequestError' ? 'P2021' : undefined);
+    logger.error({ ts: new Date().toISOString(), level: 'error', action: 'period:active:error', error: String(e), code });
+    if (code === 'P2021') {
+      return fail('Database table ActivePeriod does not exist. Run Prisma migrations (prisma migrate deploy) or prisma db push.', 500);
+    }
+    return fail('internal error', 500);
+  }
 }
