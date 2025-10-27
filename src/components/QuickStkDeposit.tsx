@@ -54,6 +54,7 @@ export default function QuickStkDeposit({
   } | null>(null);
   const [resolving, setResolving] = React.useState<boolean>(false);
   const [resolved, setResolved] = React.useState<null | { outletUsed: string; businessShortCode: string; fallback?: boolean; storeNumber?: string; headOfficeNumber?: string }>(null);
+  const [confirmFallback, setConfirmFallback] = React.useState<boolean>(false);
 
   React.useEffect(() => {
     // Keep defaultPhone in sync if parent changes
@@ -72,6 +73,8 @@ export default function QuickStkDeposit({
         if (!mounted) return;
         if (j?.ok) {
           setResolved({ outletUsed: j.outletUsed, businessShortCode: j.businessShortCode, fallback: j.fallback, storeNumber: j.storeNumber, headOfficeNumber: j.headOfficeNumber });
+          // reset confirmation when resolve changes
+          setConfirmFallback(false);
         } else {
           setResolved(null);
         }
@@ -98,6 +101,11 @@ export default function QuickStkDeposit({
     }
     if (!amt || amt <= 0) {
       setResult({ ok: false, msg: "Amount must be greater than zero." });
+      return;
+    }
+
+    if (resolved?.fallback && !confirmFallback) {
+      setResult({ ok: false, msg: 'Please confirm deposit to GENERAL till before proceeding.' });
       return;
     }
 
@@ -163,6 +171,14 @@ export default function QuickStkDeposit({
           ) : (
             <div className="text-xs text-zinc-500">Till info unavailable</div>
           )}
+          {resolved?.fallback ? (
+            <div className="mt-2 text-xs text-yellow-300">
+              This outlet has no assigned till — deposit will be made to the GENERAL till. Please confirm to proceed.
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs"><input type="checkbox" checked={confirmFallback} onChange={(e) => setConfirmFallback(e.target.checked)} /> <span className="ml-2">I confirm deposit to GENERAL till</span></label>
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="grid gap-1 md:col-span-2">
           <label className="text-sm text-zinc-300">Phone</label>

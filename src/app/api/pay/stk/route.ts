@@ -40,16 +40,15 @@ export async function POST(req: Request) {
 
     // Resolve till by outlet code. If none configured for this outlet, fall back to GENERAL till
   let till = await (localPrisma as any).till.findFirst({ where: { outletCode: finalOutlet, isActive: true } });
+    let usedOutlet = finalOutlet;
+    let usedFallback = false;
     if (!till) {
       logger.info({ action: 'stkPush:info', message: 'no till for outlet, falling back to GENERAL', requestedOutlet: finalOutlet });
       const gen = await (localPrisma as any).till.findFirst({ where: { outletCode: 'GENERAL', isActive: true } });
       if (!gen) return fail('no till configured for outlet and no GENERAL fallback', 404);
       till = gen;
-      // Use GENERAL as the final outlet for payment accounting
-      (global as any).debug && logger.info({ action: 'stkPush:info', message: 'using GENERAL till as fallback' });
-      // override finalOutlet so records point to GENERAL
-      // eslint-disable-next-line no-param-reassign
-      (body as any).outletCode = 'GENERAL';
+      usedOutlet = 'GENERAL';
+      usedFallback = true;
     }
 
     // Choose signing shortcode / passkey behavior
@@ -64,7 +63,7 @@ export async function POST(req: Request) {
 
     // Create PENDING payment row
     const payment = await (localPrisma as any).payment.create({ data: {
-      outletCode: finalOutlet,
+      outletCode: usedOutlet,
       amount: Number(amount),
       msisdn: phone,
       status: 'PENDING',
@@ -97,7 +96,8 @@ export async function POST(req: Request) {
         await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { merchantRequestId, checkoutRequestId } });
       }
 
-      return ok({ message: 'STK initiated', checkoutRequestId });
+  const msg = usedFallback ? `STK initiated via GENERAL till (fallback).` : 'STK initiated';
+  return ok({ message: msg, checkoutRequestId, outletUsed: usedOutlet, fallback: usedFallback });
     } catch (err: any) {
       // Log full error with stack for Vercel logs and mark payment FAILED with message
       logger.error({ action: 'stkPush:error', error: err?.message ?? String(err), stack: err?.stack });
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
       }
       // If Daraja client attached payload (darajaPost), surface it lightly
       const payload = err?.payload ? (typeof err.payload === 'string' ? err.payload : JSON.stringify(err.payload)) : undefined;
-      return NextResponse.json({ ok: false, error: 'daraja error', details: err?.message, payload }, { status: 502 });
+      return NextResponse.json({ ok: false, error: 'daraja error', details: err?.message, payload, outletUsed: usedOutlet, fallback: usedFallback }, { status: 502 });
     }
   } catch (e: any) {
     logger.error({ action: 'stkPush:error', error: String(e) });
