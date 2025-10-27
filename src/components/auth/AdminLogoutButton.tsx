@@ -6,8 +6,12 @@ export default function AdminLogoutButton() {
 
   async function adminSafeLogout() {
     // Only admin flags (local-first)
-    sessionStorage.removeItem("admin_auth");
-    sessionStorage.removeItem("admin_welcome");
+    try {
+      const { clearAdminAuth } = await import("@/lib/auth/clientState");
+      clearAdminAuth();
+    } catch {
+      try { sessionStorage.removeItem("admin_auth"); sessionStorage.removeItem("admin_welcome"); } catch {}
+    }
     // Also clear server-side admin session
     try {
       await fetch('/api/admin/session', { method: 'DELETE' });

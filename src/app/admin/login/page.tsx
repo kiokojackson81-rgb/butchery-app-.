@@ -43,8 +43,13 @@ export default function AdminLoginPage() {
 
       // Success: set client flag for current tab and navigate. The server has
       // already set the HTTP-only cookie so other tabs will see the session.
-      sessionStorage.setItem("admin_auth", "true");
-      sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+      try {
+        const { setAdminAuth } = await import("@/lib/auth/clientState");
+        setAdminAuth({ issuedAt: Date.now(), welcome: "Welcome boss 👑 — systems are green and ready!" });
+      } catch {
+        // fallback to sessionStorage if helper unavailable
+        try { sessionStorage.setItem("admin_auth", "true"); sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!"); } catch {}
+      }
       router.replace("/admin");
     } catch (err: any) {
       setError(String(err?.message ?? err));

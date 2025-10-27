@@ -138,8 +138,15 @@ export default function AdminPage() {
   // ---------- warm welcome (kept) ----------
   const [welcome, setWelcome] = useState<string>("");
   useEffect(() => {
-    const msg = sessionStorage.getItem("admin_welcome");
-    if (msg) setWelcome(msg);
+    (async () => {
+      try {
+        const { getAdminWelcome } = await import('@/lib/auth/clientState');
+        const msg = getAdminWelcome();
+        if (msg) setWelcome(msg);
+        return;
+      } catch {}
+      try { const msg = sessionStorage.getItem("admin_welcome"); if (msg) setWelcome(msg); } catch {}
+    })();
   }, []);
 
   const [tab, setTab] = useState<AdminTab>("outlets");
@@ -1146,9 +1153,8 @@ export default function AdminPage() {
           className="btn-mobile border rounded-xl px-3 py-2 text-sm"
           onClick={async () => {
             try {
-              // Local-first
-              sessionStorage.removeItem("admin_auth");
-              sessionStorage.removeItem("admin_welcome");
+              // Local-first: clear local admin auth and broadcast to other tabs
+              try { const { clearAdminAuth } = await import('@/lib/auth/clientState'); clearAdminAuth(); } catch { try { sessionStorage.removeItem('admin_auth'); sessionStorage.removeItem('admin_welcome'); } catch {} }
               // Also clear server admin session
               await fetch('/api/admin/session', { method: 'DELETE' });
             } catch (err) {

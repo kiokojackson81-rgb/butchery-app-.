@@ -17,13 +17,20 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
           return;
         }
       } catch {}
-      // Fallback to legacy client-only flag
-      const ok = sessionStorage.getItem("admin_auth") === "true";
-      if (!ok) {
-        router.replace("/admin/login");
-        return;
+      // Fallback to legacy client-side localStorage flag (now centralized)
+      try {
+        const { getAdminAuth } = await import("@/lib/auth/clientState");
+        const val = getAdminAuth();
+        if (!val) {
+          router.replace("/admin/login");
+          return;
+        }
+        setReady(true);
+      } catch {
+        const ok = sessionStorage.getItem("admin_auth") === "true";
+        if (!ok) { router.replace("/admin/login"); return; }
+        setReady(true);
       }
-      setReady(true);
     })();
   }, [router]);
 

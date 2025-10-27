@@ -21,8 +21,14 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
     if (!selectedOrphan || !outletInput) return;
     const headers: any = { 'content-type': 'application/json' };
     try {
-      const isAdmin = typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'true';
-      if (isAdmin) headers['x-admin-auth'] = 'true';
+      try {
+        const { getAdminAuth } = await import('@/lib/auth/clientState');
+        const val = getAdminAuth();
+        if (val) headers['x-admin-auth'] = 'true';
+      } catch {
+        const isAdmin = typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'true';
+        if (isAdmin) headers['x-admin-auth'] = 'true';
+      }
     } catch (e) {}
     const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: selectedOrphan.id, outlet: outletInput }) });
     const j = await res.json();

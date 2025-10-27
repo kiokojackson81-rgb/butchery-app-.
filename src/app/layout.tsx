@@ -3,6 +3,7 @@ import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import StorageBridge from "@/app/_bridges/StorageBridge";
 import InputBehaviorBridge from "@/app/_bridges/InputBehaviorBridge";
+import ClientAuthBootstrap from "@/app/_bridges/ClientAuthBootstrap";
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -20,6 +21,7 @@ export default function RootLayout({
       <body className={`antialiased`}>
         <StorageBridge />
         <InputBehaviorBridge />
+        <ClientAuthBootstrap />
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
