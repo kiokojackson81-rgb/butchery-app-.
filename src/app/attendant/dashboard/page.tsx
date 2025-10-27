@@ -101,6 +101,7 @@ export default function AttendantDashboardPage() {
   const [submittingStock, setSubmittingStock] = useState(false);
   const [invalidByKey, setInvalidByKey] = useState<Record<ItemKey, string>>({} as any);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [refreshingKpi, setRefreshingKpi] = useState(false);
 
   useEffect(() => {
     if (!toastMsg) return;
@@ -436,7 +437,14 @@ export default function AttendantDashboardPage() {
     // Debounce quick successive updates
     let t: any = null;
     t = setTimeout(() => {
-      try { refreshPeriodAndHeader(outlet).catch(() => {}); } catch {}
+      (async () => {
+        try {
+          setRefreshingKpi(true);
+          await refreshPeriodAndHeader(outlet).catch(() => {});
+        } catch {} finally {
+          setRefreshingKpi(false);
+        }
+      })();
     }, 300);
     return () => { if (t) clearTimeout(t); };
   }, [depositsFromServer.length, depositsFromServer.map(d => d.status).join('|') , outlet]);
@@ -1483,7 +1491,7 @@ export default function AttendantDashboardPage() {
               try {
                 setToastMsg("Refreshing dashboard…");
                 // Refresh header totals (KPIs)
-                try { await refreshPeriodAndHeader(outlet); } catch {}
+                try { setRefreshingKpi(true); await refreshPeriodAndHeader(outlet); } catch {} finally { setRefreshingKpi(false); }
                 // Refresh deposits list for this date/outlet
                 try {
                   const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: string; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
@@ -1719,6 +1727,7 @@ export default function AttendantDashboardPage() {
             <CardKPI
               label="Amount to Deposit (Ksh)"
               value={`Ksh ${fmt(kpi.amountToDeposit)}`}
+              subtitle={refreshingKpi ? 'Refreshing…' : undefined}
               highlightDanger={kpi.amountToDeposit > 0}
               tooltip={"Carryover (Prev) + Today Total Sales − Verified Deposits"}
             />
