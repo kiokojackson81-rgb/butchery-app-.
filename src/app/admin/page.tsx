@@ -1144,9 +1144,21 @@ export default function AdminPage() {
         {/* ✅ Logout button */}
         <button
           className="btn-mobile border rounded-xl px-3 py-2 text-sm"
-          onClick={() => {
-            sessionStorage.removeItem("admin_auth");
-            sessionStorage.removeItem("admin_welcome");
+          onClick={async () => {
+            try {
+              // Local-first
+              sessionStorage.removeItem("admin_auth");
+              sessionStorage.removeItem("admin_welcome");
+              // Also clear server AppState so other tabs hydrate logout
+              await fetch("/api/state/bulk-set", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ items: [{ key: "admin_auth", value: null }, { key: "admin_welcome", value: null }] }),
+              });
+            } catch (err) {
+              // ignore network errors — ensure we still navigate away
+              console.warn("Failed to clear admin AppState during logout:", err);
+            }
             router.replace("/admin/login");
           }}
           title="Sign out"
