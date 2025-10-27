@@ -8,12 +8,17 @@ export async function POST(req: Request) {
   try {
     const { key, value } = (await req.json().catch(() => ({}))) as { key?: string; value?: any };
     if (!key) return NextResponse.json({ ok: false, error: "key required" }, { status: 400 });
-    await (prisma as any).appState.upsert({
-      where: { key },
-      update: { value },
-      create: { key, value },
-    });
-    return NextResponse.json({ ok: true });
+    try {
+      await (prisma as any).appState.upsert({
+        where: { key },
+        update: { value },
+        create: { key, value },
+      });
+      return NextResponse.json({ ok: true });
+    } catch (err: any) {
+      console.error("AppState set failed:", String(err?.message ?? err));
+      return NextResponse.json({ ok: false, error: "appstate_unavailable" }, { status: 503 });
+    }
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }

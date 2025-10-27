@@ -10,16 +10,21 @@ export async function POST(req: Request) {
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ ok: false, error: "items required" }, { status: 400 });
     }
-    await (prisma as any).$transaction(
-      items.map(({ key, value }) =>
-        (prisma as any).appState.upsert({
-          where: { key },
-          update: { value },
-          create: { key, value },
-        })
-      )
-    );
-    return NextResponse.json({ ok: true, count: items.length });
+    try {
+      await (prisma as any).$transaction(
+        items.map(({ key, value }) =>
+          (prisma as any).appState.upsert({
+            where: { key },
+            update: { value },
+            create: { key, value },
+          })
+        )
+      );
+      return NextResponse.json({ ok: true, count: items.length });
+    } catch (err: any) {
+      console.error("AppState bulk-set failed:", String(err?.message ?? err));
+      return NextResponse.json({ ok: false, error: "appstate_unavailable" }, { status: 503 });
+    }
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }

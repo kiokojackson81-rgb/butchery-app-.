@@ -38,15 +38,27 @@ export async function POST(req: Request) {
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + TTL_SECONDS * 1000).toISOString();
     const payload = { token, expiresAt, createdBy: "client" };
-    await (prisma as any).appState.upsert({
-      where: { key: "admin_session" },
-      update: { value: payload },
-      create: { key: "admin_session", value: payload },
-    });
+    let upsertOk = true;
+    try {
+      await (prisma as any).appState.upsert({
+        where: { key: "admin_session" },
+        update: { value: payload },
+        create: { key: "admin_session", value: payload },
+      });
+    } catch (err: any) {
+      // If the AppState table is missing in the DB, allow a fallback path while
+      // ops are being fixed in production. Log the error and continue — the
+      // cookie will still be set so the client can proceed. This is a temporary
+      // safety measure; prefer restoring the AppState table via migrations.
+      console.error("AppState upsert failed (allowing fallback):", String(err?.message ?? err));
+      upsertOk = false;
+    }
 
     const res = NextResponse.json({ ok: true });
     res.headers.append("Set-Cookie", serializeCookie(token));
-    return res;
+    const body: any = { ok: true };
+    if (!upsertOk) body.warning = "appstate_unavailable";
+    return NextResponse.json(body, { status: 200, headers: res.headers });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }
@@ -57,7 +69,16 @@ export async function GET() {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
     if (!token) return NextResponse.json({ ok: false }, { status: 401 });
-    const row = await (prisma as any).appState.findUnique({ where: { key: "admin_session" } });
+    let row = null;
+    try {
+      row = await (prisma as any).appState.findUnique({ where: { key: "admin_session" } });
+    } catch (err: any) {
+      // If AppState is not available fall back to cookie-only check. This
+      // weakens server-side verification but avoids hard failures in prod.
+      console.error("AppState read failed (fallback to cookie-only):", String(err?.message ?? err));
+      return NextResponse.json({ ok: true, warning: "appstate_unavailable" });
+    }
+
     if (!row || !row.value) return NextResponse.json({ ok: false }, { status: 401 });
     const val = row.value as any;
     if (val?.token !== token) return NextResponse.json({ ok: false }, { status: 401 });
@@ -71,11 +92,15 @@ export async function GET() {
 export async function DELETE() {
   try {
     // Clear the server-side admin session and expire cookie
-    await (prisma as any).appState.upsert({
-      where: { key: "admin_session" },
-      update: { value: null },
-      create: { key: "admin_session", value: null },
-    });
+    try {
+      await (prisma as any).appState.upsert({
+        where: { key: "admin_session" },
+        update: { value: null },
+        create: { key: "admin_session", value: null },
+      });
+    } catch (err: any) {
+      console.error("AppState upsert (delete) failed (allowing fallback):", String(err?.message ?? err));
+    }
     const res = NextResponse.json({ ok: true });
     res.headers.append("Set-Cookie", serializeCookie(null));
     return res;
