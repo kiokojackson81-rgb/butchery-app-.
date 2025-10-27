@@ -52,11 +52,38 @@ export default function QuickStkDeposit({
     merchant?: string;
     checkout?: string;
   } | null>(null);
+  const [resolving, setResolving] = React.useState<boolean>(false);
+  const [resolved, setResolved] = React.useState<null | { outletUsed: string; businessShortCode: string; fallback?: boolean; storeNumber?: string; headOfficeNumber?: string }>(null);
 
   React.useEffect(() => {
     // Keep defaultPhone in sync if parent changes
     if (defaultPhone) setPhone(defaultPhone);
   }, [defaultPhone]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    async function resolveTill() {
+      setResolving(true);
+      setResolved(null);
+      try {
+        const q = new URLSearchParams({ outletCode });
+        const r = await fetch(`/api/pay/stk/resolve?${q.toString()}`);
+        const j = await r.json();
+        if (!mounted) return;
+        if (j?.ok) {
+          setResolved({ outletUsed: j.outletUsed, businessShortCode: j.businessShortCode, fallback: j.fallback, storeNumber: j.storeNumber, headOfficeNumber: j.headOfficeNumber });
+        } else {
+          setResolved(null);
+        }
+      } catch (e) {
+        setResolved(null);
+      } finally {
+        if (mounted) setResolving(false);
+      }
+    }
+    if (outletCode) resolveTill();
+    return () => { mounted = false; };
+  }, [outletCode]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -128,6 +155,15 @@ export default function QuickStkDeposit({
       </div>
 
       <form onSubmit={handleSubmit} className="grid gap-3 md:grid-cols-2">
+        <div className="md:col-span-2 mb-2">
+          {resolving ? (
+            <div className="text-xs text-zinc-400">Resolving till...</div>
+          ) : resolved ? (
+            <div className="text-xs text-zinc-300">Using till: <span className="font-medium">{resolved.outletUsed}</span> (Shortcode: {resolved.businessShortCode}){resolved.fallback ? ' — fallback to GENERAL' : ''}</div>
+          ) : (
+            <div className="text-xs text-zinc-500">Till info unavailable</div>
+          )}
+        </div>
         <div className="grid gap-1 md:col-span-2">
           <label className="text-sm text-zinc-300">Phone</label>
           <div className="flex items-center gap-2">
