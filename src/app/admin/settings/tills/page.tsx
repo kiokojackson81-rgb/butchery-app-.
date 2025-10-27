@@ -10,9 +10,23 @@ export default async function Page() {
     DARAJA_PASSKEY_HO: !!process.env.DARAJA_PASSKEY_HO,
     PUBLIC_BASE_URL: !!process.env.PUBLIC_BASE_URL,
   };
+
+  // UX: detect if the default swap mapping has been applied so we can show a banner
+  const EXPECTED_BARAKA_TILL = '3574871';
+  const EXPECTED_GENERAL_TILL = '3574947';
+  const barakaRow = tills.find((t: any) => t.outletCode === 'BARAKA_C');
+  const generalRow = tills.find((t: any) => t.outletCode === 'GENERAL');
+  const defaultMappingApplied = Boolean(
+    barakaRow && generalRow && barakaRow.tillNumber === EXPECTED_BARAKA_TILL && generalRow.tillNumber === EXPECTED_GENERAL_TILL
+  );
   return (
     <div className="p-6 grid grid-cols-3 gap-6">
       <div className="col-span-2">
+        {defaultMappingApplied ? (
+          <div className="mb-4 p-3 rounded border-l-4 border-green-400 bg-green-900 text-white">
+            Default till mapping detected: Baraka C → {EXPECTED_BARAKA_TILL}, General → {EXPECTED_GENERAL_TILL}
+          </div>
+        ) : null}
         <h1 className="text-2xl font-bold">Tills</h1>
         <p className="mt-2">Manage till mappings for Daraja/STK.</p>
 
@@ -34,9 +48,19 @@ export default async function Page() {
             <tr><th>Label</th><th>Outlet</th><th>Till</th><th>Store</th><th>HO</th><th>Active</th></tr>
           </thead>
           <tbody>
-            {tills.map((t:any) => (
-              <tr key={t.id} className="border-t"><td>{t.label}</td><td>{t.outletCode}</td><td>{t.tillNumber}</td><td>{t.storeNumber}</td><td>{t.headOfficeNumber}</td><td>{t.isActive ? '✅' : '❌'}</td></tr>
-            ))}
+            {tills.map((t:any) => {
+              const highlight = t.outletCode === 'BARAKA_C' || t.outletCode === 'GENERAL';
+              return (
+                <tr key={t.id} className={`border-t ${highlight ? 'bg-yellow-800 text-white' : ''}`}>
+                  <td>{t.label}</td>
+                  <td>{t.outletCode}</td>
+                  <td>{t.tillNumber}</td>
+                  <td>{t.storeNumber}</td>
+                  <td>{t.headOfficeNumber}</td>
+                  <td>{t.isActive ? '✅' : '❌'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
