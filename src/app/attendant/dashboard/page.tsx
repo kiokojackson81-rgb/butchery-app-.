@@ -7,6 +7,7 @@ import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON } from "@/utils/safeStorage";
 import { promptSync, confirmSync } from '@/lib/ui';
 import { notifyToast, registerAdminToast } from '@/lib/toast';
+import QuickStkDeposit from '@/components/QuickStkDeposit';
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -143,6 +144,8 @@ export default function AttendantDashboardPage() {
   const [tillTotal, setTillTotal] = useState(0);
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
+  const [attendantPhone, setAttendantPhone] = useState<string | null>(null);
+  const [outletCodeState, setOutletCodeState] = useState<string | null>(null);
   // Track whether there's any saved activity for today (closings, expenses, deposits, tillcount)
   const [savedClosingTodayCount, setSavedClosingTodayCount] = useState<number>(0);
 
@@ -162,9 +165,13 @@ export default function AttendantDashboardPage() {
           if (nm) setAttendantName(nm);
           const cd = (j?.attendant?.code || "").toString();
           if (cd) setAttendantCode(cd);
+          // Try to capture attendant phone (E.164) if server returned it
+          const phone = (j?.attendant?.phoneE164 || j?.attendant?.phone || j?.phoneE164 || j?.phone || "").toString();
+          if (phone) setAttendantPhone(phone);
           const outletCode = (j?.outletCode || "").toString();
           if (outletCode) {
             try {
+              setOutletCodeState(outletCode || null);
               const r = await fetch(`/api/outlets/${encodeURIComponent(outletCode)}`, { cache: "no-store" });
               if (r.ok) {
                 const data = await r.json();
@@ -1453,6 +1460,31 @@ export default function AttendantDashboardPage() {
       {/* ===== DEPOSITS ===== */}
       {tab === "deposits" && (
         <section className="rounded-2xl border p-4">
+          {/* Quick STK Deposit card (M-Pesa Express) */}
+          <QuickStkDeposit
+            outletCode={outletCodeState ?? (typeof outlet === 'string' ? outlet : 'GENERAL')}
+            defaultPhone={attendantPhone ?? undefined}
+            attendantName={attendantName ?? undefined}
+            onSuccess={async () => {
+              if (!outlet) return;
+              // Show a small toast while we refresh the dashboard data
+              try {
+                setToastMsg("Refreshing dashboard…");
+                // Refresh header totals (KPIs)
+                try { await refreshPeriodAndHeader(outlet); } catch {}
+                // Refresh deposits list for this date/outlet
+                try {
+                  const r = await getJSON<{ ok: boolean; rows: Array<{ code?: string; amount: number; note?: string; status?: string; createdAt?: string }> }>(`/api/deposits?date=${encodeURIComponent(dateStr)}&outlet=${encodeURIComponent(String(outlet))}`);
+                  setDepositsFromServer((r.rows || []) as any);
+                } catch {}
+                // Refresh till payments
+                try { await refreshTill(outlet); } catch {}
+              } finally {
+                // Clear the toast after a short delay so the user sees the message
+                setTimeout(() => setToastMsg(null), 800);
+              }
+            }}
+          />
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
             <button className="border rounded-xl px-3 py-1 text-xs" onClick={()=>setDeposits([{ id: id(), code: "", amount: "", note: "" }])}>Paste SMS</button>
