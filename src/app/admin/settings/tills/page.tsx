@@ -1,5 +1,6 @@
 "use server";
 import React from 'react';
+import ReassignPanel from './ReassignPanel';
 import { prisma } from '@/lib/prisma';
 
 export default async function Page() {
@@ -65,12 +66,14 @@ export default async function Page() {
         </table>
       </div>
 
-      <aside className="col-span-1 p-4 border rounded">
+      <aside className="col-span-1 p-4 border rounded space-y-4">
         <h2 className="font-semibold">Daraja Settings</h2>
         <ul className="mt-2">
           {Object.entries(hasKeys).map(([k,v]) => (<li key={k}>{k}: {v ? '✅' : '❌'}</li>))}
         </ul>
         <a href="https://developer.safaricom.co.ke" target="_blank" rel="noreferrer" className="mt-4 inline-block text-blue-600">Go Live Setup Guide</a>
+
+        <ReassignPanel />
       </aside>
     </div>
   );
