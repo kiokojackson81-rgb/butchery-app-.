@@ -21,8 +21,8 @@ function fail(error: string, code = 400){ return NextResponse.json({ ok: false, 
 export async function POST(req: Request) {
   try {
     const payload = await req.json().catch(() => ({}));
-    const parsed = parseStkCallback(payload);
-    const { resultCode, merchantRequestId, checkoutRequestId, amount, mpesaReceipt, phone } = parsed;
+  const parsed = parseStkCallback(payload);
+  const { resultCode, resultDesc, merchantRequestId, checkoutRequestId, amount, mpesaReceipt, phone } = parsed;
     logger.info({ action: 'stkCallback:received', merchantRequestId, checkoutRequestId, msisdn: phone, amount, resultCode, raw: payload });
 
     if (!WA_DARAJA_ENABLED) {
@@ -52,7 +52,8 @@ export async function POST(req: Request) {
     if (payment.status === 'SUCCESS') return ok({ ok: true });
 
     const newStatus = resultCode === 0 ? 'SUCCESS' : 'FAILED';
-  const update = await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: newStatus, mpesaReceipt: mpesaReceipt || payment.mpesaReceipt, rawPayload: payload } });
+    const failureNote = newStatus === 'FAILED' ? (resultDesc || '').slice(0, 256) : undefined;
+    const update = await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: newStatus, mpesaReceipt: mpesaReceipt || payment.mpesaReceipt, rawPayload: payload, note: failureNote ?? payment.note } });
 
     logger.info({ action: 'stkCallback:updated', id: update.id, status: newStatus, merchantRequestId, checkoutRequestId });
 

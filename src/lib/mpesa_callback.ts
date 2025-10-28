@@ -1,6 +1,7 @@
 export function parseStkCallback(payload: any) {
   const body = payload?.Body?.stkCallback || payload?.StkCallback || payload || {};
   const resultCode = Number(body?.ResultCode ?? body?.resultCode ?? -1);
+  const resultDesc: string | null = body?.ResultDesc || body?.resultDesc || null;
   const merchantRequestId = body?.MerchantRequestID || body?.merchantRequestId || null;
   const checkoutRequestId = body?.CheckoutRequestID || body?.checkoutRequestId || null;
 
@@ -18,5 +19,5 @@ export function parseStkCallback(payload: any) {
     if (name.includes('phonenumber') || name.includes('phone')) phone = String(val);
   }
 
-  return { resultCode, merchantRequestId, checkoutRequestId, amount, mpesaReceipt, phone, raw: payload };
+  return { resultCode, resultDesc, merchantRequestId, checkoutRequestId, amount, mpesaReceipt, phone, raw: payload };
 }
