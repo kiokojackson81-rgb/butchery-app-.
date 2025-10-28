@@ -481,7 +481,8 @@ export default function AttendantDashboardPage() {
       try { if (!cancelled) await refreshTill(outlet as string); } catch {}
     }
     tick();
-  const id = setInterval(tick, 5000);
+    // Faster refresh so payments appear promptly after C2B/STK confirmations
+    const id = setInterval(tick, 3000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet]);
 
@@ -492,12 +493,13 @@ export default function AttendantDashboardPage() {
     async function tick() {
       try {
         if (cancelled) return;
-  const dateArg = summaryMode === 'previous' ? dateStr : undefined;
-  await refreshPeriodAndHeader(outlet as string, dateArg, summaryMode === 'previous');
+        const dateArg = summaryMode === 'previous' ? dateStr : undefined;
+        await refreshPeriodAndHeader(outlet as string, dateArg, summaryMode === 'previous');
       } catch {}
     }
     tick();
-  const id = setInterval(tick, 5000);
+    // Refresh every 3s so Till Sales (Gross) reflects new payments quickly
+    const id = setInterval(tick, 3000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tab, outlet, summaryMode, dateStr]);
 
@@ -510,12 +512,12 @@ export default function AttendantDashboardPage() {
         try {
           if (cancelled) return;
           const dateArg = summaryMode === 'previous' ? dateStr : undefined;
-          // Avoid duplicating the tighter 10s poll when Summary tab is open
+          // Avoid duplicating the tighter 3s poll when Summary tab is open
           if (tab !== 'summary') {
             await refreshPeriodAndHeader(outlet as string, dateArg, summaryMode === 'previous');
           }
         } catch {}
-  }, 12000);
+      }, 6000);
       return id;
     }
     const timer = start();
