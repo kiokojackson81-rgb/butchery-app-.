@@ -1120,7 +1120,8 @@ export default function AttendantDashboardPage() {
 
   async function refreshTill(outletName: string) {
     try {
-      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`/api/payments/till?outlet=${encodeURIComponent(outletName)}`);
+      const periodQs = summaryMode === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` : '';
+      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`/api/payments/till?outlet=${encodeURIComponent(outletName)}${periodQs}`);
       setTillRows(res.rows || []);
       setTillTotal(res.total || 0);
     } catch {
@@ -1620,7 +1621,19 @@ export default function AttendantDashboardPage() {
       {tab === "till" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold">Till Payments (Active Period)</h3>
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold">Till Payments ({summaryMode === 'previous' ? 'Previous' : 'Active'} Period)</h3>
+              <div className="inline-flex items-center gap-1 text-xs">
+                <button
+                  className={`px-2 py-1 rounded-lg border ${summaryMode==='current' ? 'bg-black text-white' : ''}`}
+                  onClick={async()=>{ if(!outlet) return; setSummaryMode('current'); await refreshTill(outlet); }}
+                >Current</button>
+                <button
+                  className={`px-2 py-1 rounded-lg border ${summaryMode==='previous' ? 'bg-black text-white' : ''}`}
+                  onClick={async()=>{ if(!outlet) return; setSummaryMode('previous'); await refreshTill(outlet); }}
+                >Previous</button>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               {Math.abs(computed.varianceKsh) > 0.5 && (
                 <button
@@ -1643,7 +1656,7 @@ export default function AttendantDashboardPage() {
             </div>
           </div>
           <div className="text-sm text-gray-600 mb-2">
-            Total Till Payments: <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
+            Total Till Payments ({summaryMode === 'previous' ? dateStr : 'current period'}): <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
           </div>
           <div className="table-wrap">
             <table className="w-full text-xs">
