@@ -155,9 +155,10 @@ export default function AttendantDashboardPage() {
           if (!Number.isFinite(delta)) return;
           // Update Till Sales (Gross) immediately
           setKpi((prev) => {
-            const nextGross = Math.max(Number(gross), Number(prev.tillSalesGross || 0) + delta);
-            // Reduce Amount to Deposit by the delta immediately (clamped at 0)
-            const nextAmtToDeposit = Math.max(0, Number(prev.amountToDeposit || 0) - Math.max(0, delta));
+            const baseGross = Number(prev.tillSalesGross || 0);
+            const nextGross = Number.isFinite(gross) ? gross : (baseGross + delta);
+            // Reduce Amount to Deposit by the delta immediately; allow negative
+            const nextAmtToDeposit = Number(prev.amountToDeposit || 0) - delta;
             return { ...prev, tillSalesGross: nextGross, todayTillSales: nextGross as any, amountToDeposit: nextAmtToDeposit } as any;
           });
         } catch {}

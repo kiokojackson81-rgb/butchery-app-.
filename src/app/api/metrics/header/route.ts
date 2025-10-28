@@ -199,8 +199,9 @@ export async function GET(req: Request) {
         openingValue: openingValueGross,
         // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
         carryoverPrev: outstandingPrev,
-        // As till payments come in, they reduce the cash to deposit even before any other activity
-        amountToDeposit: Math.max(0, Number(outstandingPrev || 0) - Number(tillSalesGrossCurrent || 0)),
+        // As till payments come in, they reduce the cash to deposit even before any other activity.
+        // Allow negative (excess sales, commissions, or payouts).
+        amountToDeposit: Number(outstandingPrev || 0) - Number(tillSalesGrossCurrent || 0),
       },
     });
   }
@@ -231,7 +232,8 @@ export async function GET(req: Request) {
 
   // Inclusive amount to deposit: carryover + today's to-deposit (todayTotalSales - verifiedDeposits)
   // Reduce deposit requirement by gross till takings (cash needed is lower when sales go to till)
-  const amountToDeposit = Math.max(0, Number(outstandingPrev || 0) + Number(todayTotalSales || 0) - Number(verifiedDeposits || 0) - Number(tillSalesGross || 0));
+  // Allow negative balances (e.g., over-deposited/commission scenarios)
+  const amountToDeposit = Number(outstandingPrev || 0) + Number(todayTotalSales || 0) - Number(verifiedDeposits || 0) - Number(tillSalesGross || 0);
 
   return NextResponse.json({
     ok: true,
