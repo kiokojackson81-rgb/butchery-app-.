@@ -12,9 +12,9 @@ export default async function Page() {
   };
 
   // UX: detect if the default swap mapping has been applied so we can show a banner
-  const EXPECTED_BARAKA_TILL = '3574871';
-  const EXPECTED_GENERAL_TILL = '3574947';
-  const barakaRow = tills.find((t: any) => t.outletCode === 'BARAKA_C');
+  const EXPECTED_BARAKA_TILL = '3574947';
+  const EXPECTED_GENERAL_TILL = '3574873';
+  const barakaRow = tills.find((t: any) => t.outletCode === 'BARAKA_B');
   const generalRow = tills.find((t: any) => t.outletCode === 'GENERAL');
   const defaultMappingApplied = Boolean(
     barakaRow && generalRow && barakaRow.tillNumber === EXPECTED_BARAKA_TILL && generalRow.tillNumber === EXPECTED_GENERAL_TILL
@@ -49,7 +49,7 @@ export default async function Page() {
           </thead>
           <tbody>
             {tills.map((t:any) => {
-              const highlight = t.outletCode === 'BARAKA_C' || t.outletCode === 'GENERAL';
+              const highlight = t.outletCode === 'BARAKA_B' || t.outletCode === 'GENERAL';
               return (
                 <tr key={t.id} className={`border-t ${highlight ? 'bg-yellow-800 text-white' : ''}`}>
                   <td>{t.label}</td>
