@@ -37,9 +37,9 @@ const DEV_ADMIN_PASSWORD = "Ads0k015@#";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const email = String((body?.email ?? "")).trim().toLowerCase();
-    const password = String(body?.password ?? "");
+  const payload = await req.json().catch(() => ({}));
+  const email = String((payload?.email ?? "")).trim().toLowerCase();
+  const password = String(payload?.password ?? "");
 
     const expectedEmail = (process.env.ADMIN_EMAIL || DEV_ADMIN_EMAIL).trim().toLowerCase();
     const expectedPass = process.env.ADMIN_PASSWORD || DEV_ADMIN_PASSWORD;
@@ -55,14 +55,14 @@ export async function POST(req: Request) {
     // credentials are valid — create a server-side admin session (cookie + AppState)
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + TTL_SECONDS * 1000).toISOString();
-    const payload = { token, expiresAt, createdBy: "login" };
+  const sessionPayload = { token, expiresAt, createdBy: "login" };
 
     let upsertOk = true;
     try {
       await (prisma as any).appState.upsert({
         where: { key: "admin_session" },
-        update: { value: payload },
-        create: { key: "admin_session", value: payload },
+  update: { value: sessionPayload },
+  create: { key: "admin_session", value: sessionPayload },
       });
     } catch (err: any) {
       console.error("AppState upsert failed during login (fallback):", String(err?.message ?? err));
