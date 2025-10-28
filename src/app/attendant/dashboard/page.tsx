@@ -1121,7 +1121,13 @@ export default function AttendantDashboardPage() {
   async function refreshTill(outletName: string) {
     try {
       const periodQs = summaryMode === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` : '';
-      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`/api/payments/till?outlet=${encodeURIComponent(outletName)}${periodQs}`);
+      // New: support View by Till
+      const viewBy = (window as any).__viewByTill__ ?? (localStorage.getItem('till_view_by') || 'outlet');
+      const tillCode = localStorage.getItem('till_view_code') || '';
+      const base = viewBy === 'till' && tillCode
+        ? `/api/payments/till?by=till&code=${encodeURIComponent(tillCode)}`
+        : `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
+      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}`);
       setTillRows(res.rows || []);
       setTillTotal(res.total || 0);
     } catch {
@@ -1623,6 +1629,25 @@ export default function AttendantDashboardPage() {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
               <h3 className="font-semibold">Till Payments ({summaryMode === 'previous' ? 'Previous' : 'Active'} Period)</h3>
+              {/* View By controls */}
+              <div className="inline-flex items-center gap-2 text-xs">
+                <label className="text-gray-600">View by</label>
+                <select
+                  className="border rounded-lg px-2 py-1"
+                  defaultValue={(typeof window !== 'undefined' ? (localStorage.getItem('till_view_by') || 'outlet') : 'outlet')}
+                  onChange={async (e)=>{
+                    try { localStorage.setItem('till_view_by', e.target.value); (window as any).__viewByTill__ = e.target.value; } catch {}
+                    if (outlet) await refreshTill(outlet);
+                  }}
+                >
+                  <option value="outlet">Outlet</option>
+                  <option value="till">Till</option>
+                </select>
+                {/* Till dropdown appears only in Till mode */}
+                {typeof window !== 'undefined' && (localStorage.getItem('till_view_by') || 'outlet') === 'till' && (
+                  <TillPicker onChange={async (code)=>{ try { localStorage.setItem('till_view_code', code); } catch {}; if (outlet) await refreshTill(outlet); }} />
+                )}
+              </div>
               <div className="inline-flex items-center gap-1 text-xs">
                 <button
                   className={`px-2 py-1 rounded-lg border ${summaryMode==='current' ? 'bg-black text-white' : ''}`}
@@ -1857,5 +1882,34 @@ function StatusPill({ status }: { status: "VALID"|"PENDING"|"INVALID" }) {
     <span className={`inline-flex items-center rounded-xl border px-2 py-1 ${m[status]} text-xs`}>
       {status === "VALID" ? "Valid" : status === "PENDING" ? "Pending" : "Invalid"}
     </span>
+  );
+}
+
+/** Lightweight Till picker that loads active tills and returns the tillNumber */
+function TillPicker({ onChange }: { onChange: (code: string) => void }) {
+  const [tills, setTills] = React.useState<Array<{ label: string; tillNumber: string; outletCode: string }>>([]);
+  const [value, setValue] = React.useState<string>(typeof window !== 'undefined' ? (localStorage.getItem('till_view_code') || '') : '');
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/tills/list', { cache: 'no-store' });
+        const j = await res.json();
+        const rows = Array.isArray(j.rows) ? j.rows : [];
+        setTills(rows.map((r: any) => ({ label: r.label || r.tillNumber, tillNumber: r.tillNumber, outletCode: r.outletCode })));
+      } catch {}
+    })();
+  }, []);
+  return (
+    <select
+      className="border rounded-lg px-2 py-1"
+      value={value}
+      onChange={(e)=>{ setValue(e.target.value); onChange(e.target.value); }}
+      title="Pick a till"
+    >
+      <option value="">— pick till —</option>
+      {tills.map(t => (
+        <option key={t.tillNumber} value={t.tillNumber}>{t.label} — {t.tillNumber}</option>
+      ))}
+    </select>
   );
 }
