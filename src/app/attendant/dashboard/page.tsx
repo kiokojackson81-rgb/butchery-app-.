@@ -1751,13 +1751,24 @@ export default function AttendantDashboardPage() {
 
           {/* ✅ Highlight red ONLY when > 0 */}
           <div className="mt-4">
-            <CardKPI
-              label="Amount to Deposit (Ksh)"
-              value={`Ksh ${fmt(kpi.amountToDeposit)}`}
-              subtitle={refreshingKpi ? 'Refreshing…' : undefined}
-              highlightDanger={kpi.amountToDeposit > 0}
-              tooltip={"Carryover (Prev) + Today Total Sales − Verified Deposits"}
-            />
+            {(() => {
+              const amt = Number(kpi.amountToDeposit || 0);
+              const isExcess = amt < 0;
+              const label = isExcess ? "Excess (Ksh)" : "Amount to Deposit (Ksh)";
+              const value = `Ksh ${fmt(Math.abs(amt))}`;
+              const tooltip = isExcess
+                ? "Excess indicates a surplus (e.g., over-deposit or commissions). We show the absolute value."
+                : "Carryover (Prev) + Today Total Sales − Verified Deposits − Till Sales (Gross)";
+              return (
+                <CardKPI
+                  label={label}
+                  value={value}
+                  subtitle={refreshingKpi ? 'Refreshing…' : undefined}
+                  highlightDanger={amt > 0}
+                  tooltip={tooltip}
+                />
+              );
+            })()}
           </div>
         </section>
       )}
