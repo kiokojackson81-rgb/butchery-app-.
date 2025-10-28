@@ -20,7 +20,17 @@ export async function POST(req: Request) {
     let headOfficeNumber = "";
     if (short) {
       try {
-        const t = await (prisma as any).till.findUnique({ where: { tillNumber: short } });
+        // Map by any of the configured numbers (till, store, or head office) and prefer active tills
+        const t = await (prisma as any).till.findFirst({
+          where: {
+            isActive: true,
+            OR: [
+              { tillNumber: short },
+              { storeNumber: short },
+              { headOfficeNumber: short },
+            ],
+          },
+        });
         if (t) {
           if (t.outletCode) outletCode = t.outletCode;
           storeNumber = t.storeNumber || "";
