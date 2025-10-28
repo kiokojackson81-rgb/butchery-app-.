@@ -14,12 +14,18 @@ export async function POST(req: Request) {
     const receipt = String(body.TransID || body.MerchantRequestID || body.MpesaReceiptNumber || body.Receipt || "");
     const accountReference = String(body.BillRefNumber || body.AccountReference || body.billRefNumber || body.BillRef || "");
 
-    // Try to map the short code to a seeded Till record to pick an outletCode
+    // Try to map the short code to a seeded Till record to pick an outletCode and related numbers
     let outletCode = (process.env.DEFAULT_OUTLET_CODE || "GENERAL") as any;
+    let storeNumber = "";
+    let headOfficeNumber = "";
     if (short) {
       try {
         const t = await (prisma as any).till.findUnique({ where: { tillNumber: short } });
-        if (t && t.outletCode) outletCode = t.outletCode;
+        if (t) {
+          if (t.outletCode) outletCode = t.outletCode;
+          storeNumber = t.storeNumber || "";
+          headOfficeNumber = t.headOfficeNumber || "";
+        }
       } catch (e) {
         console.warn("[daraja confirm] till lookup failed", String(e));
       }
@@ -35,6 +41,10 @@ export async function POST(req: Request) {
           status: "SUCCESS",
           mpesaReceipt: receipt || undefined,
           businessShortCode: short || "",
+          // Required columns in schema for compatibility with STK rows
+          partyB: short || "",
+          storeNumber: storeNumber || short || "",
+          headOfficeNumber: headOfficeNumber || short || "",
           accountReference: accountReference || undefined,
           description: body.Description || body.Remarks || undefined,
           rawPayload: body || {},
