@@ -31,28 +31,72 @@ export async function POST(req: Request) {
       }
     }
 
-    // Create a Payment row (rawPayload kept for traceability)
-    try {
-      await (prisma as any).payment.create({
-        data: {
-          outletCode,
-          amount: amount,
-          msisdn: msisdn || undefined,
-          status: "SUCCESS",
-          mpesaReceipt: receipt || undefined,
-          businessShortCode: short || "",
-          // Required columns in schema for compatibility with STK rows
-          partyB: short || "",
-          storeNumber: storeNumber || short || "",
-          headOfficeNumber: headOfficeNumber || short || "",
-          accountReference: accountReference || undefined,
-          description: body.Description || body.Remarks || undefined,
-          rawPayload: body || {},
-        },
-      });
-      console.log("C2B saved payment:", { short, amount, msisdn, receipt, outletCode });
-    } catch (e) {
-      console.error("C2B saving payment failed:", String(e));
+    // Basic payload validation: require a short code and positive amount to persist
+    if (!short || !amount || amount <= 0) {
+      console.warn("[daraja confirm] skipped persist due to invalid payload", { short, amount, receipt });
+    } else {
+      // Idempotency by mpesaReceipt when provided: update existing else create
+      try {
+        if (receipt) {
+          const existing = await (prisma as any).payment.findFirst({ where: { mpesaReceipt: receipt } });
+          if (existing) {
+            await (prisma as any).payment.update({
+              where: { id: existing.id },
+              data: {
+                outletCode,
+                amount,
+                msisdn: msisdn || existing.msisdn || undefined,
+                status: "SUCCESS",
+                businessShortCode: short || existing.businessShortCode || "",
+                partyB: short || existing.partyB || "",
+                storeNumber: storeNumber || existing.storeNumber || short || "",
+                headOfficeNumber: headOfficeNumber || existing.headOfficeNumber || short || "",
+                accountReference: accountReference || existing.accountReference || undefined,
+                description: body.Description || body.Remarks || existing.description || undefined,
+                rawPayload: body || existing.rawPayload || {},
+              },
+            });
+            console.log("C2B updated existing payment by receipt", { receipt, short, amount });
+          } else {
+            await (prisma as any).payment.create({
+              data: {
+                outletCode,
+                amount,
+                msisdn: msisdn || undefined,
+                status: "SUCCESS",
+                mpesaReceipt: receipt,
+                businessShortCode: short || "",
+                partyB: short || "",
+                storeNumber: storeNumber || short || "",
+                headOfficeNumber: headOfficeNumber || short || "",
+                accountReference: accountReference || undefined,
+                description: body.Description || body.Remarks || undefined,
+                rawPayload: body || {},
+              },
+            });
+            console.log("C2B saved payment (new)", { short, amount, msisdn, receipt, outletCode });
+          }
+        } else {
+          await (prisma as any).payment.create({
+            data: {
+              outletCode,
+              amount,
+              msisdn: msisdn || undefined,
+              status: "SUCCESS",
+              businessShortCode: short || "",
+              partyB: short || "",
+              storeNumber: storeNumber || short || "",
+              headOfficeNumber: headOfficeNumber || short || "",
+              accountReference: accountReference || undefined,
+              description: body.Description || body.Remarks || undefined,
+              rawPayload: body || {},
+            },
+          });
+          console.log("C2B saved payment (no receipt)", { short, amount, msisdn, outletCode });
+        }
+      } catch (e) {
+        console.error("C2B saving payment failed:", String(e));
+      }
     }
   } catch (e) {
     console.error("C2B processing error:", String(e));
