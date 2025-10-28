@@ -55,11 +55,13 @@ export async function POST(req: Request) {
     const storeShortcode = till.storeNumber;
     const headOfficeShortcode = till.headOfficeNumber;
 
-    // If a per-till passkey env exists, sign with store; else sign with HO
+    // If a per-till passkey env exists, we treat this as a BuyGoods STK (LNMO) and sign with the store till.
+    // Otherwise, fall back to HO PayBill with PayBill transaction type and route funds to HO.
     const passkeyKey = `DARAJA_PASSKEY_${storeShortcode}`;
     const perTillPasskey = (process.env as any)[passkeyKey];
-    const useShortcode = perTillPasskey ? storeShortcode : headOfficeShortcode;
-    const partyB = storeShortcode; // funds go to store till
+    const isBuyGoods = !!perTillPasskey; // only safe when we can sign with the store till passkey
+    const useShortcode = isBuyGoods ? storeShortcode : headOfficeShortcode;
+    const partyB = isBuyGoods ? storeShortcode : useShortcode; // BG: store till, HO fallback: HO
 
     // Create PENDING payment row
     const payment = await (localPrisma as any).payment.create({ data: {
@@ -86,7 +88,7 @@ export async function POST(req: Request) {
     // Initiate STK (Daraja errors are handled separately so we can update DB and log stack)
     logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode });
     try {
-      const stkRes = await DarajaClient.stkPush({ businessShortCode: useShortcode, amount: Number(amount), phoneNumber: phone, accountReference: body.accountRef, transactionDesc: body.description, partyB });
+  const stkRes = await DarajaClient.stkPush({ businessShortCode: useShortcode, amount: Number(amount), phoneNumber: phone, accountReference: body.accountRef, transactionDesc: body.description, partyB, passkey: perTillPasskey, transactionType: isBuyGoods ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline' });
       logger.info({ action: 'stkPush:response', outletCode: finalOutlet, msisdn: phone, res: stkRes.res });
 
       // Persist merchant and checkout ids if present

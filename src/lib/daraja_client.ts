@@ -85,18 +85,18 @@ export async function darajaPost<T = any>(path: string, token: string, body: any
 
 export type StkPushResult = { MerchantRequestID?: string; CheckoutRequestID?: string; ResponseCode?: string | number; ResponseDescription?: string };
 
-export async function stkPush(opts: { businessShortCode: string; amount: number; phoneNumber: string; accountReference?: string; transactionDesc?: string; partyB?: string }) {
+export async function stkPush(opts: { businessShortCode: string; amount: number; phoneNumber: string; accountReference?: string; transactionDesc?: string; partyB?: string; passkey?: string; transactionType?: 'CustomerPayBillOnline' | 'CustomerBuyGoodsOnline' }) {
   if (opts.amount <= 0) throw new Error('amount must be > 0');
   const token = await fetchToken();
-  const { password, timestamp } = makePassword(opts.businessShortCode);
+  const { password, timestamp } = makePassword(opts.businessShortCode, opts.passkey);
   const body = {
     BusinessShortCode: opts.businessShortCode,
     Password: password,
     Timestamp: timestamp,
-    TransactionType: 'CustomerPayBillOnline',
+    TransactionType: opts.transactionType || 'CustomerPayBillOnline',
     Amount: opts.amount,
     PartyA: opts.phoneNumber,
-  PartyB: opts.partyB || opts.businessShortCode,
+    PartyB: opts.partyB || opts.businessShortCode,
     PhoneNumber: opts.phoneNumber,
     CallBackURL: process.env.PUBLIC_BASE_URL ? `${process.env.PUBLIC_BASE_URL.replace(/\/$/, '')}/api/mpesa/stk-callback` : undefined,
     AccountReference: opts.accountReference || 'BUTCHERY',
@@ -112,4 +112,25 @@ export const DarajaClient = {
   makePassword,
   darajaPost,
   stkPush,
+};
+
+// STK Push Query
+export type StkQueryResult = { ResponseCode?: string | number; ResponseDescription?: string; ResultCode?: number; ResultDesc?: string; MerchantRequestID?: string; CheckoutRequestID?: string };
+
+export async function stkQuery(opts: { businessShortCode: string; checkoutRequestId: string; passkey?: string }) {
+  if (!opts.businessShortCode || !opts.checkoutRequestId) throw new Error('businessShortCode and checkoutRequestId required');
+  const token = await fetchToken();
+  const { password, timestamp } = makePassword(opts.businessShortCode, opts.passkey);
+  const body = {
+    BusinessShortCode: opts.businessShortCode,
+    Password: password,
+    Timestamp: timestamp,
+    CheckoutRequestID: opts.checkoutRequestId,
+  };
+  const res = await darajaPost<StkQueryResult>('/mpesa/stkpushquery/v1/query', token, body);
+  return { token, res } as const;
+}
+
+export const DarajaQuery = {
+  stkQuery,
 };

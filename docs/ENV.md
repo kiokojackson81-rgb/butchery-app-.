@@ -19,6 +19,26 @@ Set these in Vercel → Settings → Environment Variables:
 - Database
   - DATABASE_URL (Postgres)
 
+- Safaricom Daraja (STK/C2B)
+  - DARAJA_BASE_URL
+    - Sandbox: https://sandbox.safaricom.co.ke
+    - Live: https://api.safaricom.co.ke
+  - DARAJA_CONSUMER_KEY
+  - DARAJA_CONSUMER_SECRET
+  - DARAJA_PASSKEY_HO
+    - Set this to the Head Office Business Short Code passkey. For example, for HO Short Code 3574813, paste the provided passkey here (do not commit secrets to git).
+  - PUBLIC_BASE_URL
+    - Your public https origin; used for Daraja callbacks (e.g., https://your-app.example.com)
+  - WA_DARAJA_ENABLED=true
+  - DARAJA_LIVE_MODE=true|false (optional flag; base URL is read from DARAJA_BASE_URL)
+
+Verification
+- Hit GET /api/pay/status to verify configuration without exposing secrets. It reports:
+  - flags (WA_DARAJA_ENABLED, DARAJA_LIVE_MODE)
+  - baseUrl (from env)
+  - publicBaseUrlSet (boolean)
+  - passkeys presence (have HO passkey and any per-till passkeys)
+
 Notes
 - GPT/OOC routing has been removed. All flows are legacy-only and server-side.
 - This repo uses WHATSAPP_* names in code (see `src/lib/wa.ts`, webhook route). If your project uses WA_* names, set both or adjust env mapping.
