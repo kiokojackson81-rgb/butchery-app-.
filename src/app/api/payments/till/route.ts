@@ -12,13 +12,39 @@ export async function GET(req: Request) {
     const sess = await getSession();
     if (!sess) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-    // Prefer explicit session.outletCode; fallback to attendant's outletRef.code
-    const outlet = (sess as any).outletCode || (sess as any).attendant?.outletRef?.code;
-    if (!outlet) return NextResponse.json({ ok: false, error: "no_outlet_bound" }, { status: 400 });
+    // Prefer explicit session.outletCode; fallback to attendant's outletRef.code/name (varies by legacy data)
+    const rawOutlet = (sess as any).outletCode || (sess as any).attendant?.outletRef?.code || (sess as any).attendant?.outletRef?.name;
+    if (!rawOutlet) return NextResponse.json({ ok: false, error: "no_outlet_bound" }, { status: 400 });
+
+    // Normalize to Prisma enum OutletCode expected by Payment/Till
+    const allowed = ["BRIGHT", "BARAKA_A", "BARAKA_B", "BARAKA_C", "GENERAL"] as const;
+    const toEnum = (s: string | null | undefined) => {
+      if (!s) return null;
+      const c = String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+      return (allowed as readonly string[]).includes(c) ? (c as typeof allowed[number]) : null;
+    };
+    // Try direct normalization; if that fails and we have an Outlet.name-like value (e.g., "Baraka A"), normalize again
+    let outletEnum = toEnum(rawOutlet);
+    if (!outletEnum) {
+      // Some sessions store lowercase codes like "bright"; also handle common aliases
+      const aliases: Record<string, string> = {
+        BRIGHT: "BRIGHT",
+        BARAKA: "BARAKA_A", // fallback to A when unspecified
+        BARAKA_A: "BARAKA_A",
+        BARAKA_B: "BARAKA_B",
+        BARAKA_C: "BARAKA_C",
+        GENERAL: "GENERAL",
+      };
+      const c = String(rawOutlet).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+      if (aliases[c]) outletEnum = aliases[c] as any;
+    }
+    if (!outletEnum) {
+      return NextResponse.json({ ok: false, error: `unknown_outlet_code: ${String(rawOutlet)}` }, { status: 400 });
+    }
 
     const url = new URL(req.url);
     const take = Math.min(Number(url.searchParams.get("take") || 50), 100);
-    const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous
+  const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous
     const dateParam = url.searchParams.get("date") || undefined; // YYYY-MM-DD (optional when period=previous)
 
     // Determine time window by trading period
@@ -27,7 +53,9 @@ export async function GET(req: Request) {
     let fromTime: Date | null = null;
     let toTime: Date | null = null;
     if (periodParam === "current") {
-      const active = await (prisma as any).activePeriod.findUnique({ where: { outletName: outlet } }).catch(() => null);
+      // ActivePeriod uses outletName (string). Attempt a case-insensitive match from the enum-derived name.
+      const outletNameForActive = outletEnum.replace(/_/g, " ");
+      const active = await (prisma as any).activePeriod.findFirst({ where: { outletName: { equals: outletNameForActive, mode: 'insensitive' } } }).catch(() => null);
       fromTime = active?.periodStartAt ? new Date(active.periodStartAt) : null;
       if (!fromTime) {
         // Fallback to today midnight in APP_TZ to avoid spanning historical payments
@@ -45,7 +73,7 @@ export async function GET(req: Request) {
       toTime = new Date(`${day}T23:59:59.999${fixedOffset}`);
     }
 
-    const whereWindow: any = { outletCode: outlet };
+  const whereWindow: any = { outletCode: outletEnum };
     if (fromTime) whereWindow.createdAt = { gte: fromTime };
     if (toTime) whereWindow.createdAt = { ...(whereWindow.createdAt || {}), lte: toTime };
 
@@ -83,7 +111,7 @@ export async function GET(req: Request) {
     });
     const total = Number(agg?._sum?.amount || 0);
 
-    return NextResponse.json({ ok: true, outlet, period: periodParam, total, rows });
+  return NextResponse.json({ ok: true, outlet: rawOutlet, outletEnum, period: periodParam, total, rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
