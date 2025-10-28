@@ -141,6 +141,30 @@ export default function AttendantDashboardPage() {
       openingValue: 0,
     }
   );
+  // Subscribe to server-sent events for instant Till updates
+  useEffect(() => {
+    if (!outlet) return;
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/events/till?outlet=${encodeURIComponent(String(outlet))}`);
+      es.addEventListener('till', (ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          const delta = Number(data?.delta || 0);
+          const gross = Number(data?.gross || 0);
+          if (!Number.isFinite(delta)) return;
+          // Update Till Sales (Gross) immediately
+          setKpi((prev) => {
+            const nextGross = Math.max(Number(gross), Number(prev.tillSalesGross || 0) + delta);
+            // Reduce Amount to Deposit by the delta immediately (clamped at 0)
+            const nextAmtToDeposit = Math.max(0, Number(prev.amountToDeposit || 0) - Math.max(0, delta));
+            return { ...prev, tillSalesGross: nextGross, todayTillSales: nextGross as any, amountToDeposit: nextAmtToDeposit } as any;
+          });
+        } catch {}
+      });
+    } catch {}
+    return () => { try { es?.close(); } catch {} };
+  }, [outlet]);
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
   const [tillTotal, setTillTotal] = useState(0);
   const [attendantName, setAttendantName] = useState<string | null>(null);
