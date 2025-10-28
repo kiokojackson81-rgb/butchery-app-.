@@ -1759,11 +1759,14 @@ export default function AttendantDashboardPage() {
               const tooltip = isExcess
                 ? "Excess indicates a surplus (e.g., over-deposit or commissions). We show the absolute value."
                 : "Carryover (Prev) + Today Total Sales − Verified Deposits − Till Sales (Gross)";
+              const subtitle = isExcess
+                ? (refreshingKpi ? 'Surplus (over-deposit, commissions, or payouts) • Refreshing…' : 'Surplus (over-deposit, commissions, or payouts).')
+                : (refreshingKpi ? 'Refreshing…' : undefined);
               return (
                 <CardKPI
                   label={label}
                   value={value}
-                  subtitle={refreshingKpi ? 'Refreshing…' : undefined}
+                  subtitle={subtitle}
                   highlightDanger={amt > 0}
                   highlightSuccess={isExcess}
                   tooltip={tooltip}
