@@ -1765,6 +1765,7 @@ export default function AttendantDashboardPage() {
                   value={value}
                   subtitle={refreshingKpi ? 'Refreshing…' : undefined}
                   highlightDanger={amt > 0}
+                  highlightSuccess={isExcess}
                   tooltip={tooltip}
                 />
               );
@@ -1783,23 +1784,27 @@ function CardKPI({
   subtitle,
   highlight,
   highlightDanger,
+  highlightSuccess,
   tooltip,
 }: {
   label: string;
   value: string;
   subtitle?: string;
   highlight?: boolean;         // legacy yellow style (kept)
-  highlightDanger?: boolean;   // NEW red style when true
+  highlightDanger?: boolean;   // red style when true
+  highlightSuccess?: boolean;  // green style when true
   tooltip?: string;            // Optional explanatory tooltip
 }) {
   const base = "rounded-2xl border p-4";
   const yellow = "bg-yellow-50 border-yellow-200";
   const red = "bg-red-50 border-red-300";
-  const wrapClass = `${base} ${highlightDanger ? red : highlight ? yellow : ""}`;
+  const green = "bg-green-50 border-green-200";
+  const wrapClass = `${base} ${highlightDanger ? red : highlightSuccess ? green : highlight ? yellow : ""}`;
+  const textColor = highlightDanger ? "text-red-700" : highlightSuccess ? "text-green-700" : "text-gray-500";
 
   return (
     <div className={wrapClass}>
-      <div className={`text-sm ${highlightDanger ? "text-red-700" : "text-gray-500"}`}>
+      <div className={`text-sm ${textColor}`}>
         <span>{label}</span>
         {tooltip && (
           <span
@@ -1809,7 +1814,7 @@ function CardKPI({
           >i</span>
         )}
       </div>
-      <div className={`text-xl font-semibold mt-1 ${highlightDanger ? "text-red-700" : ""}`}>{value}</div>
+      <div className={`text-xl font-semibold mt-1 ${textColor}`}>{value}</div>
       {subtitle && <div className="text-xs text-gray-500 mt-0.5">{subtitle}</div>}
     </div>
   );
