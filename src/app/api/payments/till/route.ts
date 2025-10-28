@@ -12,8 +12,12 @@ export async function GET(req: Request) {
     const sess = await getSession();
     if (!sess) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-    // Prefer explicit session.outletCode; fallback to attendant's outletRef.code/name (varies by legacy data)
-    const rawOutlet = (sess as any).outletCode || (sess as any).attendant?.outletRef?.code || (sess as any).attendant?.outletRef?.name;
+    // Allow explicit outlet override via query (?outlet=BARAKA_B or ?outlet=Baraka%20B)
+    // to avoid 400s when the session does not yet have an outlet binding (e.g., freshly logged in, legacy records).
+    const url = new URL(req.url);
+    const outletParam = url.searchParams.get("outlet");
+    // Prefer explicit session.outletCode unless a valid-looking outlet query param is provided.
+    const rawOutlet = outletParam || (sess as any).outletCode || (sess as any).attendant?.outletRef?.code || (sess as any).attendant?.outletRef?.name;
     if (!rawOutlet) return NextResponse.json({ ok: false, error: "no_outlet_bound" }, { status: 400 });
 
     // Normalize to Prisma enum OutletCode expected by Payment/Till
@@ -42,7 +46,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: `unknown_outlet_code: ${String(rawOutlet)}` }, { status: 400 });
     }
 
-    const url = new URL(req.url);
     const take = Math.min(Number(url.searchParams.get("take") || 50), 100);
   const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous
     const dateParam = url.searchParams.get("date") || undefined; // YYYY-MM-DD (optional when period=previous)
