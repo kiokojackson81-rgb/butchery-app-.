@@ -50,6 +50,38 @@ export async function GET(req: Request) {
   const prod = new Map(products.map((p) => [p.key, p] as const));
   const closingMap = new Map(closingRows.map((r) => [r.itemKey, r] as const));
 
+  // --- Till Payments (Gross) for CURRENT trading period ---
+  // Normalize outlet name to Prisma enum OutletCode for Payment table
+  const allowedCodes = ["BRIGHT", "BARAKA_A", "BARAKA_B", "BARAKA_C", "GENERAL"] as const;
+  const toEnum = (s: string | null | undefined) => {
+    if (!s) return null;
+    const c = String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    return (allowedCodes as readonly string[]).includes(c) ? (c as typeof allowedCodes[number]) : null;
+  };
+  let outletEnum = toEnum(outlet) as any;
+  if (!outletEnum) {
+    const aliases: Record<string, string> = { BRIGHT: "BRIGHT", BARAKA: "BARAKA_A", BARAKA_A: "BARAKA_A", BARAKA_B: "BARAKA_B", BARAKA_C: "BARAKA_C", GENERAL: "GENERAL" };
+    const c = String(outlet).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    if (aliases[c]) outletEnum = aliases[c];
+  }
+
+  let tillSalesGrossCurrent = 0;
+  try {
+    if (period !== 'previous' && outletEnum) {
+      // Establish current trading period window start
+      const active = await (prisma as any).activePeriod.findFirst({ where: { outletName: { equals: outlet, mode: 'insensitive' } } }).catch(() => null);
+      let fromTime: Date | null = active?.periodStartAt ? new Date(active.periodStartAt) : null;
+      if (!fromTime) {
+        const fixedOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00";
+        fromTime = new Date(`${today}T00:00:00${fixedOffset}`);
+      }
+      const wherePayments: any = { outletCode: outletEnum, status: 'SUCCESS' };
+      if (fromTime) wherePayments.createdAt = { gte: fromTime };
+      const agg = await (prisma as any).payment.aggregate({ where: wherePayments, _sum: { amount: true } });
+      tillSalesGrossCurrent = Number(agg?._sum?.amount || 0);
+    }
+  } catch {}
+
   // Compute previous period/day carryover regardless, used even when we gate Current totals to zero
   const y = addDaysISO(date, -1, tz);
   const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
@@ -121,6 +153,7 @@ export async function GET(req: Request) {
             expenses: Number(totalsPrev.expenses || 0),
             todayTotalSales: todayTotalPrev,
             tillSalesGross: 0,
+            todayTillSales: 0,
             verifiedDeposits: verifiedDepositsPrev,
             netTill: 0,
             carryoverPrev: carryoverPrevFromY,
@@ -140,6 +173,7 @@ export async function GET(req: Request) {
         expenses: yExpensesSum,
         todayTotalSales: Math.max(0, yRevenue - yExpensesSum),
         tillSalesGross: 0,
+        todayTillSales: 0,
         verifiedDeposits: yVerifiedDeposits,
         netTill: 0,
         carryoverPrev: 0,
@@ -158,7 +192,8 @@ export async function GET(req: Request) {
         weightSales: 0,
         expenses: 0,
         todayTotalSales: 0,
-        tillSalesGross: 0,
+        tillSalesGross: tillSalesGrossCurrent,
+        todayTillSales: tillSalesGrossCurrent,
         verifiedDeposits: 0,
         netTill: 0,
         openingValue: openingValueGross,
@@ -185,7 +220,7 @@ export async function GET(req: Request) {
   }
 
   const expensesSum = expenses.reduce((a, e) => a + (e.amount || 0), 0);
-  const tillSalesGross = 0; // hook up to POS later if needed
+  const tillSalesGross = tillSalesGrossCurrent; // sum of success payments in current trading period
   const verifiedDeposits = (deposits as any[]).filter((d) => d?.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0)), 0);
 
   const todayTotalSales = weightSales - expensesSum;
@@ -203,6 +238,7 @@ export async function GET(req: Request) {
       expenses: expensesSum,
       todayTotalSales,
       tillSalesGross,
+      todayTillSales: tillSalesGross,
       verifiedDeposits,
       netTill,
       openingValue: openingValueGross,
