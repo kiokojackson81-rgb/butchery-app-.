@@ -81,7 +81,9 @@ export async function POST(req: Request) {
     if (!process.env.PUBLIC_BASE_URL) {
       logger.error({ action: 'stkPush:error', error: 'PUBLIC_BASE_URL not configured' });
       // mark payment failed so attendants can retry
-      try { await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: 'FAILED', note: 'SERVER_MISCONFIGURED: missing PUBLIC_BASE_URL' } }); } catch (e) {}
+      try {
+        await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: 'FAILED', description: 'SERVER_MISCONFIGURED: missing PUBLIC_BASE_URL' } });
+      } catch (e) {}
       return fail('server misconfigured: PUBLIC_BASE_URL required', 500);
     }
 
@@ -104,7 +106,7 @@ export async function POST(req: Request) {
       // Log full error with stack for Vercel logs and mark payment FAILED with message
       logger.error({ action: 'stkPush:error', error: err?.message ?? String(err), stack: err?.stack });
       try {
-        await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: 'FAILED', note: (err?.message || 'stk error').slice(0, 1024) } });
+        await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: 'FAILED', description: String(err?.message || 'stk error').slice(0, 1024) } });
       } catch (e) {
         logger.error({ action: 'stkPush:error:updatePayment', error: String(e) });
       }

@@ -52,8 +52,16 @@ export async function POST(req: Request) {
     if (payment.status === 'SUCCESS') return ok({ ok: true });
 
     const newStatus = resultCode === 0 ? 'SUCCESS' : 'FAILED';
-    const failureNote = newStatus === 'FAILED' ? (resultDesc || '').slice(0, 256) : undefined;
-    const update = await (localPrisma as any).payment.update({ where: { id: payment.id }, data: { status: newStatus, mpesaReceipt: mpesaReceipt || payment.mpesaReceipt, rawPayload: payload, note: failureNote ?? payment.note } });
+    // Build update without relying on a non-existent 'note' field; use description for failure reason
+    const updateData: any = {
+      status: newStatus,
+      mpesaReceipt: mpesaReceipt || payment.mpesaReceipt,
+      rawPayload: payload,
+    };
+    if (newStatus === 'FAILED' && resultDesc) {
+      updateData.description = String(resultDesc).slice(0, 256);
+    }
+    const update = await (localPrisma as any).payment.update({ where: { id: payment.id }, data: updateData });
 
     logger.info({ action: 'stkCallback:updated', id: update.id, status: newStatus, merchantRequestId, checkoutRequestId });
 

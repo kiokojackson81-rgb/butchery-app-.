@@ -1,0 +1,48 @@
+// Simple runner to initiate an STK push via our production API
+// and poll for status to capture evidence.
+// Usage: node scripts/run-stk.js
+
+(async () => {
+  const base = 'https://barakafresh.com';
+  const payload = {
+    outletCode: 'BRIGHT',
+    phone: '254705663175',
+    amount: 10,
+  };
+
+  try {
+    const res = await fetch(`${base}/api/pay/stk`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    console.log('STK push HTTP:', res.status);
+    console.log('STK push body:', JSON.stringify(json));
+
+    if (json?.ok && json?.data?.checkoutRequestId) {
+      const id = json.data.checkoutRequestId;
+      console.log('checkoutRequestId:', id);
+
+      // Poll up to 6 times (1 minute total) for status
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 10000));
+        const q = await fetch(`${base}/api/pay/stk/query?checkout=${encodeURIComponent(id)}`);
+        const qj = await q.json().catch(() => ({}));
+        console.log(`Query[${i + 1}] HTTP:`, q.status);
+        console.log(`Query[${i + 1}] body:`, JSON.stringify(qj));
+        // Break early if we see a definitive result code in the query response
+        const rc = qj?.data?.result?.ResultCode;
+        if (typeof rc === 'number' || typeof rc === 'string') {
+          // We have a terminal result (0 success, non-zero failure/cancel)
+          break;
+        }
+      }
+    } else {
+      console.log('No checkoutRequestId returned; cannot poll.');
+    }
+  } catch (e) {
+    console.error('run-stk error:', e?.message || e);
+    process.exit(1);
+  }
+})();
