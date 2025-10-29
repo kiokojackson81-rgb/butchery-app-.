@@ -62,6 +62,22 @@ export default function RecentPaymentsTool() {
     }
   }
 
+  // Auto-fetch on load if key is present, and refresh periodically
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    // initial fetch
+    fetchRecent().catch(() => {});
+    // poll every 15s
+    const id = setInterval(() => {
+      if (!cancelled) fetchRecent().catch(() => {});
+    }, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [key]);
+
   const hasItems = items && items.length > 0;
 
   return (
