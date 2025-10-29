@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  console.log("C2B CONFIRM:", body);
+  const receivedAt = new Date().toISOString();
+  const ip = (req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown");
+  const rawText = await req.text().catch(() => "");
+  let body: any = {};
+  try { body = rawText ? JSON.parse(rawText) : {}; } catch {}
+  console.log("[C2B/confirm] hit", { receivedAt, ip, len: rawText.length });
 
   try {
     // Normalize commonly seen fields from various C2B payload shapes

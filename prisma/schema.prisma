@@ -139,6 +139,33 @@ model Payment {
   updatedAt          DateTime    @updatedAt
 }
 
+/// C2B manual payments (ConfirmationURL callbacks)
+model C2BPayment {
+  id                 String   @id @default(cuid())
+  transId            String   @unique
+  transTime          String?
+  amount             Int
+  businessShortCode  String?
+  billRefNumber      String?
+  msisdn             String
+  thirdPartyTransId  String?
+  orgAccountBalance  String?
+  outletCode         OutletCode?
+  rawPayload         Json?
+  receivedAt         DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Dead-letter storage for failed C2B processes
+model C2BDeadLetter {
+  id          String   @id @default(cuid())
+  reason      String?
+  rawPayload  Json
+  receivedAt  DateTime @default(now())
+  note        String?
+}
+
 model AttendantExpense {
   id         String   @id @default(cuid())
   date       String
