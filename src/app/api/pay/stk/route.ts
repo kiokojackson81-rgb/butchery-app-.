@@ -52,16 +52,29 @@ export async function POST(req: Request) {
     }
 
     // Choose signing shortcode / passkey behavior
-    const storeShortcode = till.storeNumber;
-    const headOfficeShortcode = till.headOfficeNumber;
+    const storeShortcode = till.storeNumber;              // Child BuyGoods till
+    const headOfficeShortcode = till.headOfficeNumber;    // HO PayBill
 
-    // If a per-till passkey env exists, we treat this as a BuyGoods STK (LNMO) and sign with the store till.
-    // Otherwise, fall back to HO PayBill with PayBill transaction type and route funds to HO.
-    const passkeyKey = `DARAJA_PASSKEY_${storeShortcode}`;
+    // Env-based overrides / availability
+    const passkeyKey = `DARAJA_PASSKEY_${storeShortcode}`;         // Per-till passkey (if configured)
     const perTillPasskey = (process.env as any)[passkeyKey];
-    const isBuyGoods = !!perTillPasskey; // only safe when we can sign with the store till passkey
-    const useShortcode = isBuyGoods ? storeShortcode : headOfficeShortcode;
-    const partyB = isBuyGoods ? storeShortcode : useShortcode; // BG: store till, HO fallback: HO
+    const hoPasskey = process.env.DARAJA_PASSKEY_HO;               // HO passkey (usually provided by Safaricom)
+    const forcePaybill = String(process.env.DARAJA_FORCE_PAYBILL ?? 'false').toLowerCase() === 'true';
+
+    // Mode selection (in order of preference):
+    // 1) Per-till passkey present: sign with store till, BuyGoods; BusinessShortCode=store, PartyB=store.
+    // 2) HO passkey present and not forcing PayBill: Safaricom guidance for HO+child tills →
+    //    sign with HO, TransactionType=CustomerBuyGoodsOnline, PartyB=store till.
+    // 3) Fallback: PayBill mode with HO (CustomerPayBillOnline), PartyB=HO.
+    let mode: 'BG_PER_TILL' | 'BG_HO_SIGN' | 'PAYBILL_HO' = 'PAYBILL_HO';
+    if (perTillPasskey) {
+      mode = 'BG_PER_TILL';
+    } else if (hoPasskey && storeShortcode && !forcePaybill) {
+      mode = 'BG_HO_SIGN';
+    }
+
+    const useShortcode = mode === 'BG_PER_TILL' ? storeShortcode : headOfficeShortcode;
+    const partyB = mode === 'PAYBILL_HO' ? headOfficeShortcode : storeShortcode || headOfficeShortcode;
 
     // Create PENDING payment row
     const payment = await (localPrisma as any).payment.create({ data: {
@@ -88,9 +101,21 @@ export async function POST(req: Request) {
     }
 
     // Initiate STK (Daraja errors are handled separately so we can update DB and log stack)
-    logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode });
+    logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode, mode, partyB });
     try {
-  const stkRes = await DarajaClient.stkPush({ businessShortCode: useShortcode, amount: Number(amount), phoneNumber: phone, accountReference: body.accountRef, transactionDesc: body.description, partyB, passkey: perTillPasskey, transactionType: isBuyGoods ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline' });
+      const transactionType = mode === 'PAYBILL_HO' ? 'CustomerPayBillOnline' : 'CustomerBuyGoodsOnline';
+      // Passkey param: per-till when BG_PER_TILL; undefined uses HO passkey via env fallback
+      const passkeyParam = mode === 'BG_PER_TILL' ? perTillPasskey : undefined;
+      const stkRes = await DarajaClient.stkPush({
+        businessShortCode: useShortcode,
+        amount: Number(amount),
+        phoneNumber: phone,
+        accountReference: body.accountRef,
+        transactionDesc: body.description,
+        partyB,
+        passkey: passkeyParam,
+        transactionType,
+      });
       logger.info({ action: 'stkPush:response', outletCode: finalOutlet, msisdn: phone, res: stkRes.res });
 
       // Persist merchant and checkout ids if present

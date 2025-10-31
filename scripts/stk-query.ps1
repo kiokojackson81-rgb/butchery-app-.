@@ -36,14 +36,13 @@ $body = @{
 } | ConvertTo-Json -Compress
 
 try {
-  $q = Invoke-WebRequest -Method POST -Uri "$BaseUrl/mpesa/stkpushquery/v1/query" -Headers $auth -Body $body -ErrorAction Stop
+  # Use -SkipHttpErrorCheck so we can inspect the body even on non-2xx (Core returns HttpResponseMessage)
+  $q = Invoke-WebRequest -Method POST -Uri "$BaseUrl/mpesa/stkpushquery/v1/query" -Headers $auth -Body $body -SkipHttpErrorCheck
   Write-Host ("Query status: {0}  x-request-id: {1}" -f $q.StatusCode, $q.Headers['x-request-id'])
-  $q.Content | Write-Host
+  if ($q.Content) { $q.Content | Write-Host }
+  if ($q.StatusCode -ge 200 -and $q.StatusCode -lt 300) { exit 0 } else { exit 2 }
 } catch {
-  if ($_.Exception.Response) {
-    $resp = $_.Exception.Response
-    Write-Host ("Query error status: {0}  x-request-id: {1}" -f $resp.StatusCode, $resp.Headers['x-request-id'])
-    $sr = New-Object System.IO.StreamReader($resp.GetResponseStream()); $raw = $sr.ReadToEnd(); $sr.Close(); Write-Host $raw
-  } else { $_ | Out-String | Write-Host }
+  Write-Host "Query request failed before response:" -ForegroundColor Red
+  $_ | Out-String | Write-Host
   exit 1
 }

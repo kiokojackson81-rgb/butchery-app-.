@@ -3,15 +3,18 @@
 // Usage: node scripts/run-stk.js
 
 (async () => {
-  const base = 'https://barakafresh.com';
+  // Allow overriding the target base URL for testing (e.g., http://localhost:3002)
+  const base = process.env.BASE_URL || 'https://barakafresh.com';
+  // Allow CLI args: phone amount outlet
+  const [, , argPhone, argAmount, argOutlet] = process.argv;
   const payload = {
-    outletCode: 'BRIGHT',
-    phone: '254705663175',
-    amount: 10,
+    outletCode: argOutlet || 'BRIGHT',
+    phone: argPhone || '254705663175',
+    amount: argAmount ? Number(argAmount) : 10,
   };
 
   try {
-    const res = await fetch(`${base}/api/pay/stk`, {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/pay/stk`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -24,10 +27,10 @@
       const id = json.data.checkoutRequestId;
       console.log('checkoutRequestId:', id);
 
-      // Poll up to 6 times (1 minute total) for status
-      for (let i = 0; i < 6; i++) {
+      // Poll up to 9 times (~90s total) for status
+      for (let i = 0; i < 9; i++) {
         await new Promise((r) => setTimeout(r, 10000));
-        const q = await fetch(`${base}/api/pay/stk/query?checkout=${encodeURIComponent(id)}`);
+  const q = await fetch(`${base.replace(/\/$/, '')}/api/pay/stk/query?checkout=${encodeURIComponent(id)}`);
         const qj = await q.json().catch(() => ({}));
         console.log(`Query[${i + 1}] HTTP:`, q.status);
         console.log(`Query[${i + 1}] body:`, JSON.stringify(qj));

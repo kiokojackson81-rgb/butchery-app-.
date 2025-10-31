@@ -310,5 +310,21 @@
 			"type": "shell",
 			"command": "npm run -s typecheck"
 		}
+		,
+		{
+			"label": "dev:sandbox (pwsh, :3003)",
+			"type": "shell",
+			"command": "$env:PORT=\"3003\"; $env:DARAJA_BASE_URL=\"https://sandbox.safaricom.co.ke\"; $env:DARAJA_CONSUMER_KEY=\"<SANDBOX_CK>\"; $env:DARAJA_CONSUMER_SECRET=\"<SANDBOX_CS>\"; $env:DARAJA_PASSKEY_HO=\"<SANDBOX_PASSKEY>\"; $env:PUBLIC_BASE_URL=\"https://barakafresh.com\"; npm run dev:3003",
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build",
+			"options": {
+				"shell": {
+					"executable": "pwsh"
+				}
+			}
+		}
 	]
 }
