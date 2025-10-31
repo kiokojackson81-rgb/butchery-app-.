@@ -5,22 +5,24 @@ function run(cmd) {
   execSync(cmd, { stdio: 'inherit', env: process.env });
 }
 
+// 1) Try to apply migrations in prod. If it fails (e.g., P3009), do NOT fail the build.
 try {
-  // 1) Try to apply migrations in prod
   run('prisma migrate deploy');
 } catch (e) {
-  console.warn('warn: prisma migrate deploy failed, falling back to prisma db push');
-  try {
-    // 2) Fallback to ensure schema is in place (non-destructive where possible)
-    run('prisma db push');
-  } catch (e2) {
-    console.error('error: prisma db push also failed');
-    process.exit(1);
+  console.warn('warn: prisma migrate deploy failed. Skipping DB changes for this deploy.');
+  const allowDbPush = process.env.ALLOW_DB_PUSH === '1';
+  if (allowDbPush) {
+    try {
+      const acceptDataLoss = process.env.ACCEPT_DATA_LOSS === '1' ? ' --accept-data-loss' : '';
+      run('prisma db push' + acceptDataLoss);
+    } catch (e2) {
+      console.warn('warn: prisma db push failed. Continuing without schema changes.');
+    }
   }
 }
 
-// 3) Prebuild tasks (existing project hook)
+// 2) Prebuild tasks (existing project hook)
 run('node scripts/prebuild.mjs');
 
-// 4) Next build
+// 3) Next build
 run('next build');
