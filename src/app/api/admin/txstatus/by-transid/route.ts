@@ -22,29 +22,33 @@ export async function GET(req: Request) {
 
     // Query by note (we saved TransactionID/ReceiptNo in note field in result route)
     let rows: any[] = [];
-    if (transId) {
-      rows = await (prisma as any).c2BDeadLetter.findMany({
-        where: { reason: { in: ['TXSTATUS', 'TXSTATUS_TIMEOUT'] }, note: transId },
-        orderBy: { receivedAt: 'desc' },
-        take,
-      });
-      // If no direct note match found, surface latest TXSTATUS entries for operator visibility
-      if (!rows.length) {
+    try {
+      if (transId) {
+        rows = await (prisma as any).c2BDeadLetter.findMany({
+          where: { reason: { in: ['TXSTATUS', 'TXSTATUS_TIMEOUT'] }, note: transId },
+          orderBy: { receivedAt: 'desc' },
+          take,
+        });
+        if (!rows.length) {
+          rows = await (prisma as any).c2BDeadLetter.findMany({
+            where: { reason: { in: ['TXSTATUS', 'TXSTATUS_TIMEOUT'] } },
+            orderBy: { receivedAt: 'desc' },
+            take,
+          });
+        }
+      } else {
         rows = await (prisma as any).c2BDeadLetter.findMany({
           where: { reason: { in: ['TXSTATUS', 'TXSTATUS_TIMEOUT'] } },
           orderBy: { receivedAt: 'desc' },
           take,
         });
       }
-    } else {
-      rows = await (prisma as any).c2BDeadLetter.findMany({
-        where: { reason: { in: ['TXSTATUS', 'TXSTATUS_TIMEOUT'] } },
-        orderBy: { receivedAt: 'desc' },
-        take,
-      });
+    } catch (e: any) {
+      console.error('admin:txstatus:read-failed', { error: String(e) });
+      rows = [];
     }
 
-    return ok({ count: rows.length, rows });
+  return ok({ count: rows.length, rows });
   } catch (e: any) {
     return fail(String(e) || 'error', 500);
   }

@@ -12,9 +12,13 @@ function fail(error: string, code = 400){ return NextResponse.json({ ok: false, 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    await (prisma as any).c2BDeadLetter.create({
-      data: { reason: 'TXSTATUS_TIMEOUT', rawPayload: body }
-    });
+    try {
+      await (prisma as any).c2BDeadLetter.create({
+        data: { reason: 'TXSTATUS_TIMEOUT', rawPayload: body }
+      });
+    } catch (e: any) {
+      console.error('txstatus:timeout-store-failed', { error: String(e) });
+    }
     return ok();
   } catch (e: any) {
     return fail(String(e) || 'error', 500);

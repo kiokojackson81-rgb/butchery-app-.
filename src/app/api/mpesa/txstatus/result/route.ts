@@ -22,9 +22,14 @@ export async function POST(req: Request) {
       note = result?.TransactionID || byKey('ReceiptNo') || byKey('TransactionID') || undefined;
     } catch {}
 
-    await (prisma as any).c2BDeadLetter.create({
-      data: { reason: 'TXSTATUS', rawPayload: body, note }
-    });
+    try {
+      await (prisma as any).c2BDeadLetter.create({
+        data: { reason: 'TXSTATUS', rawPayload: body, note }
+      });
+    } catch (e: any) {
+      // Gracefully ignore if table is missing in prod during first deploy
+      console.error('txstatus:store-failed', { error: String(e) });
+    }
     return ok();
   } catch (e: any) {
     return fail(String(e) || 'error', 500);
