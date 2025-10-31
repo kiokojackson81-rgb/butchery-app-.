@@ -61,6 +61,17 @@ export async function POST(req: Request) {
     const hoPasskey = process.env.DARAJA_PASSKEY_HO;               // HO passkey (usually provided by Safaricom)
     const forcePaybill = String(process.env.DARAJA_FORCE_PAYBILL ?? 'false').toLowerCase() === 'true';
 
+    // Non-secret diagnostics to aid production troubleshooting
+    logger.info({
+      action: 'stkPush:env',
+      outletCode: usedOutlet,
+      hasHoPasskey: !!hoPasskey,
+      hasPerTillPasskey: !!perTillPasskey,
+      forcePaybill,
+      storeShortcode,
+      headOfficeShortcode,
+    });
+
     // Mode selection (in order of preference):
     // 1) Per-till passkey present: sign with store till, BuyGoods; BusinessShortCode=store, PartyB=store.
     // 2) HO passkey present and not forcing PayBill: Safaricom guidance for HO+child tills →
@@ -71,6 +82,22 @@ export async function POST(req: Request) {
       mode = 'BG_PER_TILL';
     } else if (hoPasskey && storeShortcode && !forcePaybill) {
       mode = 'BG_HO_SIGN';
+    }
+
+    // Admin-only override: allow forcing a mode for investigative runs
+    try {
+      const adminKeyHeader = req.headers.get('x-admin-key') || '';
+      const adminKeyEnv = process.env.ADMIN_API_KEY || '';
+      if (adminKeyHeader && adminKeyEnv && adminKeyHeader === adminKeyEnv) {
+        const raw = await req.clone().json().catch(() => ({} as any));
+        const requestedMode = (raw?.mode || '').toString().toUpperCase();
+        if (requestedMode === 'BG_HO_SIGN' || requestedMode === 'PAYBILL_HO' || requestedMode === 'BG_PER_TILL') {
+          mode = requestedMode as any;
+          logger.info({ action: 'stkPush:override', mode });
+        }
+      }
+    } catch (_) {
+      // ignore override errors; proceed with computed mode
     }
 
     const useShortcode = mode === 'BG_PER_TILL' ? storeShortcode : headOfficeShortcode;

@@ -6,17 +6,23 @@
   // Allow overriding the target base URL for testing (e.g., http://localhost:3002)
   const base = process.env.BASE_URL || 'https://barakafresh.com';
   // Allow CLI args: phone amount outlet
-  const [, , argPhone, argAmount, argOutlet] = process.argv;
+  const [, , argPhone, argAmount, argOutlet, argMode] = process.argv;
   const payload = {
     outletCode: argOutlet || 'BRIGHT',
     phone: argPhone || '254705663175',
     amount: argAmount ? Number(argAmount) : 10,
+    // Optional admin override for mode: BG_HO_SIGN | PAYBILL_HO | BG_PER_TILL
+    ...(argMode ? { mode: String(argMode).toUpperCase() } : {}),
   };
 
   try {
   const res = await fetch(`${base.replace(/\/$/, '')}/api/pay/stk`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        // If ADMIN_API_KEY is present locally, forward it for admin-only override
+        ...(process.env.ADMIN_API_KEY ? { 'x-admin-key': process.env.ADMIN_API_KEY } : {}),
+      },
       body: JSON.stringify(payload),
     });
     const json = await res.json().catch(() => ({}));
