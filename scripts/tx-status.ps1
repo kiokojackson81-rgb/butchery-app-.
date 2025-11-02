@@ -4,7 +4,9 @@ param(
   [string]$SecurityCredential = $env:DARAJA_SECURITY_CREDENTIAL,
   [string]$PartyA = '3574813',
   [int]$IdentifierType = 4,
-  [string]$BaseUrl = $env:DARAJA_BASE_URL
+  [string]$BaseUrl = $env:DARAJA_BASE_URL,
+  [string]$Key,
+  [string]$Secret
 )
 
 if (-not $BaseUrl) { $BaseUrl = 'https://api.safaricom.co.ke' }
@@ -12,7 +14,9 @@ if (-not $BaseUrl) { $BaseUrl = 'https://api.safaricom.co.ke' }
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
 function Get-AccessToken {
-  param([string]$Key = $env:DARAJA_CONSUMER_KEY, [string]$Secret = $env:DARAJA_CONSUMER_SECRET)
+  param([string]$Key, [string]$Secret)
+  if (-not $Key) { $Key = $env:DARAJA_CONSUMER_KEY }
+  if (-not $Secret) { $Secret = $env:DARAJA_CONSUMER_SECRET }
   if (-not $Key -or -not $Secret) { throw 'Missing DARAJA_CONSUMER_KEY or DARAJA_CONSUMER_SECRET' }
   $pair = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$Key`:$Secret"))
   $headers = @{ Authorization = "Basic $pair" }
@@ -23,7 +27,7 @@ function Get-AccessToken {
 
 if (-not $Initiator -or -not $SecurityCredential) { Write-Host 'Missing Initiator or SecurityCredential; set DARAJA_INITIATOR and DARAJA_SECURITY_CREDENTIAL to run this.'; exit 2 }
 
-$token = Get-AccessToken
+$token = Get-AccessToken -Key $Key -Secret $Secret
 $headers = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
 
 $payload = @{ 

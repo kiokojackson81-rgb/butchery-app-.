@@ -51,12 +51,17 @@ export async function POST(req: Request) {
       usedFallback = true;
     }
 
-    // Choose signing shortcode / passkey behavior
-    const storeShortcode = till.storeNumber;              // Child BuyGoods till
-    const headOfficeShortcode = till.headOfficeNumber;    // HO PayBill
+  // Choose signing shortcode / passkey behavior
+  // Correct mapping per Safaricom guidance:
+  // - Till Number (where customers pay) = till.tillNumber → used as PartyB for BuyGoods flows
+  // - Store Number (internal store id)   = till.storeNumber → persisted for reference only
+  // - HO shortcode (PayBill)             = till.headOfficeNumber
+  const childTillShortcode = till.tillNumber;           // Child BuyGoods TILL (PartyB)
+  const storeNumber = till.storeNumber;                 // Store id (do NOT use as PartyB)
+  const headOfficeShortcode = till.headOfficeNumber;    // HO PayBill
 
     // Env-based overrides / availability
-    const passkeyKey = `DARAJA_PASSKEY_${storeShortcode}`;         // Per-till passkey (if configured)
+  const passkeyKey = `DARAJA_PASSKEY_${childTillShortcode}`;     // Per-till passkey (if configured)
     const perTillPasskey = (process.env as any)[passkeyKey];
     const hoPasskey = process.env.DARAJA_PASSKEY_HO;               // HO passkey (usually provided by Safaricom)
     const forcePaybill = String(process.env.DARAJA_FORCE_PAYBILL ?? 'false').toLowerCase() === 'true';
@@ -68,19 +73,20 @@ export async function POST(req: Request) {
       hasHoPasskey: !!hoPasskey,
       hasPerTillPasskey: !!perTillPasskey,
       forcePaybill,
-      storeShortcode,
+      childTillShortcode,
+      storeNumber,
       headOfficeShortcode,
     });
 
     // Mode selection (in order of preference):
-    // 1) Per-till passkey present: sign with store till, BuyGoods; BusinessShortCode=store, PartyB=store.
+  // 1) Per-till passkey present: sign with child till, BuyGoods; BusinessShortCode=till, PartyB=till.
     // 2) HO passkey present and not forcing PayBill: Safaricom guidance for HO+child tills →
     //    sign with HO, TransactionType=CustomerBuyGoodsOnline, PartyB=store till.
     // 3) Fallback: PayBill mode with HO (CustomerPayBillOnline), PartyB=HO.
     let mode: 'BG_PER_TILL' | 'BG_HO_SIGN' | 'PAYBILL_HO' = 'PAYBILL_HO';
     if (perTillPasskey) {
       mode = 'BG_PER_TILL';
-    } else if (hoPasskey && storeShortcode && !forcePaybill) {
+    } else if (hoPasskey && childTillShortcode && !forcePaybill) {
       mode = 'BG_HO_SIGN';
     }
 
@@ -100,8 +106,8 @@ export async function POST(req: Request) {
       // ignore override errors; proceed with computed mode
     }
 
-    const useShortcode = mode === 'BG_PER_TILL' ? storeShortcode : headOfficeShortcode;
-    const partyB = mode === 'PAYBILL_HO' ? headOfficeShortcode : storeShortcode || headOfficeShortcode;
+  const useShortcode = mode === 'BG_PER_TILL' ? childTillShortcode : headOfficeShortcode;
+  const partyB = mode === 'PAYBILL_HO' ? headOfficeShortcode : (childTillShortcode || headOfficeShortcode);
 
     // Create PENDING payment row
     const payment = await (localPrisma as any).payment.create({ data: {
@@ -111,7 +117,7 @@ export async function POST(req: Request) {
       status: 'PENDING',
       businessShortCode: useShortcode,
       partyB: partyB,
-      storeNumber: storeShortcode,
+  storeNumber: storeNumber,
       headOfficeNumber: headOfficeShortcode,
       accountReference: body.accountRef || undefined,
       description: body.description || undefined,
@@ -128,7 +134,7 @@ export async function POST(req: Request) {
     }
 
     // Initiate STK (Daraja errors are handled separately so we can update DB and log stack)
-    logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode, mode, partyB });
+  logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode, mode, partyB });
     try {
       const transactionType = mode === 'PAYBILL_HO' ? 'CustomerPayBillOnline' : 'CustomerBuyGoodsOnline';
       // Passkey param: per-till when BG_PER_TILL; undefined uses HO passkey via env fallback
