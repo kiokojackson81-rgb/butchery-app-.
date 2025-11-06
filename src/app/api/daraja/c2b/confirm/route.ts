@@ -6,10 +6,31 @@ export const revalidate = 0;
 export async function POST(req: Request) {
   const receivedAt = new Date().toISOString();
   const ip = (req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown");
+  const ct = (req.headers.get("content-type") || "").toLowerCase();
   const rawText = await req.text().catch(() => "");
-  let body: any = {};
-  try { body = rawText ? JSON.parse(rawText) : {}; } catch {}
-  console.log("[C2B/confirm] hit", { receivedAt, ip, len: rawText.length });
+
+  // Parse helper: support JSON and application/x-www-form-urlencoded bodies
+  const parseBody = (txt: string, contentType: string): any => {
+    // Try JSON first (based on header or leading character)
+    if (contentType.includes("application/json") || txt.trim().startsWith("{")) {
+      try { return txt ? JSON.parse(txt) : {}; } catch { /* fallthrough */ }
+    }
+    // Handle classic form-encoded payloads: key=value&key2=value2
+    if (contentType.includes("application/x-www-form-urlencoded") || txt.includes("=") && txt.includes("&")) {
+      try {
+        const params = new URLSearchParams(txt);
+        const obj: any = {};
+        for (const [k, v] of params.entries()) obj[k] = v;
+        return obj;
+      } catch { /* fallthrough */ }
+    }
+    // Last resort: return empty object
+    return {};
+  };
+
+  let body: any = parseBody(rawText, ct);
+  const bodyKeys = Object.keys(body || {}).slice(0, 20);
+  console.log("[C2B/confirm] hit", { receivedAt, ip, len: rawText.length, ct, keys: bodyKeys });
 
   try {
     // Normalize commonly seen fields from various C2B payload shapes
@@ -49,7 +70,7 @@ export async function POST(req: Request) {
 
     // Basic payload validation: require a short code and positive amount to persist
     if (!short || !amount || amount <= 0) {
-      console.warn("[daraja confirm] skipped persist due to invalid payload", { short, amount, receipt });
+      console.warn("[daraja confirm] skipped persist due to invalid payload", { short, amount, receipt, ct, keys: bodyKeys });
     } else {
       // Idempotency by mpesaReceipt when provided: update existing else create
       try {

@@ -1,24 +1,4 @@
 param(
-  [Parameter(Mandatory=$true)] [string]$AdminKey,
-  [Parameter(Mandatory=$true)] [string]$ShortCode,
-  [string]$BaseUrl = 'https://barakafresh.com'
-)
-
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-
-$u = "$BaseUrl/api/daraja/c2b/register"
-$headers = @{ 'x-admin-key' = $AdminKey }
-$body = @{ shortcode = $ShortCode } | ConvertTo-Json
-
-try {
-  $res = Invoke-WebRequest -Method POST -Uri $u -Headers $headers -Body $body -ContentType 'application/json' -SkipHttpErrorCheck
-  Write-Host ("Status: {0}" -f $res.StatusCode)
-  try { ($res.Content | ConvertFrom-Json) | ConvertTo-Json -Depth 8 } catch { Write-Host $res.Content }
-} catch {
-  $_ | Out-String | Write-Host
-  exit 1
-}
-param(
   [Parameter(Mandatory=$true)] [string]$ConsumerKey,
   [Parameter(Mandatory=$true)] [string]$ConsumerSecret,
   [Parameter(Mandatory=$true)] [string]$ShortCode,
@@ -30,7 +10,7 @@ param(
 # Force TLS 1.2 for older hosts
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
-Write-Host "== Daraja PROD Register C2B (HO=$ShortCode) =="
+Write-Host "== Daraja PROD Register C2B (ShortCode=$ShortCode) =="
 
 # OAuth
 $pair = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($ConsumerKey):$($ConsumerSecret)"))
