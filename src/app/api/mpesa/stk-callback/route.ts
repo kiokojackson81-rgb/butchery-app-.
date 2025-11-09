@@ -4,6 +4,9 @@ import { parseStkCallback } from '@/lib/mpesa_callback';
 import logger from '@/lib/logger';
 import { notifyAttendants, notifySupplier } from '@/server/supervisor/supervisor.notifications';
 import { emitDepositConfirmed } from '@/lib/real_time';
+import { computeAmountToDepositCurrent } from '@/server/deposit_metrics';
+import { isGeneralDepositAttendant } from '@/server/general_deposit';
+import { sendTextSafe } from '@/lib/wa';
 
 const WA_DARAJA_ENABLED = String(process.env.WA_DARAJA_ENABLED ?? 'true').toLowerCase() === 'true';
 
@@ -72,6 +75,34 @@ export async function POST(req: Request) {
         await emitDepositConfirmed({ outletCode: update.outletCode, amount: update.amount, msisdnMasked, receipt: update.mpesaReceipt, date: String(update.updatedAt) });
         logger.info({ action: 'deposit_confirmed', outletCode: update.outletCode, amount: update.amount, msisdn: msisdnMasked, receipt: update.mpesaReceipt, date: update.updatedAt });
       } catch (e:any) { logger.error({ action: 'deposit_confirmed:error', error: String(e) }); }
+
+      // Optional WhatsApp notification for GENERAL_DEPOSIT mode: detect by accountReference prefix DEP_
+      try {
+        if (update.accountReference && String(update.accountReference).toUpperCase().startsWith('DEP_')) {
+          const code = String(update.accountReference).slice(4).toUpperCase();
+          const isSpecial = await isGeneralDepositAttendant(code).catch(()=>false);
+          if (isSpecial && phone) {
+            const metrics = await computeAmountToDepositCurrent({ outletName: update.outletCode, attendantCode: code });
+            const remaining = Math.max(0, metrics.amountToDeposit || 0);
+            const successMsg = `Deposit received: KSh ${update.amount}. Outstanding balance now KSh ${Math.round(remaining)}.`;
+            await sendTextSafe('+' + phone, successMsg, 'AI_DISPATCH_TEXT');
+          }
+        }
+      } catch (e:any) { logger.error({ action: 'stkCallback:waSuccessNotify:error', error: String(e) }); }
+    } else if (newStatus === 'FAILED') {
+      // Failure notification for general deposit attempts
+      try {
+        if (payment.accountReference && String(payment.accountReference).toUpperCase().startsWith('DEP_')) {
+          const code = String(payment.accountReference).slice(4).toUpperCase();
+          const isSpecial = await isGeneralDepositAttendant(code).catch(()=>false);
+          if (isSpecial && phone) {
+            const metrics = await computeAmountToDepositCurrent({ outletName: payment.outletCode, attendantCode: code });
+            const outstanding = Math.max(0, metrics.amountToDeposit || 0);
+            const failMsg = `Deposit failed. Required: KSh ${Math.round(outstanding)}. Please try again.`;
+            await sendTextSafe('+' + phone, failMsg, 'AI_DISPATCH_TEXT');
+          }
+        }
+      } catch (e:any) { logger.error({ action: 'stkCallback:waFailNotify:error', error: String(e) }); }
     }
 
     return ok({ updated: update.id, status: newStatus });

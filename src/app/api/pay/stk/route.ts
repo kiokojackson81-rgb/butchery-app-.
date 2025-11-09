@@ -4,8 +4,8 @@ import { DarajaClient } from '@/lib/daraja_client';
 import logger from '@/lib/logger';
 import { resolveOutletForCategory } from '@/lib/category_router';
 
-const WA_DARAJA_ENABLED = String(process.env.WA_DARAJA_ENABLED ?? 'true').toLowerCase() === 'true';
-const DARAJA_LIVE_MODE = String(process.env.DARAJA_LIVE_MODE ?? 'false').toLowerCase() === 'true';
+const WA_DARAJA_ENABLED = String(process.env.WA_DARAJA_ENABLED ?? 'true').toLowerCase() === 'true'; // No change
+const DARAJA_LIVE_MODE = String(process.env.DARAJA_LIVE_MODE ?? 'false').toLowerCase() === 'true'; // No change
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,11 +20,10 @@ type Body = { outletCode: string; phone: string; amount: number; accountRef?: st
 function ok(data: any){ return NextResponse.json({ ok: true, data }); }
 function fail(error: string, code = 400){ return NextResponse.json({ ok: false, error }, { status: code }); }
 
-export async function POST(req: Request) {
+async function handleStk(body: Body, req: Request) {
   try {
     if (!WA_DARAJA_ENABLED) return NextResponse.json({ ok: false, error: 'Daraja disabled' }, { status: 400 });
-  const body = await req.json() as Body;
-  const { outletCode, phone, amount } = body;
+    const { outletCode, phone, amount } = body;
     if (!outletCode) return fail('outletCode required');
     // Normalize and validate outlet code against Prisma enum OutletCode
     const allowedOutletCodes = ['BRIGHT','BARAKA_A','BARAKA_B','BARAKA_C','GENERAL'];
@@ -67,9 +66,9 @@ export async function POST(req: Request) {
 
     // Env-based overrides / availability
   const passkeyKey = `DARAJA_PASSKEY_${childTillShortcode}`;     // Per-till passkey (if configured)
-    const perTillPasskey = (process.env as any)[passkeyKey];
+    const perTillPasskey = (process.env as any)[passkeyKey];     // Per-till passkey (if configured) // No change
     const hoPasskey = process.env.DARAJA_PASSKEY_HO;               // HO passkey (usually provided by Safaricom)
-    const forcePaybill = String(process.env.DARAJA_FORCE_PAYBILL ?? 'false').toLowerCase() === 'true';
+    const forcePaybill = String(process.env.DARAJA_FORCE_PAYBILL ?? 'false').toLowerCase() === 'true'; // No change
 
     // Non-secret diagnostics to aid production troubleshooting
     logger.info({
@@ -185,4 +184,25 @@ export async function POST(req: Request) {
     logger.error({ action: 'stkPush:error', error: String(e) });
     return fail('internal error', 500);
   }
+}
+
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => ({} as Body));
+  return handleStk(body, req);
+}
+
+export async function GET(req: Request) {
+  // Allow GET deep link trigger via query params (used from WhatsApp links)
+  const { searchParams } = new URL(req.url);
+  const body: Body = {
+    outletCode: String(searchParams.get('outletCode') || searchParams.get('outlet') || ''),
+    phone: String(searchParams.get('phone') || ''),
+    amount: Number(searchParams.get('amount') || 0),
+    accountRef: searchParams.get('accountRef') || undefined,
+    description: searchParams.get('description') || undefined,
+    category: searchParams.get('category') || undefined,
+    mode: searchParams.get('mode') || undefined,
+    attendantCode: searchParams.get('attendantCode') || undefined,
+  } as any;
+  return handleStk(body, req);
 }
