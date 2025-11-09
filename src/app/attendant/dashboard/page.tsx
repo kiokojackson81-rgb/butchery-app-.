@@ -172,6 +172,7 @@ export default function AttendantDashboardPage() {
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
   const [attendantPhone, setAttendantPhone] = useState<string | null>(null);
   const [outletCodeState, setOutletCodeState] = useState<string | null>(null);
+  const [tillNumber, setTillNumber] = useState<string | null>(null);
   // Track whether there's any saved activity for today (closings, expenses, deposits, tillcount)
   const [savedClosingTodayCount, setSavedClosingTodayCount] = useState<number>(0);
 
@@ -222,6 +223,28 @@ export default function AttendantDashboardPage() {
       }
     })();
   }, [router]);
+
+  // Resolve and show this outlet's till number (read-only), and ensure Till Payments are scoped to the outlet only
+  useEffect(() => {
+    const mapNameToCode: Record<string, string> = {
+      "Bright": "BRIGHT",
+      "Baraka A": "BARAKA_A",
+      "Baraka B": "BARAKA_B",
+      "Baraka C": "BARAKA_C",
+      "General": "GENERAL",
+    };
+    const code = outletCodeState || (outlet ? mapNameToCode[String(outlet)] : null);
+    if (!code) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/tills/list', { cache: 'no-store' });
+        const j = await res.json();
+        const rows = Array.isArray(j?.rows) ? j.rows : [];
+        const match = rows.find((r: any) => String(r?.outletCode) === String(code));
+        setTillNumber(match?.tillNumber || null);
+      } catch { setTillNumber(null); }
+    })();
+  }, [outlet, outletCodeState]);
 
   /** ===== Scope & pricebook overlays (unchanged) ===== */
   useEffect(() => {
@@ -1121,12 +1144,8 @@ export default function AttendantDashboardPage() {
   async function refreshTill(outletName: string) {
     try {
       const periodQs = summaryMode === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` : '';
-      // New: support View by Till
-      const viewBy = (window as any).__viewByTill__ ?? (localStorage.getItem('till_view_by') || 'outlet');
-      const tillCode = localStorage.getItem('till_view_code') || '';
-      const base = viewBy === 'till' && tillCode
-        ? `/api/payments/till?by=till&code=${encodeURIComponent(tillCode)}`
-        : `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
+      // Always scope Till Payments to the logged-in outlet
+      const base = `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
       const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}`);
       setTillRows(res.rows || []);
       setTillTotal(res.total || 0);
@@ -1629,25 +1648,11 @@ export default function AttendantDashboardPage() {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
               <h3 className="font-semibold">Till Payments ({summaryMode === 'previous' ? 'Previous' : 'Active'} Period)</h3>
-              {/* View By controls */}
-              <div className="inline-flex items-center gap-2 text-xs">
-                <label className="text-gray-600">View by</label>
-                <select
-                  className="border rounded-lg px-2 py-1"
-                  defaultValue={(typeof window !== 'undefined' ? (localStorage.getItem('till_view_by') || 'outlet') : 'outlet')}
-                  onChange={async (e)=>{
-                    try { localStorage.setItem('till_view_by', e.target.value); (window as any).__viewByTill__ = e.target.value; } catch {}
-                    if (outlet) await refreshTill(outlet);
-                  }}
-                >
-                  <option value="outlet">Outlet</option>
-                  <option value="till">Till</option>
-                </select>
-                {/* Till dropdown appears only in Till mode */}
-                {typeof window !== 'undefined' && (localStorage.getItem('till_view_by') || 'outlet') === 'till' && (
-                  <TillPicker onChange={async (code)=>{ try { localStorage.setItem('till_view_code', code); } catch {}; if (outlet) await refreshTill(outlet); }} />
-                )}
-              </div>
+              {tillNumber && (
+                <span className="inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-white/5">
+                  Till: <span className="ml-1 font-semibold">{tillNumber}</span>
+                </span>
+              )}
               <div className="inline-flex items-center gap-1 text-xs">
                 <button
                   className={`px-2 py-1 rounded-lg border ${summaryMode==='current' ? 'bg-black text-white' : ''}`}
