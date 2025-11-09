@@ -3,12 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
+import { isGeneralDepositAttendant } from "@/server/general_deposit";
 import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 import { computeSnapshotTotals } from "@/server/finance";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const outlet = searchParams.get("outlet") || "";
+  const attendantCode = (searchParams.get("attendant") || searchParams.get("attendantCode") || "").toString();
   const tz = APP_TZ;
   const dateParam = (searchParams.get("date") || "").slice(0, 10);
   const today = dateISOInTZ(new Date(), tz);
@@ -185,6 +187,7 @@ export async function GET(req: Request) {
   // If this is Current day and there's no activity yet, gate totals to zero to avoid inflating from opening stock
   const hasTill = Array.isArray(tillCountRows) && tillCountRows.length > 0 && Number((tillCountRows as any)[0]?.counted || 0) > 0;
   const hasActivity = (closingRows.length > 0) || (expenses.length > 0) || (deposits.length > 0) || hasTill;
+  const isSpecial = await isGeneralDepositAttendant(attendantCode).catch(()=>false);
   if (isCurrent && !hasActivity) {
     return NextResponse.json({
       ok: true,
@@ -199,9 +202,10 @@ export async function GET(req: Request) {
         openingValue: openingValueGross,
         // Show outstanding from the previously closed period immediately (snapshot if available, else yesterday)
         carryoverPrev: outstandingPrev,
-        // As till payments come in, they reduce the cash to deposit even before any other activity.
-        // Allow negative (excess sales, commissions, or payouts).
-        amountToDeposit: Number(outstandingPrev || 0) - Number(tillSalesGrossCurrent || 0),
+        // Special attendants: do NOT subtract till sales because their sales require direct deposits
+        amountToDeposit: isSpecial
+          ? Number(outstandingPrev || 0)
+          : Number(outstandingPrev || 0) - Number(tillSalesGrossCurrent || 0),
       },
     });
   }
@@ -233,7 +237,10 @@ export async function GET(req: Request) {
   // Inclusive amount to deposit: carryover + today's to-deposit (todayTotalSales - verifiedDeposits)
   // Reduce deposit requirement by gross till takings (cash needed is lower when sales go to till)
   // Allow negative balances (e.g., over-deposited/commission scenarios)
-  const amountToDeposit = Number(outstandingPrev || 0) + Number(todayTotalSales || 0) - Number(verifiedDeposits || 0) - Number(tillSalesGross || 0);
+  // Special attendants: do NOT reduce by tillSalesGross (they must deposit their sales)
+  const amountToDeposit = isSpecial
+    ? Number(outstandingPrev || 0) + Number(todayTotalSales || 0) - Number(verifiedDeposits || 0)
+    : Number(outstandingPrev || 0) + Number(todayTotalSales || 0) - Number(verifiedDeposits || 0) - Number(tillSalesGross || 0);
 
   return NextResponse.json({
     ok: true,

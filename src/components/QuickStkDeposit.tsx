@@ -7,6 +7,8 @@ type Props = {
   defaultPhone?: string;       // e.g. "2547XXXXXXXX"
   attendantName?: string;      // for UX only
   defaultAmount?: number | null; // amount picked from summary (optional)
+  attendantCode?: string | null; // for special deposit mode tagging
+  generalDepositMode?: boolean;  // forces GENERAL_DEPOSIT mode
   onSuccessAction?: () => void | Promise<void>;
 };
 
@@ -39,6 +41,8 @@ export default function QuickStkDeposit({
   defaultPhone,
   attendantName,
   defaultAmount,
+  attendantCode,
+  generalDepositMode,
   onSuccessAction,
 }: Props) {
   const [phone, setPhone] = React.useState(defaultPhone ?? "");
@@ -111,14 +115,16 @@ export default function QuickStkDeposit({
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/pay/stk", {
+  const res = await fetch("/api/pay/stk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            outletCode,                  // server chooses till/passkey based on outlet
-            phone: msisdn,               // normalized
-            amount: amt,
-            category: "DEPOSIT",       // optional hint your route already accepts
+    outletCode,
+    phone: msisdn,
+    amount: amt,
+    category: "DEPOSIT",
+    mode: generalDepositMode ? "GENERAL_DEPOSIT" : undefined,
+    attendantCode: attendantCode || undefined,
           }),
       });
 
@@ -156,7 +162,7 @@ export default function QuickStkDeposit({
   return (
     <div className="rounded-2xl border border-zinc-700 bg-zinc-900/40 p-5 mb-6">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold">Quick STK Deposit</h3>
+  <h3 className="text-lg font-semibold">Quick STK Deposit{generalDepositMode ? ' (General Items)' : ''}</h3>
         {attendantName ? (
           <span className="text-xs text-zinc-400">Attendant: {attendantName}</span>
         ) : null}
@@ -200,7 +206,7 @@ export default function QuickStkDeposit({
         </div>
 
         <div className="grid gap-1 md:col-span-2">
-          <label className="text-sm text-zinc-300">Amount to deposit (KES)</label>
+          <label className="text-sm text-zinc-300">Amount to deposit (KES){generalDepositMode ? ' • special formula' : ''}</label>
           <div className="flex items-center gap-2">
             {editingAmount ? (
               <input

@@ -15,7 +15,7 @@ export const revalidate = 0;
 let localPrisma: any = prisma;
 export function setPrisma(p: any){ localPrisma = p; }
 
-type Body = { outletCode: string; phone: string; amount: number; accountRef?: string; description?: string; category?: string };
+type Body = { outletCode: string; phone: string; amount: number; accountRef?: string; description?: string; category?: string; mode?: string; attendantCode?: string };
 
 function ok(data: any){ return NextResponse.json({ ok: true, data }); }
 function fail(error: string, code = 400){ return NextResponse.json({ ok: false, error }, { status: code }); }
@@ -23,8 +23,8 @@ function fail(error: string, code = 400){ return NextResponse.json({ ok: false, 
 export async function POST(req: Request) {
   try {
     if (!WA_DARAJA_ENABLED) return NextResponse.json({ ok: false, error: 'Daraja disabled' }, { status: 400 });
-    const body = await req.json() as Body;
-    const { outletCode, phone, amount } = body;
+  const body = await req.json() as Body;
+  const { outletCode, phone, amount } = body;
     if (!outletCode) return fail('outletCode required');
     // Normalize and validate outlet code against Prisma enum OutletCode
     const allowedOutletCodes = ['BRIGHT','BARAKA_A','BARAKA_B','BARAKA_C','GENERAL'];
@@ -36,7 +36,12 @@ export async function POST(req: Request) {
     if (!amount || Number(amount) <= 0) return fail('amount must be > 0');
 
     // allow category-based override
-  const finalOutlet = body['category'] ? resolveOutletForCategory((body as any).category, normalizedRequestedOutlet) : normalizedRequestedOutlet;
+  // Special mode: GENERAL_DEPOSIT forces GENERAL till usage regardless of outlet
+  const requestedMode = String(body.mode || '').toUpperCase();
+  const isGeneralDepositMode = requestedMode === 'GENERAL_DEPOSIT';
+  const finalOutlet = isGeneralDepositMode
+    ? 'GENERAL'
+    : (body['category'] ? resolveOutletForCategory((body as any).category, normalizedRequestedOutlet) : normalizedRequestedOutlet);
 
     // Resolve till by outlet code. If none configured for this outlet, fall back to GENERAL till
   let till = await (localPrisma as any).till.findFirst({ where: { outletCode: finalOutlet, isActive: true } });
@@ -119,8 +124,12 @@ export async function POST(req: Request) {
       partyB: partyB,
   storeNumber: storeNumber,
       headOfficeNumber: headOfficeShortcode,
-      accountReference: body.accountRef || undefined,
-      description: body.description || undefined,
+      accountReference: isGeneralDepositMode
+        ? (body.accountRef || (body.attendantCode ? `DEP_${String(body.attendantCode).toUpperCase()}` : 'DEP_GENERAL'))
+        : (body.accountRef || undefined),
+      description: isGeneralDepositMode
+        ? (body.description || 'Deposit for general items')
+        : (body.description || undefined),
     }});
 
     // Ensure callback base URL is present (daraja client requires it)
@@ -134,7 +143,7 @@ export async function POST(req: Request) {
     }
 
     // Initiate STK (Daraja errors are handled separately so we can update DB and log stack)
-  logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode, mode, partyB });
+  logger.info({ action: 'stkPush:request', outletCode: finalOutlet, msisdn: phone, amount, shortcode: useShortcode, mode, partyB, generalDepositMode: isGeneralDepositMode });
     try {
       const transactionType = mode === 'PAYBILL_HO' ? 'CustomerPayBillOnline' : 'CustomerBuyGoodsOnline';
       // Passkey param: per-till when BG_PER_TILL; undefined uses HO passkey via env fallback

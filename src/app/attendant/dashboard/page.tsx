@@ -8,6 +8,7 @@ import { readJSON as safeReadJSON } from "@/utils/safeStorage";
 import { promptSync, confirmSync } from '@/lib/ui';
 import { notifyToast, registerAdminToast } from '@/lib/toast';
 import QuickStkDeposit from '@/components/QuickStkDeposit';
+import { isGeneralDepositAttendant } from '@/server/general_deposit';
 
 /** ========= Types ========= */
 type Unit = "kg" | "pcs";
@@ -170,6 +171,7 @@ export default function AttendantDashboardPage() {
   const [tillTotal, setTillTotal] = useState(0);
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
+  const [isGeneralDeposit, setIsGeneralDeposit] = useState(false);
   const [attendantPhone, setAttendantPhone] = useState<string | null>(null);
   const [outletCodeState, setOutletCodeState] = useState<string | null>(null);
   const [tillNumber, setTillNumber] = useState<string | null>(null);
@@ -217,6 +219,21 @@ export default function AttendantDashboardPage() {
       }
 
       const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
+  // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
+  useEffect(() => {
+    if (!attendantCode) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/settings/general-deposit?code=${encodeURIComponent(attendantCode)}`);
+        if (r.ok) {
+          const j = await r.json();
+          setIsGeneralDeposit(!!j?.isGeneralDeposit);
+        } else {
+          // Fallback client-side (non-blocking): we can skip if endpoint not present yet.
+        }
+      } catch {}
+    })();
+  }, [attendantCode]);
       if (arr && arr.length > 0) {
         const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
         setCatalog(map);
@@ -1091,8 +1108,9 @@ export default function AttendantDashboardPage() {
   async function fetchHeaderTotals(outletName: string, summaryDate?: string, periodPrevious?: boolean): Promise<{
     todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number;
   }> {
-    const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
-    const url = `${base}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
+  const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
+  const att = attendantCode ? `&attendant=${encodeURIComponent(attendantCode)}` : "";
+  const url = `${base}${att}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
     const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number } }>(url);
     if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
     return h.totals as any;
@@ -1534,6 +1552,8 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           {/* Quick STK Deposit card (M-Pesa Express) */}
           <QuickStkDeposit
+            attendantCode={attendantCode}
+            generalDepositMode={isGeneralDeposit}
             outletCode={outletCodeState ?? (typeof outlet === 'string' ? outlet : 'GENERAL')}
             defaultPhone={attendantPhone ?? undefined}
             attendantName={attendantName ?? undefined}
@@ -1769,6 +1789,8 @@ export default function AttendantDashboardPage() {
               tooltip={"Calculated from stock: sum over items of (opening − closing − waste) × price, then minus expenses."}
             />
             <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />
+            {!isGeneralDeposit && <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />}
+            {!isGeneralDeposit && <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."} />}
             <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} tooltip={summaryMode==='previous' ? 'Deposits verified for the closed day.' : 'Deposits verified so far today.'} />
             <CardKPI
               label="Till Sales (Net)"
