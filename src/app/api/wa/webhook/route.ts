@@ -198,6 +198,8 @@ export async function POST(req: Request) {
                 "SUP_TAB_SUPPLY_TODAY": "SPL_DELIVER",
                 "SUP_TAB_VIEW": "SPL_RECENT",
                 "SUP_TAB_DISPUTE": "SPL_DISPUTES",
+                "SUP_TAB_TRANSFER": "SUPL_TRANSFER",
+                "SUP_TAB_OPENING": "SUPL_VIEW_OPENING",
                 "SUP_TAB_HELP": "SPL_MENU",
                 // Action intents → concrete flow steps
                 "SUP_SUPPLY_ADD": "SPL_ADD_MORE",
@@ -232,13 +234,13 @@ export async function POST(req: Request) {
               return map[digit] || "SV_HELP";
             } else if (role === "supplier") {
               const map: Record<string, string> = {
-                "1": "SUPL_DELIVERY",
+                "1": "SUPL_SUBMIT_DELIVERY",
                 "2": "SUPL_VIEW_OPENING",
                 "3": "SUPL_DISPUTES",
-                "4": "SUPL_HELP",
-                "5": "SUPL_HELP",
+                "4": "SUPL_TRANSFER",
+                "5": "SUPL_DISPUTES",
                 "6": "SUPL_HELP",
-                "7": "SUPL_HELP",
+                "7": "LOGOUT",
               };
               return map[digit] || "SUPL_HELP";
             } else {

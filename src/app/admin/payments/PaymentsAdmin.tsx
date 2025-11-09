@@ -80,11 +80,14 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
       </div>
 
       <table className="w-full mb-6">
-        <thead><tr><th>Date</th><th>Outlet</th><th>Till</th><th>Amount</th><th>Phone</th><th>Receipt</th><th>Status</th></tr></thead>
+        <thead><tr><th>Date</th><th>Outlet</th><th>Shortcode Used</th><th>Amount</th><th>Phone</th><th>Receipt</th><th>Status</th></tr></thead>
         <tbody>
-          {filtered.map((p:any) => (
-            <tr key={p.id}><td>{new Date(p.createdAt).toLocaleString()}</td><td>{p.outletCode}</td><td>{p.storeNumber}</td><td>{p.amount}</td><td>{p.msisdn}</td><td>{p.mpesaReceipt}</td><td>{p.status}</td></tr>
-          ))}
+          {filtered.map((p:any) => {
+            const shortcode = p.businessShortCode || p.tillNumber || p.storeNumber || p.headOfficeNumber || '';
+            return (
+              <tr key={p.id}><td>{new Date(p.createdAt).toLocaleString()}</td><td>{p.outletCode}</td><td>{shortcode}</td><td>{p.amount}</td><td>{p.msisdn}</td><td>{p.mpesaReceipt}</td><td>{p.status}</td></tr>
+            );
+          })}
         </tbody>
       </table>
 

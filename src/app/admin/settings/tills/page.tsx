@@ -25,7 +25,7 @@ export default async function Page() {
       <div className="col-span-2">
         {defaultMappingApplied ? (
           <div className="mb-4 p-3 rounded border-l-4 border-green-400 bg-green-900 text-white">
-            Default till mapping detected: Baraka C → {EXPECTED_BARAKA_TILL}, General → {EXPECTED_GENERAL_TILL}
+            Default till mapping detected: Baraka B → {EXPECTED_BARAKA_TILL}, General → {EXPECTED_GENERAL_TILL}
           </div>
         ) : null}
         <h1 className="text-2xl font-bold">Tills</h1>

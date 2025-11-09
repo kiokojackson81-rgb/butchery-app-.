@@ -3,15 +3,16 @@ import { prisma } from '@/lib/prisma';
 
 export async function POST(req: Request) {
   try {
-    // Desired mapping: swap Baraka B and General tills
-    // - Baraka B gets 3574947 (store stays 3574837)
-    // - General gets 3574873 (store stays 3574821)
+  // Desired mapping (corrected): swap Baraka B and General tills + store numbers per latest directive
+  // Final target mapping:
+  // - Baraka B:   till 3574947 | store 3574821
+  // - General:    till 3574873 | store 3574837
     const seed = [
       { label: 'Bright',   tillNumber: '3574877', storeNumber: '3574841', headOfficeNumber: '3574813', outletCode: 'BRIGHT' },
       { label: 'Baraka A', tillNumber: '3574875', storeNumber: '3574839', headOfficeNumber: '3574813', outletCode: 'BARAKA_A' },
-      { label: 'Baraka B', tillNumber: '3574947', storeNumber: '3574837', headOfficeNumber: '3574813', outletCode: 'BARAKA_B' },
+  { label: 'Baraka B', tillNumber: '3574947', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'BARAKA_B' },
       { label: 'Baraka C', tillNumber: '3574871', storeNumber: '3574835', headOfficeNumber: '3574813', outletCode: 'BARAKA_C' },
-      { label: 'General',  tillNumber: '3574873', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
+  { label: 'General',  tillNumber: '3574873', storeNumber: '3574837', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
     ];
 
     // Upsert by tillNumber (unique) and ensure exactly one ACTIVE per outlet from the target mapping

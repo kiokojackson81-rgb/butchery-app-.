@@ -5,9 +5,10 @@ const prisma = new PrismaClient();
 const SEED: Array<{ label: string; tillNumber: string; storeNumber: string; headOfficeNumber: string; outletCode: any }> = [
   { label: 'Bright', tillNumber: '3574877', storeNumber: '3574841', headOfficeNumber: '3574813', outletCode: 'BRIGHT' },
   { label: 'Baraka A', tillNumber: '3574875', storeNumber: '3574839', headOfficeNumber: '3574813', outletCode: 'BARAKA_A' },
-  { label: 'Baraka B', tillNumber: '3574873', storeNumber: '3574837', headOfficeNumber: '3574813', outletCode: 'BARAKA_B' },
-  { label: 'Baraka C', tillNumber: '3574947', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'BARAKA_C' },
-  { label: 'General', tillNumber: '3574871', storeNumber: '3574835', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
+  // Updated mapping: Baraka B till/store swapped with General store per latest directive
+  { label: 'Baraka B', tillNumber: '3574947', storeNumber: '3574821', headOfficeNumber: '3574813', outletCode: 'BARAKA_B' },
+  { label: 'Baraka C', tillNumber: '3574871', storeNumber: '3574835', headOfficeNumber: '3574813', outletCode: 'BARAKA_C' },
+  { label: 'General', tillNumber: '3574873', storeNumber: '3574837', headOfficeNumber: '3574813', outletCode: 'GENERAL' },
 ];
 
 async function main() {

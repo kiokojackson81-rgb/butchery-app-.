@@ -14,6 +14,9 @@ import {
   buildAfterSaveButtons,
 } from "@/server/wa/wa_messages";
 import { lockPeriod } from "@/server/trading_period";
+import { notifyTransferCreated } from "@/server/supplier/supplier.notifications";
+import { getTodaySupplySummary } from "@/server/supply";
+import { listProductsForOutlet } from "@/server/supplier/supplier.service";
 
 export type SupplierState =
   | "SPL_MENU"
@@ -28,6 +31,8 @@ export type SupplierState =
   | "SPL_TRANSFER_PRODUCT"
   | "SPL_TRANSFER_QTY"
   | "SPL_TRANSFER_UNIT"
+  | "SPL_TRANSFER_CONFIRM"
+  | "SPL_VIEW_OPENING_PICK_OUTLET"
   | "SPL_RECENT"
   | "SPL_MOD_OUTLET"
   | "SPL_MOD_NOTE"
@@ -43,6 +48,10 @@ export type SupplierCursor = {
   unit?: "kg" | "pcs";
   fromOutlet?: string;
   toOutlet?: string;
+  lastSig?: string; // idempotency signature of last save (delivery)
+  lastSigTs?: number;
+  pricebookPending?: boolean;
+  stockPending?: boolean;
 };
 
 const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
@@ -161,6 +170,38 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
+    case "SUPL_VIEW_OPENING": {
+      // View opening summary; if only one assigned outlet, auto-display
+      const assigned = await (prisma as any).phoneMapping.findMany({ where: { phoneE164, role: "supplier" }, select: { outlet: true } });
+      const activeOutlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
+  const outletNames = assigned.length ? assigned.map((a: any) => a.outlet).filter(Boolean) : activeOutlets.map((o: any) => o.name);
+      if (outletNames.length === 1) {
+        const out = outletNames[0]!;
+        const rows = await getTodaySupplySummary(out, today);
+        const lines = rows.length ? rows.map(r => `• ${r.name} ${r.qty}${r.unit} @ ${r.buyPrice || 0}`).join("\n").slice(0, 900) : "No opening rows yet.";
+        await sendTextSafe(gp, `Opening — ${out} (${today})\n${lines}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+      }
+      // Pick outlet first
+      await saveSessionPatch(sess.id, { state: "SPL_VIEW_OPENING_PICK_OUTLET", cursor: { date: today, pricebookPending: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(activeOutlets) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SUPL_PRICEBOOK": {
+      // Show price list (sell price) per outlet. For now: require outlet pick if >1 assigned.
+      const assigned = await (prisma as any).phoneMapping.findMany({ where: { phoneE164, role: "supplier" }, select: { outlet: true } });
+      const activeOutlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
+      const outletNames = assigned.length ? assigned.map((a: any) => a.outlet).filter(Boolean) : activeOutlets.map((o: any) => o.name);
+      const chosen = outletNames.length === 1 ? outletNames[0] : null;
+      if (!chosen) {
+        await saveSessionPatch(sess.id, { state: "SPL_VIEW_OPENING_PICK_OUTLET", cursor: { date: today } }); // reuse outlet pick state
+        return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(activeOutlets) as any }, "AI_DISPATCH_INTERACTIVE");
+      }
+      const products = await listProductsForOutlet(chosen);
+      const lines = products.slice(0, 40).map((p: any) => `• ${p.name} — sell ${p.sellPrice ?? "?"}${p.unit}`).join("\n").slice(0, 900) || "No products.";
+      await sendTextSafe(gp, `Price List — ${chosen} (${today})\n${lines}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+
     case "SPL_RECENT":
     case "SUPL_HISTORY": {
       const rows = await (prisma as any).supplyOpeningRow.findMany({ where: { date: today }, orderBy: { id: "desc" }, take: 5 });
@@ -168,6 +209,13 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
         ? rows.map((r: any) => `• ${r.outletName} — ${r.itemKey} ${r.qty}${r.unit} @ ${r.buyPrice}`).join("\n")
         : "No deliveries today.";
         await sendTextSafe(gp, lines, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      // Offer delete options if there are rows (single-item delete for now)
+      if ((rows || []).length) {
+        const buttons = rows.slice(0,3).map((r: any) => ({ type: "reply", reply: { id: `SPL_DEL_ROW:${r.id}`, title: `Del ${r.itemKey}` } }));
+        buttons.push({ type: "reply", reply: { id: "SPL_MENU", title: "Menu" } });
+        await sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: { type: "button", body: { text: "Delete an item?" }, action: { buttons } } as any }, "AI_DISPATCH_INTERACTIVE");
+        return;
+      }
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
@@ -237,6 +285,22 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
     }
 
+    case "SUPL_VIEW_STOCK": {
+      // For now, reuse opening summary as a proxy for stock. Future: compute from day totals.
+      const assigned = await (prisma as any).phoneMapping.findMany({ where: { phoneE164, role: "supplier" }, select: { outlet: true } });
+      const activeOutlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
+      const outletNames = assigned.length ? assigned.map((a: any) => a.outlet).filter(Boolean) : activeOutlets.map((o: any) => o.name);
+      if (outletNames.length === 1) {
+        const out = outletNames[0]!;
+        const rows = await getTodaySupplySummary(out, today);
+        const lines = rows.length ? rows.map(r => `• ${r.name} ${r.qty}${r.unit}`).join("\n").slice(0, 900) : "No stock rows yet.";
+        await sendTextSafe(gp, `Stock — ${out} (${today})\n${lines}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+      }
+      await saveSessionPatch(sess.id, { state: "SPL_VIEW_OPENING_PICK_OUTLET", cursor: { date: today, stockPending: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(activeOutlets) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+
     case "SPL_MENU":
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
       return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
@@ -248,6 +312,30 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
     // If state was menu and this outlet selection came from a View Opening/View Stock intent,
     // callers will have set the session state accordingly. Default behavior: move to product pick.
+    if (sess.state === "SPL_VIEW_OPENING_PICK_OUTLET") {
+      // Display summary then return to menu
+      const rows = await getTodaySupplySummary(outlet, c.date);
+      const lines = rows.length ? rows.map(r => `• ${r.name} ${r.qty}${r.unit} @ ${r.buyPrice || 0}`).join("\n").slice(0, 900) : "No opening rows yet.";
+      await sendTextSafe(gp, `Opening — ${outlet} (${c.date})\n${lines}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      // If previous action was pricebook pick reuse same state to show pricebook instead (heuristic: check lastSig for marker?)
+      // Simplicity: if the user selected an outlet after SUPL_PRICEBOOK (state reused), also send pricebook.
+      if ((sess.cursor as any)?.pricebookPending) {
+        try {
+          const products = await listProductsForOutlet(outlet);
+          const linesPb = products.slice(0, 40).map((p: any) => `• ${p.name} — sell ${p.sellPrice ?? "?"}${p.unit}`).join("\n").slice(0, 900) || "No products.";
+          await sendTextSafe(gp, `Price List — ${outlet} (${c.date})\n${linesPb}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        } catch {}
+      }
+      else if ((sess.cursor as any)?.stockPending) {
+        try {
+          const rows = await getTodaySupplySummary(outlet, c.date);
+          const linesSt = rows.length ? rows.map(r => `• ${r.name} ${r.qty}${r.unit}`).join("\n").slice(0, 900) : "No stock rows yet.";
+          await sendTextSafe(gp, `Stock — ${outlet} (${c.date})\n${linesSt}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        } catch {}
+      }
+      await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
     if (sess.state === "SPL_TRANSFER_FROM") {
       await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_TO", cursor: { ...c, fromOutlet: outlet } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true, NOT: { name: outlet } }, select: { name: true } });
@@ -271,6 +359,12 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   if (replyId.startsWith("SPL_P:")) {
     const productKey = replyId.split(":")[1]!;
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
+    if (sess.state === "SPL_TRANSFER_PRODUCT") {
+      // Transfer flow: go to qty entry directly
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_QTY", cursor: { ...c, productKey } });
+      await sendTextSafe(gp, "Enter quantity to transfer (numbers only)", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
     // If this product is new for the outlet (never submitted before) we ask for confirmation
     const outlet = c.outlet;
     if (outlet) {
@@ -290,25 +384,48 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   if (replyId === "UNIT_KG" || replyId === "UNIT_PCS") {
     const c: SupplierCursor = (sess.cursor as any) || { date: today };
     const unit = replyId === "UNIT_KG" ? "kg" : "pcs";
-    await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c, unit } });
-    const p = await (prisma as any).product.findUnique({ where: { key: c.productKey }, select: { name: true } });
-  await sendTextSafe(gp, `Save delivery for ${c.outlet}: ${p?.name || c.productKey} ${c.qty}${unit} @ ${c.buyPrice}?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-    return sendInteractiveSafe({
-      messaging_product: "whatsapp",
-      to: gp,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        body: { text: "Confirm?" },
-        action: {
-          buttons: [
-            { type: "reply", reply: { id: "SPL_SAVE", title: "Confirm" } },
-            { type: "reply", reply: { id: "SPL_BACK", title: "Edit" } },
-            { type: "reply", reply: { id: "SPL_CANCEL", title: "Cancel" } },
-          ],
+    // Distinguish between delivery vs transfer confirm
+    if (sess.state === "SPL_TRANSFER_UNIT" || sess.state === "SPL_TRANSFER_QTY") {
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_CONFIRM", cursor: { ...c, unit } });
+      const p = await (prisma as any).product.findUnique({ where: { key: c.productKey }, select: { name: true } });
+      await sendTextSafe(gp, `Confirm transfer: ${p?.name || c.productKey} ${c.qty}${unit} from ${c.fromOutlet} → ${c.toOutlet}?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return sendInteractiveSafe({
+        messaging_product: "whatsapp",
+        to: gp,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Confirm transfer?" },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "SPL_TRANSFER_SAVE", title: "Confirm" } },
+              { type: "reply", reply: { id: "SPL_BACK", title: "Edit" } },
+              { type: "reply", reply: { id: "SPL_CANCEL", title: "Cancel" } },
+            ],
+          },
         },
-      },
-    } as any, "AI_DISPATCH_INTERACTIVE");
+      } as any, "AI_DISPATCH_INTERACTIVE");
+    } else {
+      await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c, unit } });
+      const p = await (prisma as any).product.findUnique({ where: { key: c.productKey }, select: { name: true } });
+    await sendTextSafe(gp, `Save delivery for ${c.outlet}: ${p?.name || c.productKey} ${c.qty}${unit} @ ${c.buyPrice}?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return sendInteractiveSafe({
+        messaging_product: "whatsapp",
+        to: gp,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Confirm?" },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "SPL_SAVE", title: "Confirm" } },
+              { type: "reply", reply: { id: "SPL_BACK", title: "Edit" } },
+              { type: "reply", reply: { id: "SPL_CANCEL", title: "Cancel" } },
+            ],
+          },
+        },
+      } as any, "AI_DISPATCH_INTERACTIVE");
+    }
   }
 
   if (replyId === "SPL_SAVE") {
@@ -318,6 +435,14 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   await sendTextSafe(gp, "Missing details; please try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    // Idempotency guard: if last signature matches and under 30s, do not apply again
+    const sig = `${c.date}:${outlet}:${productKey}:${qty}:${buyPrice}:${unit}`;
+    const now = Date.now();
+    if (c.lastSig === sig && c.lastSigTs && now - c.lastSigTs < 30_000) {
+      await sendTextSafe(gp, "Already saved (ignored duplicate).", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock: true }) as any }, "AI_DISPATCH_INTERACTIVE");
     }
     // If exists, automatically ADD to current opening; otherwise create
     const existed = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
@@ -351,8 +476,51 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
   await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
-    await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
+    await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, lastSig: sig, lastSigTs: now } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
+  }
+
+  if (replyId === "SPL_TRANSFER_SAVE") {
+    const c: SupplierCursor = (sess.cursor as any) || { date: today };
+    const { fromOutlet, toOutlet, productKey, qty, unit } = c;
+    if (!fromOutlet || !toOutlet || !productKey || !qty || !unit) {
+      await sendTextSafe(gp, "Missing transfer details; please try again.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    if (fromOutlet === toOutlet) {
+      await sendTextSafe(gp, "From/To must differ.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    // Transaction: record transfer + adjust openings
+    try {
+      await prisma.$transaction(async (tx: any) => {
+        await tx.supplyTransfer.create({ data: { date: c.date, fromOutletName: fromOutlet, toOutletName: toOutlet, itemKey: productKey, qty, unit } });
+        // decrement FROM
+        const fromRow = await tx.supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: fromOutlet, itemKey: productKey } } });
+        const fromQty = Math.max(0, (fromRow?.qty || 0) - qty);
+        await tx.supplyOpeningRow.upsert({
+          where: { date_outletName_itemKey: { date: c.date, outletName: fromOutlet, itemKey: productKey } },
+          create: { date: c.date, outletName: fromOutlet, itemKey: productKey, qty: fromQty, unit, buyPrice: fromRow?.buyPrice || 0 },
+          update: { qty: fromQty },
+        });
+        // increment TO
+        const toRow = await tx.supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: toOutlet, itemKey: productKey } } });
+        const toQty = (toRow?.qty || 0) + qty;
+        await tx.supplyOpeningRow.upsert({
+          where: { date_outletName_itemKey: { date: c.date, outletName: toOutlet, itemKey: productKey } },
+          create: { date: c.date, outletName: toOutlet, itemKey: productKey, qty: toQty, unit, buyPrice: toRow?.buyPrice || 0 },
+          update: { qty: toQty },
+        });
+      });
+      try { await notifyTransferCreated(fromOutlet, toOutlet, c.date, `${productKey} ${qty}${unit}`); } catch {}
+      await sendTextSafe(gp, `Transfer saved: ${productKey} ${qty}${unit} ${fromOutlet} → ${toOutlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    } catch (e: any) {
+      await sendTextSafe(gp, `Failed to save transfer: ${String(e?.message || e)}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
+    await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
+    return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
   if (replyId === "SPL_SAVE_ADD" || replyId === "SPL_SAVE_REPLACE") {
@@ -410,6 +578,22 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
   }
 
+  if (replyId.startsWith("SPL_DEL_ROW:")) {
+    const id = replyId.split(":")[1];
+    try {
+      const row = await (prisma as any).supplyOpeningRow.findUnique({ where: { id: Number(id) } });
+      if (!row) {
+        await sendTextSafe(gp, "Row not found.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } else {
+        await (prisma as any).supplyOpeningRow.delete({ where: { id: Number(id) } });
+        await sendTextSafe(gp, `Deleted ${row.itemKey} ${row.qty}${row.unit} from ${row.outletName}.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      }
+    } catch (e: any) {
+      await sendTextSafe(gp, `Delete failed: ${String(e?.message || e)}`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    }
+    return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
+  }
+
   // Default
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
 }
@@ -439,6 +623,30 @@ export async function handleSupplierText(sess: any, text: string, phoneE164: str
     }
       const c: SupplierCursor = (sess.cursor as any) || { date: today };
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_UNIT", cursor: { ...c, buyPrice: price } });
+      return sendInteractiveSafe({
+        messaging_product: "whatsapp",
+        to: gp,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Pick unit:" },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "UNIT_KG", title: "kg" } },
+              { type: "reply", reply: { id: "UNIT_PCS", title: "pcs" } },
+            ],
+          },
+        },
+      } as any, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SPL_TRANSFER_QTY": {
+      const num = parseQty(text);
+      if (num == null) {
+        await sendTextSafe(gp, "Numbers only, e.g., 4 or 4.5", "AI_DISPATCH_TEXT");
+        return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
+      }
+      const c: SupplierCursor = (sess.cursor as any) || { date: today };
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_UNIT", cursor: { ...c, qty: num } });
       return sendInteractiveSafe({
         messaging_product: "whatsapp",
         to: gp,
@@ -500,6 +708,41 @@ async function supplierGoBack(sess: any, gp: string) {
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_OUTLET", cursor: { ...c } });
       const outlets = await (prisma as any).outlet.findMany({ where: { active: true }, select: { name: true } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SPL_TRANSFER_PRODUCT": {
+      // Go back to choosing TO outlet
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_TO", cursor: { ...c } });
+      const outlets = await (prisma as any).outlet.findMany({ where: { active: true, NOT: { name: c.fromOutlet } }, select: { name: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildOutletList(outlets) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SPL_TRANSFER_QTY": {
+      // Back goes to product list again
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_PRODUCT", cursor: { ...c } });
+      const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SPL_TRANSFER_UNIT": {
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_QTY", cursor: { ...c } });
+      await sendText(gp, "Enter quantity to transfer (numbers only)", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      return sendInteractive({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildBackCancel() as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    case "SPL_TRANSFER_CONFIRM": {
+      await saveSessionPatch(sess.id, { state: "SPL_TRANSFER_UNIT", cursor: { ...c } });
+      return sendInteractive({
+        messaging_product: "whatsapp",
+        to: gp,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Pick unit:" },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "UNIT_KG", title: "kg" } },
+              { type: "reply", reply: { id: "UNIT_PCS", title: "pcs" } },
+            ],
+          },
+        },
+      } as any, "AI_DISPATCH_INTERACTIVE");
     }
     case "SPL_DELIV_PICK_OUTLET": {
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: todayLocalISO() } });
