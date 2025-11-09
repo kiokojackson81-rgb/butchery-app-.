@@ -185,18 +185,20 @@ try {
   });
 } catch {}
 
-// Synchronous ensure: add the column early to avoid Prisma RETURNING errors in cold paths
-try {
-  if (!NO_DB) {
-    const ok = await detectTypeColumn();
-    if (!ok) {
-      await (base as any).$executeRawUnsafe(
-        'ALTER TABLE "public"."WaMessageLog" ADD COLUMN IF NOT EXISTS "type" TEXT'
-      );
-      __hasTypeColumn = true;
+// Async ensure wrapper to avoid top-level await (scripts executed via tsx/esbuild in CJS mode)
+(async () => {
+  try {
+    if (!NO_DB) {
+      const ok = await detectTypeColumn();
+      if (!ok) {
+        await (base as any).$executeRawUnsafe(
+          'ALTER TABLE "public"."WaMessageLog" ADD COLUMN IF NOT EXISTS "type" TEXT'
+        );
+        __hasTypeColumn = true;
+      }
     }
-  }
-} catch {}
+  } catch {}
+})();
 
 // Minimal test hook
 // Use a unique export name to avoid HMR duplicate declaration collisions

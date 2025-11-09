@@ -36,7 +36,8 @@
     "seed:phone:attendant": "tsx scripts/seed-phone-mapping.ts +254705663175 attendant Kawangware ATT001 'Attendant'",
     "seed:phone:supplier": "tsx scripts/seed-phone-mapping.ts +254705663175 supplier Kawangware SUPL001 'Supplier'",
     "postinstall": "prisma generate",
-    "verify:all": "bash scripts/verify-all.sh"
+    "verify:all": "bash scripts/verify-all.sh",
+    "audit:tills": "tsx scripts/audit-tills-payments.ts"
   },
   "darajaScripts": {
     "token": "tsx scripts/daraja/token-fetch.ts",
