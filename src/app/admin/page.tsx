@@ -441,28 +441,18 @@ export default function AdminPage() {
       try { await hydrateLocalStorageFromDB([K_CODES as any]); } catch {}
       const refreshed = parseLS<PersonCode[]>(K_CODES) ?? payload;
 
-      const byNorm = new Map<string, PersonCode>();
-      codes.forEach((item) => {
-        const key = normCode(item.code);
-        if (key) byNorm.set(key, item);
-      });
-
+      // Build a previous snapshot map by stable id (prevents duplicate-code bleed)
+      const byId = new Map<string, PersonCode>();
+      codes.forEach((item) => { if (item?.id) byId.set(item.id, item); });
+      const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
       const normalized = refreshed.map((row: any) => {
-        const key = normCode(row?.code || '');
-        const prev = key ? byNorm.get(key) : undefined;
+        const prev = (row?.id && byId.get(String(row.id))) || undefined;
         const rawRole = String(row?.role || '').toLowerCase();
-        let role: PersonCode["role"];
-        if (rawRole === 'assistant' || rawRole === 'supervisor' || rawRole === 'supplier' || rawRole === 'attendant') {
-          role = rawRole as any;
-        } else if (prev?.role) {
-          role = prev.role; // fallback ONLY to previous row's role
-        } else {
-          role = 'attendant';
-        }
+        const role: PersonCode["role"] = allowedRoles.has(rawRole) ? (rawRole as any) : (prev?.role || 'attendant');
         return {
-          id: prev?.id ?? rid(),
-          name: typeof row?.name === 'string' ? row.name : '',
-          code: typeof row?.code === 'string' ? row.code : '',
+          id: typeof row?.id === 'string' && row.id ? row.id : (prev?.id ?? rid()),
+          name: typeof row?.name === 'string' ? row.name : (prev?.name || ''),
+          code: typeof row?.code === 'string' ? row.code : (prev?.code || ''),
           role,
           active: row?.active === false ? false : true,
           salaryAmount: typeof row?.salaryAmount === 'number' ? row.salaryAmount : prev?.salaryAmount,
@@ -688,14 +678,27 @@ export default function AdminPage() {
   }, [normalizeOutletList, refreshOutletsFromServer]);
 
   const persistCodes = useCallback(async (nextCodes: PersonCode[]) => {
-    const payload = nextCodes
-      .filter((c) => typeof c.code === 'string' && c.code.trim().length > 0)
+    // Normalize per row by id to avoid role bleed when duplicate codes exist transiently in the editor.
+    const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
+    const cleaned: PersonCode[] = nextCodes.map(row => {
+      const rawRole = String(row.role || '').toLowerCase();
+      const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : 'attendant';
+      return {
+        ...row,
+        role,
+        id: typeof row.id === 'string' && row.id ? row.id : rid(),
+        code: typeof row.code === 'string' ? row.code.trim() : '',
+        name: typeof row.name === 'string' ? row.name : '',
+      };
+    });
+    const payload = cleaned
+      .filter((c) => c.code.length > 0)
       .map((c) => ({
         role: c.role,
-        code: c.code.trim(),
+        code: c.code,
         name: c.name,
         active: c.active,
-        ...(c.role === "attendant" ? {
+        ...((c.role === 'attendant' || c.role === 'assistant') ? {
           salaryAmount: typeof c.salaryAmount === 'number' ? c.salaryAmount : undefined,
           salaryFrequency: c.salaryFrequency,
         } : {}),
@@ -715,7 +718,7 @@ export default function AdminPage() {
         body: JSON.stringify({ action: 'set', codes: assistantCodes })
       }).catch(()=>{});
     } catch {}
-    setCodes(nextCodes);
+    setCodes(cleaned);
   }, []);
 
   // Outlets
