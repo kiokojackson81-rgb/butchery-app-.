@@ -1194,6 +1194,13 @@ export default function AttendantDashboardPage() {
     }
   }, [outlet]);
 
+  // Ensure assistants never land on Till tab by redirecting tab selection
+  useEffect(() => {
+    if (isGeneralDeposit && tab === "till") {
+      setTab("summary");
+    }
+  }, [isGeneralDeposit, tab]);
+
   if (!outlet) {
     return (
       <main className="mobile-container sticky-safe p-6">
@@ -1274,7 +1281,8 @@ export default function AttendantDashboardPage() {
       </nav>
 
       {/* Ensure assistants never land on Till tab */}
-      {isGeneralDeposit && tab === "till" && setTab("summary")}
+  {/* handled via useEffect above to avoid side-effects in render */}
+  {null}
 
       {/* ===== PRODUCTS (Assigned + Prices) ===== */}
       {tab === "products" && (

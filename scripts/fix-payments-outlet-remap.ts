@@ -58,7 +58,7 @@ async function loadTillMap() {
 
 async function loadPayments(since: Date) {
   // Use raw query with COALESCE to avoid Prisma runtime mismatch when DB has nulls in non-null columns
-  const rows = await (prisma as any).$queryRawUnsafe<PaymentRow[]>(
+  const rows = await (prisma as any).$queryRawUnsafe(
     `SELECT id,
             "outletCode" as "outletCode",
             COALESCE("businessShortCode", '') as "businessShortCode",
@@ -71,7 +71,7 @@ async function loadPayments(since: Date) {
       WHERE "createdAt" >= $1
       ORDER BY "createdAt" DESC`,
     since
-  );
+  ) as PaymentRow[];
   return rows;
 }
 

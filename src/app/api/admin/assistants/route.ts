@@ -7,8 +7,10 @@ import { prisma } from '@/lib/prisma';
 import { canonFull } from '@/lib/codeNormalize';
 
 function isAdmin(req: Request): boolean {
-  const h = req.headers.get('x-admin-auth') || req.headers.get('x-admin-token');
-  return h === 'true' || (h && h.length > 0);
+  const h = req.headers.get('x-admin-auth') ?? req.headers.get('x-admin-token');
+  if (h === null) return false;
+  if (h === 'true') return true;
+  return h.length > 0;
 }
 
 async function readList(): Promise<string[]> {
