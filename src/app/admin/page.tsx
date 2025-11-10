@@ -441,14 +441,20 @@ export default function AdminPage() {
       try { await hydrateLocalStorageFromDB([K_CODES as any]); } catch {}
       const refreshed = parseLS<PersonCode[]>(K_CODES) ?? payload;
 
-      // Build a previous snapshot map by stable id (prevents duplicate-code bleed)
-      const byId = new Map<string, PersonCode>();
-      codes.forEach((item) => { if (item?.id) byId.set(item.id, item); });
+      // Build previous snapshot maps by id and by canonical code (for stable hydration without cross-row role bleed)
+      const prevById = new Map<string, PersonCode>();
+      const prevByCode = new Map<string, PersonCode>();
+      codes.forEach((item) => {
+        if (item?.id) prevById.set(item.id, item);
+        const nc = normCode(item.code);
+        if (nc) prevByCode.set(nc, item);
+      });
       const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
       const normalized = refreshed.map((row: any) => {
-        const prev = (row?.id && byId.get(String(row.id))) || undefined;
+        const nc = normCode(row?.code || '');
+        const prev = (row?.id && prevById.get(String(row.id))) || (nc && prevByCode.get(nc)) || undefined;
         const rawRole = String(row?.role || '').toLowerCase();
-        const role: PersonCode["role"] = allowedRoles.has(rawRole) ? (rawRole as any) : (prev?.role || 'attendant');
+        const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : (prev?.role || 'attendant');
         return {
           id: typeof row?.id === 'string' && row.id ? row.id : (prev?.id ?? rid()),
           name: typeof row?.name === 'string' ? row.name : (prev?.name || ''),
@@ -678,17 +684,20 @@ export default function AdminPage() {
   }, [normalizeOutletList, refreshOutletsFromServer]);
 
   const persistCodes = useCallback(async (nextCodes: PersonCode[]) => {
-    // Normalize per row by id to avoid role bleed when duplicate codes exist transiently in the editor.
+    // Normalize per row using both id and canonical code for stability; disallow cross-row role bleed.
     const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
+    const prevById = new Map<string, PersonCode>();
+    codes.forEach(c => { if (c?.id) prevById.set(c.id, c); });
     const cleaned: PersonCode[] = nextCodes.map(row => {
+      const prev = row?.id ? prevById.get(row.id) : undefined;
       const rawRole = String(row.role || '').toLowerCase();
-      const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : 'attendant';
+      const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : (prev?.role || 'attendant');
       return {
         ...row,
         role,
-        id: typeof row.id === 'string' && row.id ? row.id : rid(),
-        code: typeof row.code === 'string' ? row.code.trim() : '',
-        name: typeof row.name === 'string' ? row.name : '',
+        id: typeof row.id === 'string' && row.id ? row.id : (prev?.id || rid()),
+        code: typeof row.code === 'string' ? row.code.trim() : (prev?.code || ''),
+        name: typeof row.name === 'string' ? row.name : (prev?.name || ''),
       };
     });
     const payload = cleaned
@@ -719,7 +728,7 @@ export default function AdminPage() {
       }).catch(()=>{});
     } catch {}
     setCodes(cleaned);
-  }, []);
+  }, [codes]);
 
   // Outlets
   const addOutlet = () => setOutlets(v => [...v, { id: rid(), name: "", code: "", active: true }]);
