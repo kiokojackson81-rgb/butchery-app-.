@@ -134,14 +134,19 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        {Object.entries(outletTotalsState).map(([o,t]:any)=> (
-          <div key={o} className="p-3 border rounded">
-            <div className="font-semibold">{o}</div>
-            <div>Deposits: KSh {t.deposits}</div>
-            <div>Expected: KSh {t.expected}</div>
-            <div className={`${t.deposits - t.expected === 0 ? 'text-green-600' : (t.deposits - t.expected < 0 ? 'text-amber-600' : 'text-red-600')}`}>Diff: KSh {t.deposits - t.expected}</div>
-          </div>
-        ))}
+        {Object.entries(outletTotalsState).map(([o,t]:any)=> {
+          const tillGross = Number(t.tillGross || 0);
+          const expected = Number(t.expected || 0);
+          const diff = tillGross - expected;
+          return (
+            <div key={o} className="p-3 border rounded">
+              <div className="font-semibold">{o}</div>
+              <div>Till Paid (Gross): KSh {tillGross}</div>
+              <div>Expected (Closing Sales): KSh {expected}</div>
+              <div className={`${diff === 0 ? 'text-green-600' : (diff < 0 ? 'text-amber-600' : 'text-red-600')}`}>Diff: KSh {diff}</div>
+            </div>
+          );
+        })}
       </div>
 
       <table className="w-full mb-6">

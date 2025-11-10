@@ -68,7 +68,8 @@ export default async function Page({ searchParams }: any) {
       if (createdAtRange) sumWhere.createdAt = createdAtRange;
       const sumRow = await (prisma as any).payment.aggregate({ where: sumWhere, _sum: { amount: true } });
       const sum = Number(sumRow?._sum?.amount || 0);
-      outletTotals[o] = { deposits: sum, expected: expectedMap[o] || 0 };
+      // Expose as tillGross for clarity (payments to till within the selected period)
+      outletTotals[o] = { tillGross: sum, expected: expectedMap[o] || 0 };
     }
 
     return (
