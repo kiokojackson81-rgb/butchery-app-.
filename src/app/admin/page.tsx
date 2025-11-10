@@ -450,21 +450,18 @@ export default function AdminPage() {
       const normalized = refreshed.map((row: any) => {
         const key = normCode(row?.code || '');
         const prev = key ? byNorm.get(key) : undefined;
+        const rawRole = String(row?.role || '').toLowerCase();
+        const role: PersonCode["role"] = rawRole === 'assistant' || rawRole === 'supervisor' || rawRole === 'supplier'
+          ? (rawRole as any)
+          : (prev?.role === 'assistant' ? 'assistant' : 'attendant');
         return {
           id: prev?.id ?? rid(),
           name: typeof row?.name === 'string' ? row.name : '',
           code: typeof row?.code === 'string' ? row.code : '',
-          // Preserve 'assistant' UI role if previously set locally
-          role: ((): PersonCode["role"] => {
-            const r = String(row?.role || '').toLowerCase();
-            if (r === 'supervisor' || r === 'supplier') return r as any;
-            // Server does not know 'assistant' (coerces to attendant); keep local assistant if previously set
-            if (prev?.role === 'assistant') return 'assistant';
-            return 'attendant';
-          })(),
+          role,
           active: row?.active === false ? false : true,
           salaryAmount: typeof row?.salaryAmount === 'number' ? row.salaryAmount : prev?.salaryAmount,
-          salaryFrequency: typeof row?.salaryFrequency === 'string' ? (row.salaryFrequency as any) : prev?.salaryFrequency,
+          salaryFrequency: typeof row?.salaryFrequency === 'string' ? (row?.salaryFrequency as any) : prev?.salaryFrequency,
         } as PersonCode;
       });
 
