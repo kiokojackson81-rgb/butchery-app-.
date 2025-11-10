@@ -46,7 +46,7 @@ export default async function Page({ searchParams }: any) {
     const sortField = allowedFields.has(sortFieldRaw) ? sortFieldRaw : 'createdAt';
     const sortDir = sortDirRaw === 'asc' ? 'asc' : 'desc';
 
-    const createdAtRange = buildRange(period);
+  const createdAtRange = buildRange(period);
 
     const where: any = {};
     if (outlet) where.outletCode = outlet;
@@ -63,9 +63,24 @@ export default async function Page({ searchParams }: any) {
     const outlets = ['BRIGHT','BARAKA_A','BARAKA_B','BARAKA_C','GENERAL'];
     const expectedMap = await computeExpectedDepositsForOutlets(outlets, prisma);
     const outletTotals: any = {};
+    // Fetch active period starts for all outlets (used when period === 'today')
+    const activePeriods = await (prisma as any).activePeriod.findMany({ where: { outletName: { in: outlets } } }).catch(()=>[] as any[]);
+    const apStartMap = new Map<string, Date>();
+    for (const ap of (activePeriods as any[])) {
+      try {
+        if (ap?.outletName && ap?.periodStartAt) apStartMap.set(ap.outletName, new Date(ap.periodStartAt));
+      } catch {}
+    }
     for (const o of outlets) {
       const sumWhere: any = { outletCode: o, status: 'SUCCESS' };
-      if (createdAtRange) sumWhere.createdAt = createdAtRange;
+      // For 'today', align to current trading period start per outlet; otherwise fall back to calendar range
+      if (period === 'today') {
+        const fromTime = apStartMap.get(o);
+        if (fromTime) sumWhere.createdAt = { gte: fromTime };
+        else if (createdAtRange) sumWhere.createdAt = createdAtRange; // safety fallback
+      } else if (createdAtRange) {
+        sumWhere.createdAt = createdAtRange;
+      }
       const sumRow = await (prisma as any).payment.aggregate({ where: sumWhere, _sum: { amount: true } });
       const sum = Number(sumRow?._sum?.amount || 0);
       // Expose as tillGross for clarity (payments to till within the selected period)

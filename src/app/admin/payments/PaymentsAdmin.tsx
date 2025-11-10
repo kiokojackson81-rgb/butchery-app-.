@@ -104,7 +104,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
     <div>
       <div className="flex flex-wrap gap-4 mb-4 items-center">
         <select value={period} onChange={(e)=>onChangePeriod(e.target.value)} className="border p-2">
-          <option value="today">Today</option>
+          <option value="today">Current Period</option>
           <option value="yesterday">Yesterday</option>
           <option value="last7">Last 7 days</option>
           <option value="all">All time</option>
