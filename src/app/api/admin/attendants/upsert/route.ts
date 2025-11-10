@@ -9,11 +9,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type PersonRole = "attendant" | "supervisor" | "supplier";
+type PersonRole = "attendant" | "assistant" | "supervisor" | "supplier";
 
 function asPersonRole(value: unknown): PersonRole {
   const lower = String(value || "").toLowerCase();
-  if (lower === "supervisor" || lower === "supplier") return lower;
+  if (lower === "supervisor" || lower === "supplier" || lower === 'assistant') return lower as PersonRole;
   return "attendant";
 }
 
@@ -333,7 +333,7 @@ export async function POST(req: Request) {
         const pm = await (prisma as any).phoneMapping.findUnique({ where: { code } }).catch(() => null);
         const phone = pm?.phoneE164 as string | undefined;
         if (!phone) continue;
-        const roleLabel = role === 'attendant' ? 'Attendant' : role === 'supervisor' ? 'Supervisor' : 'Supplier';
+  const roleLabel = role === 'attendant' ? 'Attendant' : role === 'assistant' ? 'Assistant' : role === 'supervisor' ? 'Supervisor' : 'Supplier';
         // Resolve outlet + scope depending on role
         let outlet = "";
         let scope = "";
@@ -365,7 +365,7 @@ export async function POST(req: Request) {
         const pm = await (prisma as any).phoneMapping.findUnique({ where: { code: ev.code } }).catch(() => null);
         const phone = pm?.phoneE164 as string | undefined; if (!phone) continue;
         const outlet = ev.outlet || (await (prisma as any).attendantAssignment.findUnique({ where: { code: ev.code } }).catch(() => null))?.outlet || "";
-        const roleLabel = ev.role === "attendant" ? "Attendant" : ev.role === "supervisor" ? "Supervisor" : "Supplier";
+  const roleLabel = ev.role === "attendant" ? "Attendant" : ev.role === 'assistant' ? 'Assistant' : ev.role === "supervisor" ? "Supervisor" : "Supplier";
         try { await sendTemplate({ to: phone, template: WA_TEMPLATES.roleDeactivation, params: [roleLabel, outlet], contextType: "ASSIGNMENT" }); } catch {}
       }
     } catch {}

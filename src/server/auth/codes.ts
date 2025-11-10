@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { canonFull, canonNum } from "@/lib/codeNormalize";
 
-type Role = "attendant" | "supervisor" | "supplier";
+type Role = "attendant" | "assistant" | "supervisor" | "supplier";
 
 export async function findActiveCode(role: Role, raw: string) {
   const full = canonFull(raw);

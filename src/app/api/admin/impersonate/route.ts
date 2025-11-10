@@ -6,7 +6,7 @@ import { serializeRoleCookie } from "@/lib/roleSession";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
-type Role = "attendant" | "supervisor" | "supplier";
+type Role = "attendant" | "assistant" | "supervisor" | "supplier";
 
 async function resolveOutletRow(outletName?: string | null) {
   const name = (outletName || "").trim();
@@ -32,11 +32,11 @@ export async function POST(req: Request) {
     const roleKey = String(role || "").toLowerCase() as Role;
     const full = canonFull(code || "");
     const loose = canonLoose(code || "");
-    if (!roleKey || !["attendant","supervisor","supplier"].includes(roleKey) || (!full && !loose)) {
+    if (!roleKey || !["attendant","assistant","supervisor","supplier"].includes(roleKey) || (!full && !loose)) {
       return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
     }
 
-    if (roleKey === "attendant") {
+    if (roleKey === "attendant" || roleKey === 'assistant') {
       const loginCode = normalizeCode(code || "");
       if (!loginCode) return NextResponse.json({ ok: false, error: "BAD_REQUEST" }, { status: 400 });
 
@@ -92,9 +92,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: "SESSION_CREATE_FAILED" }, { status: 503 });
       }
 
-      const res = NextResponse.json({ ok: true, role: "attendant", code: loginCode, outlet: outletCode || null, redirect: "/attendant/dashboard" });
+      const res = NextResponse.json({ ok: true, role: roleKey, code: loginCode, outlet: outletCode || null, redirect: "/attendant/dashboard" });
       if (sessionHeader) res.headers.append("Set-Cookie", sessionHeader);
-      res.headers.append("Set-Cookie", serializeRoleCookie({ role: "attendant", code: loginCode, outlet: outletCode || null }));
+      res.headers.append("Set-Cookie", serializeRoleCookie({ role: roleKey, code: loginCode, outlet: outletCode || null }));
       return res;
     }
 

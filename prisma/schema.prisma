@@ -400,6 +400,7 @@ model SupervisorCommission {
 
 enum PersonRole {
   attendant
+  assistant
   supervisor
   supplier
 }

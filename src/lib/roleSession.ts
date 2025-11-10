@@ -5,7 +5,7 @@ const ROLE_COOKIE = "bk_role";
 // TTL with sliding renewal handled in getRoleSession (~24h)
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
-type Role = "attendant" | "supervisor" | "supplier";
+type Role = "attendant" | "assistant" | "supervisor" | "supplier";
 export type RolePayload = {
   role: Role;
   code: string;
