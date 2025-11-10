@@ -1216,7 +1216,7 @@ export default function AttendantDashboardPage() {
         </div>
       )}
       {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
+  <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Attendant Dashboard</h1>
           <p className="text-sm text-gray-600">
@@ -1234,6 +1234,11 @@ export default function AttendantDashboardPage() {
             ) : (
               <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-yellow-50 border-yellow-200 text-yellow-700">
                 Awaiting Stock Submit to start new period
+              </span>
+            )}
+            {isGeneralDeposit && (
+              <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-blue-50 border-blue-200 text-blue-800" title="Assistant mode: deposits go to General till; Till Sales are hidden.">
+                Assistant mode • Deposit to GENERAL
               </span>
             )}
           </p>
@@ -1264,9 +1269,12 @@ export default function AttendantDashboardPage() {
         <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
         <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
-        <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>
+        {!isGeneralDeposit && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
         <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
       </nav>
+
+      {/* Ensure assistants never land on Till tab */}
+      {isGeneralDeposit && tab === "till" && setTab("summary")}
 
       {/* ===== PRODUCTS (Assigned + Prices) ===== */}
       {tab === "products" && (
@@ -1665,7 +1673,7 @@ export default function AttendantDashboardPage() {
       )}
 
       {/* ===== TILL PAYMENTS ===== */}
-      {tab === "till" && (
+      {!isGeneralDeposit && tab === "till" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
@@ -1801,15 +1809,13 @@ export default function AttendantDashboardPage() {
               value={`Ksh ${fmt(kpi.todayTotalSales)}`}
               tooltip={"Calculated from stock: sum over items of (opening − closing − waste) × price, then minus expenses."}
             />
-            <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />
-            {!isGeneralDeposit && <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />}
-            {!isGeneralDeposit && <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."} />}
+            {!isGeneralDeposit && (
+              <>
+                <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />
+                <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."} />
+              </>
+            )}
             <CardKPI label="Verified Deposits" value={`Ksh ${fmt(kpi.verifiedDeposits)}`} tooltip={summaryMode==='previous' ? 'Deposits verified for the closed day.' : 'Deposits verified so far today.'} />
-            <CardKPI
-              label="Till Sales (Net)"
-              value={`Ksh ${fmt(kpi.tillSalesNet)}`}
-              tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."}
-            />
             <CardKPI
               label="Carryover (Prev)"
               value={`Ksh ${fmt(kpi.carryoverPrev || 0)}`}
