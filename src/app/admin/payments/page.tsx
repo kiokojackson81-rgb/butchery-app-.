@@ -2,7 +2,7 @@ import React from 'react';
 import { prisma } from '@/lib/prisma';
 import PaymentsAdmin from './PaymentsAdmin';
 import { ToastProvider } from '@/components/ToastProvider';
-import { computeExpectedDepositsForOutlets } from '@/lib/reconciliation';
+import { computeExpectedDepositsForOutlets, computeExpectedDepositsForOutletsFromActivePeriod } from '@/lib/reconciliation';
 import { addDaysISO, todayLocalISO, APP_TZ } from '@/server/trading_period';
 
 // Ensure this page always runs on Node.js (Prisma needs node:crypto) and never caches
@@ -61,7 +61,10 @@ export default async function Page({ searchParams }: any) {
 
     // Totals and expectations
     const outlets = ['BRIGHT','BARAKA_A','BARAKA_B','BARAKA_C','GENERAL'];
-    const expectedMap = await computeExpectedDepositsForOutlets(outlets, prisma);
+    // Align expected deposits to the same window: use ActivePeriod start for current period, else fallback to daily (today) expectation
+    const expectedMap = period === 'today'
+      ? await computeExpectedDepositsForOutletsFromActivePeriod(outlets, prisma)
+      : await computeExpectedDepositsForOutlets(outlets, prisma);
     const outletTotals: any = {};
     // Fetch active period starts for all outlets (used when period === 'today')
     const activePeriods = await (prisma as any).activePeriod.findMany({ where: { outletName: { in: outlets } } }).catch(()=>[] as any[]);
