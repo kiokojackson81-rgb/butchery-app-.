@@ -49,7 +49,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: `unknown_outlet_code: ${String(rawOutlet)}` }, { status: 400 });
     }
 
-    const take = Math.min(Number(url.searchParams.get("take") || 50), 100);
+  const take = Math.min(Number(url.searchParams.get("take") || 50), 100);
+  const sortRaw = url.searchParams.get("sort") || "createdAt:desc"; // pattern field:dir
+  const [sortFieldRaw, sortDirRaw] = sortRaw.split(":");
+  const allowedSortFields = new Set(["createdAt", "amount"]);
+  const sortField = allowedSortFields.has(sortFieldRaw) ? sortFieldRaw : "createdAt";
+  const sortDir = sortDirRaw === "asc" ? "asc" : "desc";
     const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous
     const dateParam = url.searchParams.get("date") || undefined; // YYYY-MM-DD (optional when period=previous)
 
@@ -112,7 +117,7 @@ export async function GET(req: Request) {
     // Fetch recent payments for this outlet within the window
     const raw = await (prisma as any).payment.findMany({
       where: whereWindow,
-      orderBy: { createdAt: "desc" },
+      orderBy: { [sortField]: sortDir },
       take,
       select: {
         id: true,
@@ -145,7 +150,7 @@ export async function GET(req: Request) {
     });
     const total = Number(agg?._sum?.amount || 0);
 
-    return NextResponse.json({ ok: true, mode: byParam, outlet: rawOutlet, outletEnum, code: codeParam || null, inclusive, period: periodParam, total, rows });
+  return NextResponse.json({ ok: true, mode: byParam, outlet: rawOutlet, outletEnum, code: codeParam || null, inclusive, period: periodParam, sort: `${sortField}:${sortDir}`, total, rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

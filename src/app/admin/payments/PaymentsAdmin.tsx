@@ -1,12 +1,17 @@
 "use client";
 import React, { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ToastProvider, useToast } from '@/components/ToastProvider';
 
 type Payment = any;
 
 export default function PaymentsAdmin({ payments, orphans, outletTotals }: { payments: Payment[]; orphans: Payment[]; outletTotals: any }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [filterOutlet, setFilterOutlet] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [period, setPeriod] = useState<string>(searchParams.get('period') || 'today');
+  const [sort, setSort] = useState<string>(searchParams.get('sort') || 'createdAt:desc');
   const [showAttach, setShowAttach] = useState(false);
   const [selectedOrphan, setSelectedOrphan] = useState<any>(null);
   const [outletInput, setOutletInput] = useState('');
@@ -14,6 +19,48 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
   const [orphansState, setOrphansState] = useState<Payment[]>(orphans || []);
   const [outletTotalsState, setOutletTotalsState] = useState<any>({ ...outletTotals });
   const { showToast } = useToast();
+
+  // Sync filters from URL on mount/param change
+  useEffect(() => {
+    const o = searchParams.get('outlet') || '';
+    const s = searchParams.get('status') || '';
+    const p = searchParams.get('period') || 'today';
+    const so = searchParams.get('sort') || 'createdAt:desc';
+    setFilterOutlet(o);
+    setFilterStatus(s);
+    setPeriod(p);
+    setSort(so);
+  }, [searchParams]);
+
+  function pushParams(next: Partial<Record<string, string>>) {
+    const sp = new URLSearchParams(Array.from(searchParams.entries()));
+    for (const [k, v] of Object.entries(next)) {
+      if (v === undefined || v === null || v === '') sp.delete(k);
+      else sp.set(k, v);
+    }
+    const qs = sp.toString();
+    router.push(qs ? `?${qs}` : '?');
+  }
+
+  function onChangePeriod(val: string) {
+    setPeriod(val);
+    pushParams({ period: val });
+  }
+
+  function onChangeSort(val: string) {
+    setSort(val);
+    pushParams({ sort: val });
+  }
+
+  function onChangeOutlet(val: string) {
+    setFilterOutlet(val);
+    pushParams({ outlet: val || '' });
+  }
+
+  function onChangeStatus(val: string) {
+    setFilterStatus(val);
+    pushParams({ status: val || '' });
+  }
 
   const filtered = paymentsState.filter(p => (filterOutlet ? p.outletCode === filterOutlet : true) && (filterStatus ? p.status === filterStatus : true));
 
@@ -55,12 +102,30 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
 
   return (
     <div>
-      <div className="flex gap-4 mb-4">
-        <select value={filterOutlet} onChange={(e)=>setFilterOutlet(e.target.value)} className="border p-2">
+      <div className="flex flex-wrap gap-4 mb-4 items-center">
+        <select value={period} onChange={(e)=>onChangePeriod(e.target.value)} className="border p-2">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="last7">Last 7 days</option>
+          <option value="all">All time</option>
+        </select>
+
+        <select value={sort} onChange={(e)=>onChangeSort(e.target.value)} className="border p-2">
+          <option value="createdAt:desc">Newest first</option>
+          <option value="createdAt:asc">Oldest first</option>
+          <option value="amount:desc">Amount high → low</option>
+          <option value="amount:asc">Amount low → high</option>
+          <option value="status:asc">Status A→Z</option>
+          <option value="status:desc">Status Z→A</option>
+          <option value="outletCode:asc">Outlet A→Z</option>
+          <option value="outletCode:desc">Outlet Z→A</option>
+        </select>
+
+        <select value={filterOutlet} onChange={(e)=>onChangeOutlet(e.target.value)} className="border p-2">
           <option value="">All outlets</option>
           {Object.keys(outletTotalsState).map(o=> <option key={o} value={o}>{o}</option>)}
         </select>
-        <select value={filterStatus} onChange={(e)=>setFilterStatus(e.target.value)} className="border p-2">
+        <select value={filterStatus} onChange={(e)=>onChangeStatus(e.target.value)} className="border p-2">
           <option value="">All statuses</option>
           <option value="PENDING">PENDING</option>
           <option value="SUCCESS">SUCCESS</option>

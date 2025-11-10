@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import PaymentsAdmin from './PaymentsAdmin';
 import { ToastProvider } from '@/components/ToastProvider';
 import { computeExpectedDepositsForOutlets } from '@/lib/reconciliation';
+import { addDaysISO, todayLocalISO, APP_TZ } from '@/server/trading_period';
 
 // Ensure this page always runs on Node.js (Prisma needs node:crypto) and never caches
 export const runtime = "nodejs";
@@ -13,13 +14,48 @@ export default async function Page({ searchParams }: any) {
   try {
     const outlet = searchParams?.outlet;
     const status = searchParams?.status;
+    const period = searchParams?.period || 'today';
+    const sortParam: string = searchParams?.sort || 'createdAt:desc';
+
+    // Build date range for selected period (Nairobi-local trading day by default)
+    const buildRange = (p: string): { gte?: Date; lt?: Date } | undefined => {
+      if (!p || p === 'all') return undefined;
+      const tzOffset = APP_TZ === 'Africa/Nairobi' ? '+03:00' : '+00:00';
+      const todayISO = todayLocalISO();
+      if (p === 'today') {
+        const startISO = todayISO;
+        const endISO = addDaysISO(todayISO, 1);
+        return { gte: new Date(`${startISO}T00:00:00${tzOffset}`), lt: new Date(`${endISO}T00:00:00${tzOffset}`) };
+      }
+      if (p === 'yesterday') {
+        const startISO = addDaysISO(todayISO, -1);
+        const endISO = todayISO;
+        return { gte: new Date(`${startISO}T00:00:00${tzOffset}`), lt: new Date(`${endISO}T00:00:00${tzOffset}`) };
+      }
+      if (p === 'last7') {
+        const startISO = addDaysISO(todayISO, -6);
+        const endISO = addDaysISO(todayISO, 1);
+        return { gte: new Date(`${startISO}T00:00:00${tzOffset}`), lt: new Date(`${endISO}T00:00:00${tzOffset}`) };
+      }
+      return undefined;
+    };
+
+    // Parse sort param like "field:direction"
+    const [sortFieldRaw, sortDirRaw] = String(sortParam).split(':');
+    const allowedFields = new Set(['createdAt', 'amount', 'status', 'outletCode']);
+    const sortField = allowedFields.has(sortFieldRaw) ? sortFieldRaw : 'createdAt';
+    const sortDir = sortDirRaw === 'asc' ? 'asc' : 'desc';
+
+    const createdAtRange = buildRange(period);
+
     const where: any = {};
     if (outlet) where.outletCode = outlet;
     if (status) where.status = status;
+    if (createdAtRange) where.createdAt = createdAtRange;
 
     // Primary queries
     const [payments, orphans] = await Promise.all([
-      (prisma as any).payment.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 }),
+      (prisma as any).payment.findMany({ where, orderBy: { [sortField]: sortDir }, take: 200 }),
       (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
     ]);
 
@@ -28,7 +64,9 @@ export default async function Page({ searchParams }: any) {
     const expectedMap = await computeExpectedDepositsForOutlets(outlets, prisma);
     const outletTotals: any = {};
     for (const o of outlets) {
-      const sumRow = await (prisma as any).payment.aggregate({ where: { outletCode: o, status: 'SUCCESS' }, _sum: { amount: true } });
+      const sumWhere: any = { outletCode: o, status: 'SUCCESS' };
+      if (createdAtRange) sumWhere.createdAt = createdAtRange;
+      const sumRow = await (prisma as any).payment.aggregate({ where: sumWhere, _sum: { amount: true } });
       const sum = Number(sumRow?._sum?.amount || 0);
       outletTotals[o] = { deposits: sum, expected: expectedMap[o] || 0 };
     }

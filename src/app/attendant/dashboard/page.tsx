@@ -169,6 +169,7 @@ export default function AttendantDashboardPage() {
   }, [outlet]);
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
   const [tillTotal, setTillTotal] = useState(0);
+  const [tillSort, setTillSort] = useState<'createdAt:asc' | 'createdAt:desc'>('createdAt:desc');
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
   const [isGeneralDeposit, setIsGeneralDeposit] = useState(false);
@@ -1163,8 +1164,9 @@ export default function AttendantDashboardPage() {
     try {
       const periodQs = summaryMode === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` : '';
       // Always scope Till Payments to the logged-in outlet
-      const base = `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
-      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}`);
+  const base = `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
+  const sortQs = `&sort=${encodeURIComponent(tillSort)}`;
+  const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}${sortQs}`);
       setTillRows(res.rows || []);
       setTillTotal(res.total || 0);
     } catch {
@@ -1705,8 +1707,19 @@ export default function AttendantDashboardPage() {
               <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
             </div>
           </div>
-          <div className="text-sm text-gray-600 mb-2">
+          <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
             Total Till Payments ({summaryMode === 'previous' ? dateStr : 'current period'}): <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Sort</label>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                value={tillSort}
+                onChange={async (e)=>{ const v = e.target.value as 'createdAt:asc'|'createdAt:desc'; setTillSort(v); if (outlet) await refreshTill(outlet); }}
+              >
+                <option value="createdAt:desc">Newest first</option>
+                <option value="createdAt:asc">Oldest first</option>
+              </select>
+            </div>
           </div>
           <div className="table-wrap">
             <table className="w-full text-xs">

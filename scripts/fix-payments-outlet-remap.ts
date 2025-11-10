@@ -25,7 +25,7 @@
 import { prisma } from '@/lib/prisma';
 
 interface TillRow { outletCode: string; tillNumber: string; storeNumber: string; headOfficeNumber: string; }
-interface PaymentRow { id: string; outletCode: string; businessShortCode: string | null; storeNumber: string | null; headOfficeNumber: string | null; createdAt: Date; amount: number; mpesaReceipt: string | null; }
+interface PaymentRow { id: string; outletCode: string; businessShortCode: string; storeNumber: string; headOfficeNumber: string; createdAt: Date; amount: number; mpesaReceipt: string | null; }
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -57,12 +57,22 @@ async function loadTillMap() {
 }
 
 async function loadPayments(since: Date) {
-  const payments: PaymentRow[] = await (prisma as any).payment.findMany({
-    where: { createdAt: { gte: since } },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, outletCode: true, businessShortCode: true, storeNumber: true, headOfficeNumber: true, createdAt: true, amount: true, mpesaReceipt: true },
-  });
-  return payments;
+  // Use raw query with COALESCE to avoid Prisma runtime mismatch when DB has nulls in non-null columns
+  const rows = await (prisma as any).$queryRawUnsafe<PaymentRow[]>(
+    `SELECT id,
+            "outletCode" as "outletCode",
+            COALESCE("businessShortCode", '') as "businessShortCode",
+            COALESCE("storeNumber", '') as "storeNumber",
+            COALESCE("headOfficeNumber", '') as "headOfficeNumber",
+            "createdAt" as "createdAt",
+            COALESCE("amount", 0) as "amount",
+            "mpesaReceipt" as "mpesaReceipt"
+       FROM "Payment"
+      WHERE "createdAt" >= $1
+      ORDER BY "createdAt" DESC`,
+    since
+  );
+  return rows;
 }
 
 async function main() {
