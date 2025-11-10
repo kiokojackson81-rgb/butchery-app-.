@@ -1,14 +1,24 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import AdminGuard from "@/components/guards/AdminGuard";
+import { canonFull } from "@/lib/codeNormalize";
 
 type Row = { code: string };
 
-async function getList(): Promise<string[]> {
-  const r = await fetch("/api/settings/general-deposit?list=1", { cache: "no-store" });
+type AssistantDetail = { code: string; outlet?: string | null; products?: string[] };
+
+async function getList(details = false): Promise<AssistantDetail[]> {
+  // Prefer enriched admin endpoint (includes outlet + products if details=true)
+  const url = details ? "/api/admin/assistants?details=1" : "/api/admin/assistants";
+  const headers: any = {};
+  try { const { getAdminAuth } = await import("@/lib/auth/clientState"); if (getAdminAuth()) headers['x-admin-auth'] = 'true'; } catch { if (typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'true') headers['x-admin-auth'] = 'true'; }
+  const r = await fetch(url, { cache: 'no-store', headers });
   if (!r.ok) return [];
   const j = await r.json();
-  return Array.isArray(j?.list) ? j.list : [];
+  const base = Array.isArray(j?.list) ? j.list : [];
+  // If details were returned
+  if (Array.isArray(j?.details)) return j.details as AssistantDetail[];
+  return base.map((c: any) => ({ code: String(c) }));
 }
 
 async function addCode(code: string) {
@@ -32,7 +42,7 @@ async function removeCode(code: string) {
 }
 
 export default function AssistantsSettingsPage() {
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<AssistantDetail[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +51,8 @@ export default function AssistantsSettingsPage() {
     (async () => {
       try {
         setLoading(true);
-        const list = await getList();
-        setRows(list.map((c) => ({ code: c })));
+  const list = await getList(true);
+  setRows(list);
       } catch (e: any) {
         setError(e?.message || "Failed to load");
       } finally {
@@ -54,7 +64,7 @@ export default function AssistantsSettingsPage() {
   async function onAdd() {
     const raw = input.trim();
     if (!raw) return;
-    const code = raw.toUpperCase().replace(/\s+/g, "");
+  const code = canonFull(raw).toUpperCase();
     const j = await addCode(code);
     if (!j?.ok) { setError(j?.error || "Add failed"); return; }
     setRows((prev) => {
@@ -67,7 +77,7 @@ export default function AssistantsSettingsPage() {
   async function onRemove(code: string) {
     const j = await removeCode(code);
     if (!j?.ok) { setError(j?.error || "Remove failed"); return; }
-    setRows((prev) => prev.filter((r) => r.code !== code));
+  setRows((prev) => prev.filter((r) => r.code !== code));
   }
 
   return (
@@ -96,15 +106,19 @@ export default function AssistantsSettingsPage() {
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2">Code</th>
+                <th>Outlet</th>
+                <th>Products</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="py-2 text-gray-500" colSpan={2}>Loading…</td></tr>}
-              {!loading && rows.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={2}>No assistants yet.</td></tr>}
+              {loading && <tr><td className="py-2 text-gray-500" colSpan={4}>Loading…</td></tr>}
+              {!loading && rows.length === 0 && <tr><td className="py-2 text-gray-500" colSpan={4}>No assistants yet.</td></tr>}
               {rows.map((r) => (
                 <tr key={r.code} className="border-b">
                   <td className="py-2 font-mono">{r.code}</td>
+                  <td className="py-2">{r.outlet || '—'}</td>
+                  <td className="py-2">{Array.isArray(r.products) && r.products.length > 0 ? r.products.join(', ') : '—'}</td>
                   <td className="text-right">
                     <button className="text-xs border rounded-lg px-2 py-1" onClick={() => onRemove(r.code)}>Remove</button>
                   </td>

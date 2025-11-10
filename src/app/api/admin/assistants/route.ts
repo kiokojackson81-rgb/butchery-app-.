@@ -35,7 +35,30 @@ async function writeList(list: string[]): Promise<void> {
 export async function GET(req: Request) {
   try {
     if (!isAdmin(req)) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    const url = new URL(req.url);
+    const details = url.searchParams.get('details');
     const list = await readList();
+    if (details) {
+      // Enrich with outlet and product assignments from AttendantScope / AttendantAssignment
+      const result: Array<{ code: string; outlet?: string | null; products?: string[] }> = [];
+      for (const raw of list) {
+        const code = String(raw).toUpperCase();
+        let outlet: string | null = null; let products: string[] = [];
+        try {
+          const scope = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: canonFull(code) }, include: { products: true } });
+          if (scope) {
+            outlet = String((scope as any).outletName || '') || null;
+            products = Array.isArray((scope as any).products) ? ((scope as any).products as any[]).map((p: any) => String(p?.productKey || '')).filter(Boolean) : [];
+          } else {
+            const assignment = await (prisma as any).attendantAssignment.findUnique({ where: { code: canonFull(code) }, select: { outlet: true, productKeys: true } });
+            outlet = String((assignment as any)?.outlet || '') || null;
+            products = Array.isArray((assignment as any)?.productKeys) ? ((assignment as any).productKeys as any[]).map((k: any) => String(k || '')).filter(Boolean) : [];
+          }
+        } catch {}
+        result.push({ code, outlet, products });
+      }
+      return NextResponse.json({ ok: true, list, details: result });
+    }
     return NextResponse.json({ ok: true, list });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || 'internal') }, { status: 500 });

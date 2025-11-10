@@ -49,6 +49,7 @@ type AdminTab =
   | "commissions"
   | "payments"
   | "tills"
+  | "assistants"
   | "wa-logs";
 
 /** People & Codes */
@@ -56,7 +57,7 @@ type PersonCode = {
   id: string;
   name: string;
   code: string;
-  role: "attendant" | "supervisor" | "supplier";
+  role: "attendant" | "assistant" | "supervisor" | "supplier";
   active: boolean;
   // Optional payroll fields (attendants only)
   salaryAmount?: number;
@@ -409,7 +410,8 @@ export default function AdminPage() {
         code: c.code.trim(),
         name: c.name,
         active: c.active,
-        ...(c.role === "attendant" ? {
+        // Treat assistant like attendant for salary persistence
+        ...((c.role === "attendant" || c.role === 'assistant') ? {
           salaryAmount: typeof c.salaryAmount === 'number' ? c.salaryAmount : undefined,
           salaryFrequency: c.salaryFrequency,
         } : {}),
@@ -452,7 +454,14 @@ export default function AdminPage() {
           id: prev?.id ?? rid(),
           name: typeof row?.name === 'string' ? row.name : '',
           code: typeof row?.code === 'string' ? row.code : '',
-          role: row?.role === 'supervisor' || row?.role === 'supplier' ? row.role : 'attendant',
+          // Preserve 'assistant' UI role if previously set locally
+          role: ((): PersonCode["role"] => {
+            const r = String(row?.role || '').toLowerCase();
+            if (r === 'supervisor' || r === 'supplier') return r as any;
+            // Server does not know 'assistant' (coerces to attendant); keep local assistant if previously set
+            if (prev?.role === 'assistant') return 'assistant';
+            return 'attendant';
+          })(),
           active: row?.active === false ? false : true,
           salaryAmount: typeof row?.salaryAmount === 'number' ? row.salaryAmount : prev?.salaryAmount,
           salaryFrequency: typeof row?.salaryFrequency === 'string' ? (row.salaryFrequency as any) : prev?.salaryFrequency,
@@ -470,6 +479,14 @@ export default function AdminPage() {
       });
       saveLS(K_CODES, normalized);
       try { await refreshScopeFromServer(); } catch {}
+      // Sync assistants allowlist from codes labeled as 'assistant'
+      try {
+        const assistantCodes = normalized.filter(c => c.role === 'assistant').map(c => canonFull(c.code));
+        await fetch('/api/admin/assistants', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+          body: JSON.stringify({ action: 'set', codes: assistantCodes })
+        }).catch(()=>{});
+      } catch {}
   setToast('People & Codes saved ✅');
     } catch (err) {
       console.error('save codes error', err);
@@ -688,6 +705,14 @@ export default function AdminPage() {
     const txt = await res.text();
     let j: any = null; try { j = JSON.parse(txt); } catch {}
     if (!res.ok || !j?.ok) throw new Error(j?.error || txt || 'Failed to save codes');
+    // Sync assistants allowlist from codes labeled as 'assistant'
+    try {
+      const assistantCodes = nextCodes.filter(c => c.role === 'assistant').map(c => canonFull(c.code));
+      await fetch('/api/admin/assistants', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ action: 'set', codes: assistantCodes })
+      }).catch(()=>{});
+    } catch {}
     setCodes(nextCodes);
   }, []);
 
@@ -865,7 +890,7 @@ export default function AdminPage() {
   /** ----- Assignments (Attendants) ----- */
   const activeOutlets = useMemo(() => outlets.filter(o => o.active), [outlets]);
   const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
-  const attendantCodes = useMemo(() => codes.filter(c => c.role === "attendant"), [codes]);
+  const attendantCodes = useMemo(() => codes.filter(c => c.role === "attendant" || c.role === 'assistant'), [codes]);
 
   const normCode = (c: string) => canonFull(c);
 
@@ -1190,6 +1215,7 @@ export default function AdminPage() {
   <TabBtn active={tab==="commissions"} onClick={() => setTab("commissions")}>Commissions</TabBtn>
   <TabBtn active={tab==="payments"} onClick={() => setTab("payments")}>Payments</TabBtn>
   <TabBtn active={tab==="tills"} onClick={() => setTab("tills")}>Tills</TabBtn>
+  <TabBtn active={tab==="assistants"} onClick={() => setTab("assistants")}>Assistants</TabBtn>
   <TabBtn active={tab==="wa-logs"} onClick={() => setTab("wa-logs")}>WhatsApp</TabBtn>
   </nav>
 
@@ -1319,13 +1345,14 @@ export default function AdminPage() {
                         <select className="input-mobile border rounded-xl p-2"
                           value={c.role} onChange={e=>updateCode(c.id,{role:e.target.value as PersonCode["role"]})}>
                           <option value="attendant">attendant</option>
+                          <option value="assistant">assistant</option>
                           <option value="supervisor">supervisor</option>
                           <option value="supplier">supplier</option>
                         </select>
                       </td>
                       {/* Salary (attendants only) */}
                       <td>
-                        {c.role === "attendant" ? (
+                        {c.role === "attendant" || c.role === "assistant" ? (
                           <input
                             className="input-mobile border rounded-xl p-2 w-32"
                             type="number"
@@ -1343,7 +1370,7 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td>
-                        {c.role === "attendant" ? (
+                        {c.role === "attendant" || c.role === "assistant" ? (
                           <select
                             className="input-mobile border rounded-xl p-2"
                             value={c.salaryFrequency || ''}
@@ -1375,7 +1402,7 @@ export default function AdminPage() {
                             const role = c.role;
                             const codeVal = (c.code || '').trim();
                             if (!codeVal) { notifyToast('No code'); return; }
-                            const outletName = role === 'attendant' ? (scope[canonFull(codeVal)]?.outlet || '') : '';
+                            const outletName = (role === 'attendant' || role === 'assistant') ? (scope[canonFull(codeVal)]?.outlet || '') : '';
                             try {
                               const r = await fetch(`/api/admin/impersonate`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
@@ -1419,7 +1446,7 @@ export default function AdminPage() {
           {/* Assignments (Attendants) */}
           <div className="mt-6 pt-4 border-t">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold">Assignments (Attendants)</h3>
+              <h3 className="font-semibold">Assignments (Attendants & Assistants)</h3>
               <button className="border rounded-xl px-3 py-1.5 text-sm" onClick={saveScopesNow}>Save Assignments</button>
             </div>
             <p className="text-xs text-gray-600 mt-1 mb-2">
@@ -1427,7 +1454,7 @@ export default function AdminPage() {
             </p>
 
             {attendantCodes.length === 0 && (
-              <p className="text-xs text-gray-600">Add at least one code with role “attendant”.</p>
+              <p className="text-xs text-gray-600">Add at least one code with role “attendant” or “assistant”.</p>
             )}
 
             {attendantCodes.map(ac => {
@@ -1568,6 +1595,15 @@ export default function AdminPage() {
           <h2 className="font-semibold mb-3">Tills</h2>
           <div className="w-full h-[700px]">
             <iframe src="/admin/settings/tills" className="w-full h-full rounded-2xl border" title="Tills" />
+          </div>
+        </section>
+      )}
+
+      {tab === "assistants" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">Assistant Attendants</h2>
+          <div className="w-full h-[700px]">
+            <iframe src="/admin/settings/assistants" className="w-full h-full rounded-2xl border" title="Assistants" />
           </div>
         </section>
       )}
