@@ -451,9 +451,14 @@ export default function AdminPage() {
         const key = normCode(row?.code || '');
         const prev = key ? byNorm.get(key) : undefined;
         const rawRole = String(row?.role || '').toLowerCase();
-        const role: PersonCode["role"] = rawRole === 'assistant' || rawRole === 'supervisor' || rawRole === 'supplier'
-          ? (rawRole as any)
-          : (prev?.role === 'assistant' ? 'assistant' : 'attendant');
+        let role: PersonCode["role"];
+        if (rawRole === 'assistant' || rawRole === 'supervisor' || rawRole === 'supplier' || rawRole === 'attendant') {
+          role = rawRole as any;
+        } else if (prev?.role) {
+          role = prev.role; // fallback ONLY to previous row's role
+        } else {
+          role = 'attendant';
+        }
         return {
           id: prev?.id ?? rid(),
           name: typeof row?.name === 'string' ? row.name : '',
