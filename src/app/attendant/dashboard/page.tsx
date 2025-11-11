@@ -173,6 +173,7 @@ export default function AttendantDashboardPage() {
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
   const [isGeneralDeposit, setIsGeneralDeposit] = useState(false);
+  const [isAssistantRole, setIsAssistantRole] = useState(false);
   const [assistantInsights, setAssistantInsights] = useState<{
     expected: number;
     recommendedNow: number;
@@ -188,6 +189,7 @@ export default function AttendantDashboardPage() {
   const [tillNumber, setTillNumber] = useState<string | null>(null);
   // Track whether there's any saved activity for today (closings, expenses, deposits, tillcount)
   const [savedClosingTodayCount, setSavedClosingTodayCount] = useState<number>(0);
+  const assistantMode = useMemo(() => isGeneralDeposit || isAssistantRole || !!assistantInsights, [isGeneralDeposit, isAssistantRole, assistantInsights]);
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
@@ -204,7 +206,10 @@ export default function AttendantDashboardPage() {
           const nm = (j?.attendant?.name || "").toString();
           if (nm) setAttendantName(nm);
           const roleRaw = (j?.attendant?.role || "").toString().toLowerCase();
-          if (roleRaw === "assistant") setIsGeneralDeposit(true);
+          if (roleRaw === "assistant") {
+            setIsAssistantRole(true);
+            setIsGeneralDeposit(true);
+          }
           const cd = (j?.attendant?.code || "").toString();
           if (cd) setAttendantCode(cd);
           // Try to capture attendant phone (E.164) if server returned it
@@ -234,7 +239,7 @@ export default function AttendantDashboardPage() {
       const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
   // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
   useEffect(() => {
-    if (!attendantCode) return;
+    if (!attendantCode || isAssistantRole) return;
     (async () => {
       try {
         const r = await fetch(`/api/settings/general-deposit?code=${encodeURIComponent(attendantCode)}`);
@@ -246,7 +251,7 @@ export default function AttendantDashboardPage() {
         }
       } catch {}
     })();
-  }, [attendantCode]);
+  }, [attendantCode, isAssistantRole]);
       if (arr && arr.length > 0) {
         const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
         setCatalog(map);
@@ -1079,6 +1084,10 @@ export default function AttendantDashboardPage() {
         openingValue: Number((totals as any).openingValue ?? 0),
       });
       setAssistantInsights(assistant ?? null);
+      if (assistant) {
+        setIsAssistantRole(true);
+        setIsGeneralDeposit(true);
+      }
     } catch {
       setAssistantInsights(null);
       // Conservative fallback:
@@ -1222,10 +1231,10 @@ export default function AttendantDashboardPage() {
 
   // Ensure assistants never land on Till tab by redirecting tab selection
   useEffect(() => {
-    if (isGeneralDeposit && tab === "till") {
+    if (assistantMode && tab === "till") {
       setTab("summary");
     }
-  }, [isGeneralDeposit, tab]);
+  }, [assistantMode, tab]);
 
   if (!outlet) {
     return (
@@ -1269,7 +1278,7 @@ export default function AttendantDashboardPage() {
                 Awaiting Stock Submit to start new period
               </span>
             )}
-            {isGeneralDeposit && (
+            {assistantMode && (
               <span className="ml-2 inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-blue-50 border-blue-200 text-blue-800" title="Assistant mode: deposits go to General till; Till Sales are hidden.">
                 Assistant mode • Deposit to GENERAL
               </span>
@@ -1302,7 +1311,7 @@ export default function AttendantDashboardPage() {
         <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
         <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
-        {!isGeneralDeposit && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
+        {!assistantMode && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
         <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
       </nav>
 
@@ -1597,7 +1606,7 @@ export default function AttendantDashboardPage() {
           {/* Quick STK Deposit card (M-Pesa Express) */}
           <QuickStkDeposit
             attendantCode={attendantCode}
-            generalDepositMode={isGeneralDeposit}
+            generalDepositMode={assistantMode}
             outletCode={outletCodeState ?? (typeof outlet === 'string' ? outlet : 'GENERAL')}
             defaultPhone={attendantPhone ?? undefined}
             attendantName={attendantName ?? undefined}
@@ -1622,12 +1631,12 @@ export default function AttendantDashboardPage() {
               }
             }}
           />
-            {isGeneralDeposit && assistantInsights && (
-              <p className="mt-3 text-xs text-blue-700 bg-blue-50/70 border border-blue-200 rounded-xl px-3 py-2">
-                Recommended deposit now: <span className="font-semibold">Ksh {fmt(assistantInsights.recommendedNow)}</span>. Sales {fmt(assistantInsights.salesValue)} - Expenses {fmt(assistantInsights.expensesValue)}.
-              </p>
-            )}
-            <div className="flex items-center justify-between">
+          {assistantMode && assistantInsights && (
+            <p className="mt-3 text-xs text-blue-700 bg-blue-50/70 border border-blue-200 rounded-xl px-3 py-2">
+              Recommended deposit now: <span className="font-semibold">Ksh {fmt(assistantInsights.recommendedNow)}</span>. Sales {fmt(assistantInsights.salesValue)} - Expenses {fmt(assistantInsights.expensesValue)}.
+            </p>
+          )}
+          <div className="flex items-center justify-between">
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
           </div>
 
@@ -1712,7 +1721,7 @@ export default function AttendantDashboardPage() {
       )}
 
       {/* ===== TILL PAYMENTS ===== */}
-      {!isGeneralDeposit && tab === "till" && (
+      {!assistantMode && tab === "till" && (
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
@@ -1848,7 +1857,7 @@ export default function AttendantDashboardPage() {
               value={`Ksh ${fmt(kpi.todayTotalSales)}`}
               tooltip={"Calculated from stock: sum over items of (opening − closing − waste) × price, then minus expenses."}
             />
-            {!isGeneralDeposit && (
+            {!assistantMode && (
               <>
                 <CardKPI label="Till Sales (Gross)" value={`Ksh ${fmt(kpi.tillSalesGross)}`} tooltip={summaryMode==='previous' ? 'Gross till payments for the closed day.' : 'Gross till payments so far in the current period.'} />
                 <CardKPI label="Till Sales (Net)" value={`Ksh ${fmt(kpi.tillSalesNet)}`} tooltip={"Till takings after adjustments (e.g., reversals/invalids/fees). Gross shows raw takings."} />
@@ -1873,7 +1882,7 @@ export default function AttendantDashboardPage() {
           </div>
 
           {/* ✅ Highlight red ONLY when > 0 */}
-          {isGeneralDeposit && assistantInsights && (
+          {assistantMode && assistantInsights && (
             <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-3 text-sm">
               <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                 <h4 className="font-semibold text-blue-900">Assistant Deposit Snapshot</h4>
