@@ -22,6 +22,17 @@ type Product = {
   active: boolean;
 };
 
+const FRACTIONAL_PCS_KEYS = new Set<string>(["mutura", "samosas"]);
+
+function allowsFractionalQty(unit: Unit, key?: string | null): boolean {
+  if (unit === "kg") return true;
+  if (unit === "pcs" && key) {
+    const keyLc = key.toLowerCase();
+    return FRACTIONAL_PCS_KEYS.has(keyLc);
+  }
+  return false;
+}
+
 type Outlet = {
   id: string;
   name: string;              // "Bright", "Baraka A", ...
@@ -621,14 +632,14 @@ export default function SupplierDashboard(): JSX.Element {
     // Show a toast and keep the input value (we normalize via onBlur handler too)
     notifyToast("Transfer saved and applied to both outlets’ opening.");
     // Normalize input immediately so user sees canonical value
-    const finalQtyStr = normalizeQtyForInput(qtyNum, p.unit);
+    const finalQtyStr = normalizeQtyForInput(qtyNum, p.unit, p.key);
     setTxQty(finalQtyStr);
   };
 
   // Normalize formatting helper (pcs -> integer, kg -> up to 2dp trimmed)
-  const normalizeQtyForInput = (val: number, unit: Unit) => {
+  const normalizeQtyForInput = (val: number, unit: Unit, key?: string | null) => {
     if (!Number.isFinite(val)) return "";
-    if (unit === "pcs") return String(Math.round(val));
+    if (!allowsFractionalQty(unit, key)) return String(Math.round(val));
     const s = val.toFixed(2);
     return s.replace(/\.00$/, "").replace(/(\.\d[1-9]?)0$/, "$1");
   };
@@ -1001,7 +1012,7 @@ export default function SupplierDashboard(): JSX.Element {
                         type="text"
                         inputMode={unit === "kg" ? "decimal" : "numeric"}
                         placeholder={unit === "kg" ? "e.g. 4.5 kg" : "e.g. 4 pcs"}
-                        value={qtyDraftById[r.id] ?? normalizeQtyForInput(r.qty ?? 0, unit)}
+                        value={qtyDraftById[r.id] ?? normalizeQtyForInput(r.qty ?? 0, unit, r.itemKey)}
                         onChange={(e) => {
                           const raw = e.target.value;
                           if (raw === "") {
@@ -1009,18 +1020,20 @@ export default function SupplierDashboard(): JSX.Element {
                             updateRow(r.id, { qty: 0 });
                             return;
                           }
-                          const allowed = unit === "kg" ? /^\d*(?:[.,]\d*)?$/ : /^\d*$/;
+                          const allowFractional = allowsFractionalQty(unit, r.itemKey);
+                          const allowed = allowFractional ? /^\d*(?:[.,]\d*)?$/ : /^\d*$/;
                           if (!allowed.test(raw)) return;
                           setQtyDraftById((prev) => ({ ...prev, [r.id]: raw }));
                           const n = toNumStr(raw);
                           const clamped = n < 0 ? 0 : n;
-                          const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
+                          const finalQty = allowFractional ? clamped : Math.round(clamped);
                           updateRow(r.id, { qty: finalQty });
                         }}
                         onBlur={(e) => {
                           const n = toNumStr(e.target.value);
                           const clamped = n < 0 ? 0 : n;
-                          const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
+                          const allowFractional = allowsFractionalQty(unit, r.itemKey);
+                          const finalQty = allowFractional ? clamped : Math.round(clamped);
                           updateRow(r.id, { qty: finalQty });
                           setQtyDraftById((prev) => {
                             if (!(r.id in prev)) return prev;
@@ -1243,7 +1256,7 @@ export default function SupplierDashboard(): JSX.Element {
               const p = productByKey[txProductKey];
               const unit = p?.unit ?? "kg";
               const n = toNumStr(txQty);
-              setTxQty(normalizeQtyForInput(n, unit));
+              setTxQty(normalizeQtyForInput(n, unit, p?.key ?? null));
             }}
           />
 
