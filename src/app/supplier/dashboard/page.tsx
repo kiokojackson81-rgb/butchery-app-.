@@ -156,7 +156,31 @@ export default function SupplierDashboard(): JSX.Element {
 
   /* Supply table state */
   const [rows, setRows] = useState<SupplyRow[]>([]);
+  const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({});
+  const [priceDraftById, setPriceDraftById] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<boolean>(false);
+
+  useEffect(() => {
+    const ids = new Set(rows.map((r) => r.id));
+    setQtyDraftById((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (ids.has(key)) next[key] = value;
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+    setPriceDraftById((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (ids.has(key)) next[key] = value;
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [rows]);
 
   /* Transfers */
   const [transfers, setTransfers] = useState<TransferRow[]>([]);
@@ -977,19 +1001,33 @@ export default function SupplierDashboard(): JSX.Element {
                         type="text"
                         inputMode={unit === "kg" ? "decimal" : "numeric"}
                         placeholder={unit === "kg" ? "e.g. 4.5 kg" : "e.g. 4 pcs"}
-                        value={String(r.qty ?? "")}
+                        value={qtyDraftById[r.id] ?? normalizeQtyForInput(r.qty ?? 0, unit)}
                         onChange={(e) => {
-                          const n = toNumStr(e.target.value);
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            setQtyDraftById((prev) => ({ ...prev, [r.id]: raw }));
+                            updateRow(r.id, { qty: 0 });
+                            return;
+                          }
+                          const allowed = unit === "kg" ? /^\d*(?:[.,]\d*)?$/ : /^\d*$/;
+                          if (!allowed.test(raw)) return;
+                          setQtyDraftById((prev) => ({ ...prev, [r.id]: raw }));
+                          const n = toNumStr(raw);
                           const clamped = n < 0 ? 0 : n;
                           const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
                           updateRow(r.id, { qty: finalQty });
                         }}
                         onBlur={(e) => {
-                          // Normalize visually on blur
                           const n = toNumStr(e.target.value);
                           const clamped = n < 0 ? 0 : n;
                           const finalQty = unit === "pcs" ? Math.round(clamped) : clamped;
                           updateRow(r.id, { qty: finalQty });
+                          setQtyDraftById((prev) => {
+                            if (!(r.id in prev)) return prev;
+                            const next = { ...prev };
+                            delete next[r.id];
+                            return next;
+                          });
                         }}
                         disabled={submitted}
                       />
@@ -1001,9 +1039,17 @@ export default function SupplierDashboard(): JSX.Element {
                         type="text"
                         inputMode="decimal"
                         placeholder="e.g. 300"
-                        value={String(r.buyPrice ?? "")}
+                        value={priceDraftById[r.id] ?? (Number.isFinite(r.buyPrice) ? String(r.buyPrice) : "")}
                         onChange={(e) => {
-                          const n = toNumStr(e.target.value);
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            setPriceDraftById((prev) => ({ ...prev, [r.id]: raw }));
+                            updateRow(r.id, { buyPrice: 0 });
+                            return;
+                          }
+                          if (!/^\d*(?:[.,]\d*)?$/.test(raw)) return;
+                          setPriceDraftById((prev) => ({ ...prev, [r.id]: raw }));
+                          const n = toNumStr(raw);
                           const final = n < 0 ? 0 : n;
                           updateRow(r.id, { buyPrice: final });
                         }}
@@ -1011,6 +1057,12 @@ export default function SupplierDashboard(): JSX.Element {
                           const n = toNumStr(e.target.value);
                           const final = n < 0 ? 0 : n;
                           updateRow(r.id, { buyPrice: final });
+                          setPriceDraftById((prev) => {
+                            if (!(r.id in prev)) return prev;
+                            const next = { ...prev };
+                            delete next[r.id];
+                            return next;
+                          });
                         }}
                         disabled={submitted}
                       />
