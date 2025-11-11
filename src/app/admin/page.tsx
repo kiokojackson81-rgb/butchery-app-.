@@ -181,6 +181,8 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [expenses, setExpenses] = useState<FixedExpense[]>([]);
   const [codes, setCodes]       = useState<PersonCode[]>([]);
+  // Separate role state keyed by unique id to avoid any accidental cross-row propagation
+  const [rolesById, setRolesById] = useState<Record<string, PersonCode["role"]>>({});
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
@@ -281,11 +283,15 @@ export default function AdminPage() {
         const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
         setOutlets(o); setProducts(p); setExpenses(e);
         setCodes(c); setScope(s); setPricebook(pb);
+  // seed roles map uniquely
+  const seed: Record<string, PersonCode["role"]> = {};
+  c.forEach(r => { if (r?.id) seed[r.id] = r.role; });
+  setRolesById(seed);
       } catch {
         setOutlets(seedDefaultOutlets());
         setProducts(seedDefaultProducts());
         setExpenses(seedDefaultExpenses());
-        setCodes([]); setScope({}); setPricebook({});
+        setCodes([]); setScope({}); setPricebook({}); setRolesById({});
       } finally {
         setHydrated(true); // mark as loaded
         try {
@@ -476,6 +482,12 @@ export default function AdminPage() {
       });
 
       setCodes(normalized);
+      // refresh roles map (preserve existing when same id present)
+      setRolesById(prev => {
+        const next: Record<string, PersonCode["role"]> = { ...prev };
+        normalized.forEach(r => { if (r.id) next[r.id] = r.role; });
+        return next;
+      });
       setScope((prev) => {
         const allow = new Set(normalized.map((c) => normCode(c.code)));
         const next: ScopeMap = {};
@@ -746,6 +758,11 @@ export default function AdminPage() {
       }).catch(()=>{});
     } catch {}
     setCodes(cleaned);
+    setRolesById(prev => {
+      const next: Record<string, PersonCode["role"]> = { ...prev };
+      cleaned.forEach(r => { if (r.id) next[r.id] = r.role; });
+      return next;
+    });
   }, [codes]);
 
   // Outlets
@@ -916,8 +933,10 @@ export default function AdminPage() {
     setCodes(next);
     saveLS(K_CODES, next);
   };
-  const updateCode = (id: string, patch: Partial<PersonCode>) =>
-    setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch } : c)));
+  const updateCode = (id: string, patch: Partial<PersonCode>) => {
+    setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch, role: patch.role ? patch.role : c.role } : c)));
+    if (patch.role) setRolesById(m => ({ ...m, [id]: patch.role as PersonCode["role"] }));
+  };
 
   /** ----- Assignments (Attendants) ----- */
   const activeOutlets = useMemo(() => outlets.filter(o => o.active), [outlets]);
@@ -1375,7 +1394,9 @@ export default function AdminPage() {
                       </td>
                       <td>
                         <select className="input-mobile border rounded-xl p-2"
-                          value={c.role} onChange={e=>updateCode(c.id,{role:e.target.value as PersonCode["role"]})}>
+                          data-testid={`role-select-${c.id}`}
+                          value={rolesById[c.id] ?? c.role}
+                          onChange={e=>updateCode(c.id,{role:e.target.value as PersonCode["role"]})}>
                           <option value="attendant">attendant</option>
                           <option value="assistant">assistant</option>
                           <option value="supervisor">supervisor</option>
