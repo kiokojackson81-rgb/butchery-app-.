@@ -37,6 +37,7 @@ import {
   buildClosingNotifyButtons,
   buildReviewSummaryText,
 } from "@/lib/wa/messageBuilder";
+import { computeAssistantExpectedDeposit, isAssistant } from "@/server/assistant";
 // (sendText) already imported; (prisma) already imported at top
 
 type Cursor = {
@@ -176,6 +177,11 @@ function fmtQty(n: number): string {
   const v = Math.round((Number(n) || 0) * 10) / 10;
   const s = v.toFixed(1);
   return s.endsWith(".0") ? s.slice(0, -2) : s;
+}
+function fmtMoney(n: number): string {
+  const num = Number(n || 0);
+  if (!Number.isFinite(num)) return "0";
+  return num.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function upsertRow(cursor: Cursor, key: string, patch: Partial<{ closing: number; waste: number; name: string }>) {
@@ -406,6 +412,135 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
   }
 }
 
+async function sendAssistantMenu(phone: string, sess: any, opts?: { force?: boolean; source?: string }) {
+  const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+  let acquiredHere = false;
+  if (!opts?.force) {
+    const allowed = await menuSendAllowed(phoneE164);
+    if (!allowed) {
+      try { console.info?.(`[wa] skip assistant menu`, { phoneE164, source: opts?.source }); } catch {}
+      return;
+    }
+    if (!acquireInFlight(phoneE164)) {
+      try { console.info?.(`[wa] skip assistant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
+      return;
+    }
+    acquiredHere = true;
+  } else {
+    if (!MENU_IN_FLIGHT.has(phoneE164)) {
+      if (!acquireInFlight(phoneE164)) {
+        try { console.info?.(`[wa] force skip assistant menu (concurrent in-flight)`, { phoneE164, source: opts?.source }); } catch {}
+        return;
+      }
+      acquiredHere = true;
+    }
+  }
+
+  try {
+    let summaryLines: string[] = [];
+    try {
+      if (sess?.code) {
+        const metrics = await computeAssistantExpectedDeposit({
+          code: sess.code,
+          outletName: sess.outlet ?? null,
+          respectAllowlist: false,
+        });
+        if (metrics) {
+          if (metrics.ok) {
+            summaryLines = [
+              `Sales: KSh ${fmtMoney(metrics.salesValue)}`,
+              `Expenses: KSh ${fmtMoney(metrics.expensesValue)}`,
+              `Deposited: KSh ${fmtMoney(metrics.depositedSoFar)}`,
+              `Recommended: KSh ${fmtMoney(metrics.recommendedNow)}`,
+            ];
+          } else {
+            summaryLines = [
+              `Period: ${metrics.periodState}`,
+              `Recommended now: KSh ${fmtMoney(metrics.recommendedNow)}`,
+            ];
+          }
+        }
+      }
+    } catch (err) {
+      try { console.error?.("[assistant menu] compute failed", err); } catch {}
+    }
+    if (summaryLines.length === 0) summaryLines = ["No deposit data yet."];
+    const header = sess?.outlet ? `Assistant menu for ${sess.outlet}.` : "Assistant menu.";
+    await sendText(
+      phone,
+      `${header}\n${summaryLines.join("\n")}\nReply SUMMARY for product breakdown.`,
+      "AI_DISPATCH_TEXT",
+      { gpt_sent: true }
+    );
+    const payload = buildButtonPayload(
+      phone.replace(/^\+/, ""),
+      "Choose deposit action",
+      [
+        { type: "reply", reply: { id: "DEP_FULL", title: "Deposit recommended" } },
+        { type: "reply", reply: { id: "DEP_PARTIAL", title: "Deposit partial" } },
+        { type: "reply", reply: { id: "DEP_PASTE", title: "Paste M-Pesa" } },
+      ],
+      "Type SUMMARY for breakdown"
+    );
+    await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE");
+    try {
+      await logOutbound({
+        direction: "out",
+        templateName: null,
+        payload: { phoneE164, source: opts?.source, kind: "assistant_menu" },
+        status: "SENT",
+        type: "MENU_SEND",
+      });
+    } catch {}
+    await markMenuSent(phoneE164, opts?.source);
+  } finally {
+    if (acquiredHere) releaseInFlight(phoneE164);
+  }
+}
+
+async function sendAssistantSummary(phone: string, sess: any, cur: Cursor) {
+  if (!sess?.code) {
+    await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    return;
+  }
+  try {
+    const metrics = await computeAssistantExpectedDeposit({
+      code: sess.code,
+      outletName: sess.outlet ?? null,
+      date: cur.date,
+      respectAllowlist: false,
+    });
+    if (!metrics || metrics.breakdownByProduct.length === 0) {
+      await sendText(
+        phone,
+        metrics && metrics.reason === "no-products"
+          ? "No scoped products yet. Ask your supervisor to assign product scope before recording deposits."
+          : "No deposit data yet for this period.",
+        "AI_DISPATCH_TEXT",
+        { gpt_sent: true }
+      );
+      return;
+    }
+    const lines = metrics.breakdownByProduct
+      .map((row) => `- ${row.productName}: ${fmtQty(row.salesUnits)} units → KSh ${fmtMoney(row.salesValue)}`);
+    const warnings = (metrics.warnings || []).map((w) => `⚠️ ${w}`);
+    const summary = [
+      `Sales: KSh ${fmtMoney(metrics.salesValue)}`,
+      `Expenses: KSh ${fmtMoney(metrics.expensesValue)}`,
+      `Deposited: KSh ${fmtMoney(metrics.depositedSoFar)}`,
+      `Recommended now: KSh ${fmtMoney(metrics.recommendedNow)}`,
+      "",
+      "By product:",
+      ...lines,
+      ...(warnings.length ? ["", ...warnings] : []),
+    ];
+    await sendText(phone, summary.join("\n"), "AI_DISPATCH_TEXT", { gpt_sent: true });
+  } catch (err) {
+    await sendText(phone, "Unable to compute assistant summary right now. Try again shortly.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+    try { console.error?.("[assistant summary] failed", err); } catch {}
+  }
+}
+
 async function getAvailableClosingProducts(sess: any, cursor: Cursor) {
   const prodsAll = await getAssignedProducts(sess.code || "");
   if (!sess.outlet) return prodsAll;
@@ -569,6 +704,9 @@ export async function safeSendGreetingOrMenu({
     if (roleKind === "attendant") {
       const sess = sessionLike || { outlet: outlet ?? undefined };
       await sendAttendantMenu(phoneE164, sess, { force: true, source });
+    } else if (roleKind === "assistant") {
+      const sess = sessionLike || { outlet: outlet ?? undefined };
+      await sendAssistantMenu(phoneE164, sess, { force: true, source });
     } else {
       const roleLabel = roleKind.charAt(0).toUpperCase() + roleKind.slice(1);
       const outletText = outlet ? ` at ${outlet}` : "";
@@ -724,6 +862,182 @@ async function tryAutoLinkLogin(text: string, phoneE164: string) {
   return false;
 }
 
+async function handleAssistantInbound(phone: string, text: string, s: any, cur: Cursor) {
+  const trimmed = String(text || "").trim();
+  const upper = trimmed.toUpperCase();
+
+  if (s.state === "WAIT_DEPOSIT") {
+    const parsed = parseMpesaText(trimmed);
+    if (parsed) {
+      if (!s.outlet) {
+        await sendText(phone, "No outlet bound. Ask supervisor.", "AI_DISPATCH_TEXT");
+        return;
+      }
+      await addDeposit({ outletName: s.outlet, amount: parsed.amount, note: parsed.ref, date: cur.date, code: s.code || undefined });
+      await notifySupAdm(`Assistant deposit at ${s.outlet} (${cur.date}): KSh ${parsed.amount} (ref ${parsed.ref}).`);
+      await sendText(
+        phone,
+        `Deposit recorded and pending approval: KSh ${parsed.amount} (ref ${parsed.ref}). Reply SUMMARY for breakdown or MENU for actions.`,
+        "AI_DISPATCH_TEXT",
+        { gpt_sent: true }
+      );
+      await saveSession(phone, { state: "MENU", ...cur });
+      await sendAssistantMenu(phone, s, { source: "assistant_deposit_recorded" });
+      return;
+    }
+    await sendText(
+      phone,
+      "Paste the original M-Pesa SMS (no edits). Deposits stay pending until an admin marks them VALID.",
+      "AI_DISPATCH_TEXT",
+      { gpt_sent: true }
+    );
+    return;
+  }
+  if (s.state === "DEP_ENTER_PARTIAL") {
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+      await sendText(phone, "Numbers only, e.g. 500", "AI_DISPATCH_TEXT");
+      return;
+    }
+    const amount = Number(trimmed);
+    await saveSession(phone, { state: "DEP_CONFIRM_PHONE", pendingAmount: amount, ...cur } as any);
+    await sendText(phone, `We'll push STK for KSh ${amount}. Reply with phone in 2547XXXXXXXX format or type CHANGE to use another phone.`, "AI_DISPATCH_TEXT");
+    return;
+  }
+  if (s.state === "DEP_CONFIRM_PHONE") {
+    if (upper === "CHANGE") {
+      await saveSession(phone, { state: "DEP_ENTER_PHONE", ...cur } as any);
+      await sendText(phone, "Enter phone number in 2547XXXXXXXX format", "AI_DISPATCH_TEXT");
+      return;
+    }
+    if (!/^2547\d{8}$/.test(trimmed)) {
+      await sendText(phone, "Invalid phone format. Use 2547XXXXXXXX", "AI_DISPATCH_TEXT");
+      return;
+    }
+    const pendingAmount = (cur as any).pendingAmount || 0;
+    try {
+      const res = await fetch(`${process.env.PUBLIC_BASE_URL || ""}/api/pay/stk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outletCode: s.outlet, phone: trimmed, amount: pendingAmount, mode: "GENERAL_DEPOSIT", attendantCode: s.code || undefined }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        await sendText(phone, `STK push initiated to ${trimmed}. Complete the prompt to finish.`, "AI_DISPATCH_TEXT");
+      } else {
+        await sendText(phone, `STK initiation failed: ${j.error || "unknown error"}`, "AI_DISPATCH_TEXT");
+      }
+    } catch (e) {
+      await sendText(phone, "STK initiation failed. Try again later.", "AI_DISPATCH_TEXT");
+    }
+    await saveSession(phone, { state: "MENU", pendingAmount: undefined, ...cur } as any);
+    await sendAssistantMenu(phone, s, { source: "assistant_stk" });
+    return;
+  }
+  if (s.state === "DEP_ENTER_PHONE") {
+    if (!/^2547\d{8}$/.test(trimmed)) {
+      await sendText(phone, "Invalid phone format. Use 2547XXXXXXXX", "AI_DISPATCH_TEXT");
+      return;
+    }
+    const pendingAmount = (cur as any).pendingAmount || 0;
+    try {
+      const res = await fetch(`${process.env.PUBLIC_BASE_URL || ""}/api/pay/stk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outletCode: s.outlet, phone: trimmed, amount: pendingAmount, mode: "GENERAL_DEPOSIT", attendantCode: s.code || undefined }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        await sendText(phone, `STK push initiated to ${trimmed}. Complete the prompt to finish.`, "AI_DISPATCH_TEXT");
+      } else {
+        await sendText(phone, `STK initiation failed: ${j.error || "unknown error"}`, "AI_DISPATCH_TEXT");
+      }
+    } catch (e) {
+      await sendText(phone, "STK initiation failed. Try again later.", "AI_DISPATCH_TEXT");
+    }
+    await saveSession(phone, { state: "MENU", pendingAmount: undefined, ...cur } as any);
+    await sendAssistantMenu(phone, s, { source: "assistant_stk" });
+    return;
+  }
+
+  if (upper === "MENU" || upper === "0") {
+    await saveSession(phone, { state: "MENU", ...cur });
+    await sendAssistantMenu(phone, s, { force: true, source: "assistant_menu_cmd" });
+    return;
+  }
+  if (upper === "SUMMARY" || upper === "2") {
+    await sendAssistantSummary(phone, s, cur);
+    return;
+  }
+  if (upper === "PASTE") {
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT");
+    return;
+  }
+  if (upper === "DEPOSIT" || upper === "1") {
+    await sendAssistantMenu(phone, s, { force: true, source: "assistant_deposit_cmd" });
+    return;
+  }
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const amount = Number(trimmed);
+    await saveSession(phone, { state: "DEP_CONFIRM_PHONE", pendingAmount: amount, ...cur } as any);
+    await sendText(phone, `We'll push STK for KSh ${amount}. Reply with phone in 2547XXXXXXXX format.`, "AI_DISPATCH_TEXT");
+    return;
+  }
+
+  await sendText(
+    phone,
+    "Assistant menu: reply MENU for actions, SUMMARY for breakdown, PASTE to capture an M-Pesa SMS, or send an amount to trigger STK.",
+    "AI_DISPATCH_TEXT",
+    { gpt_sent: true }
+  );
+}
+
+async function handleAssistantInteractive(phone: string, s: any, cur: Cursor, id: string): Promise<boolean> {
+  const upper = String(id || "").toUpperCase();
+  if (!upper) return false;
+  if (upper === "NAV_MENU") {
+    await saveSession(phone, { state: "MENU", ...cur });
+    await sendAssistantMenu(phone, s, { force: true, source: "assistant_nav_menu" });
+    return true;
+  }
+  if (upper === "DEP_FULL") {
+    if (!s.code) {
+      await sendText(phone, "Code missing. Ask supervisor to relink your account.", "AI_DISPATCH_TEXT");
+      return true;
+    }
+    const metrics = await computeAssistantExpectedDeposit({
+      code: s.code,
+      outletName: s.outlet ?? null,
+      date: cur.date,
+      respectAllowlist: false,
+    });
+    const amount = Math.max(0, metrics?.recommendedNow || 0);
+    if (amount <= 0) {
+      await sendText(phone, "No outstanding amount right now. Reply SUMMARY for details.", "AI_DISPATCH_TEXT");
+      return true;
+    }
+    await saveSession(phone, { state: "DEP_CONFIRM_PHONE", pendingAmount: amount, ...cur } as any);
+    await sendText(phone, `We'll push STK for KSh ${amount}. Reply with phone in 2547XXXXXXXX format or type CHANGE to switch numbers.`, "AI_DISPATCH_TEXT");
+    return true;
+  }
+  if (upper === "DEP_PARTIAL") {
+    await saveSession(phone, { state: "DEP_ENTER_PARTIAL", ...cur } as any);
+    await sendText(phone, "Enter partial deposit amount (numbers only).", "AI_DISPATCH_TEXT");
+    return true;
+  }
+  if (upper === "DEP_PASTE") {
+    await saveSession(phone, { state: "WAIT_DEPOSIT", ...cur });
+    await sendText(phone, "Paste the original M-Pesa SMS (no edits).", "AI_DISPATCH_TEXT");
+    return true;
+  }
+  if (upper === "SUMMARY" || upper === "AST_VIEW_BREAKDOWN") {
+    await sendAssistantSummary(phone, s, cur);
+    return true;
+  }
+  if (upper === "LOGOUT") return false;
+  return false;
+}
+
 export async function handleInboundText(phone: string, text: string) {
   const s = await loadSession(phone);
   // Touch session activity
@@ -766,6 +1080,15 @@ export async function handleInboundText(phone: string, text: string) {
       await saveSession(phone, { state: "LOGIN", date: today(), rows: [] });
       await promptLogin(phone);
     }
+    return;
+  }
+
+  let assistantMode = String(s?.role || "").toLowerCase() === "assistant";
+  if (!assistantMode && s?.code) {
+    try { assistantMode = await isAssistant(s.code); } catch {}
+  }
+  if (assistantMode) {
+    await handleAssistantInbound(phone, text, s, cur);
     return;
   }
 
@@ -1462,6 +1785,15 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
   const br = payload?.button_reply?.id as string | undefined;
   const id = lr || br || "";
   const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
+
+  let assistantMode = String(s?.role || "").toLowerCase() === "assistant";
+  if (!assistantMode && s?.code) {
+    try { assistantMode = await isAssistant(s.code); } catch {}
+  }
+  if (assistantMode) {
+    const handled = await handleAssistantInteractive(phone, s, cur, id);
+    if (handled) return true;
+  }
 
   if (id === "NAV_MENU") {
     await saveSession(phone, { state: "MENU", ...cur });

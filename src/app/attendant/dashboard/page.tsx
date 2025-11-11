@@ -173,6 +173,16 @@ export default function AttendantDashboardPage() {
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
   const [isGeneralDeposit, setIsGeneralDeposit] = useState(false);
+  const [assistantInsights, setAssistantInsights] = useState<{
+    expected: number;
+    recommendedNow: number;
+    depositedSoFar: number;
+    salesValue: number;
+    expensesValue: number;
+    periodState: string;
+    warnings?: string[];
+    breakdown?: Array<{ productKey: string; productName: string; salesUnits: number; salesValue: number; price: number }>;
+  } | null>(null);
   const [attendantPhone, setAttendantPhone] = useState<string | null>(null);
   const [outletCodeState, setOutletCodeState] = useState<string | null>(null);
   const [tillNumber, setTillNumber] = useState<string | null>(null);
@@ -193,6 +203,8 @@ export default function AttendantDashboardPage() {
           }
           const nm = (j?.attendant?.name || "").toString();
           if (nm) setAttendantName(nm);
+          const roleRaw = (j?.attendant?.role || "").toString().toLowerCase();
+          if (roleRaw === "assistant") setIsGeneralDeposit(true);
           const cd = (j?.attendant?.code || "").toString();
           if (cd) setAttendantCode(cd);
           // Try to capture attendant phone (E.164) if server returned it
@@ -1054,7 +1066,7 @@ export default function AttendantDashboardPage() {
     } catch { setPeriodStartAt(null); }
 
     try {
-      const totals = await fetchHeaderTotals(outletName, summaryDate, periodPrevious);
+      const { totals, assistant } = await fetchHeaderTotals(outletName, summaryDate, periodPrevious);
       setKpi({
         weightSales: Number(totals.weightSales ?? 0),
         expenses: Number(totals.expenses ?? 0),
@@ -1066,7 +1078,9 @@ export default function AttendantDashboardPage() {
         carryoverPrev: Number(totals.carryoverPrev ?? 0),
         openingValue: Number((totals as any).openingValue ?? 0),
       });
+      setAssistantInsights(assistant ?? null);
     } catch {
+      setAssistantInsights(null);
       // Conservative fallback:
       // - If period is active OR we have any saved activity, estimate ONLY from submitted (locked) rows.
       // - Otherwise, show zeros to avoid inflating sales before submission.
@@ -1107,14 +1121,26 @@ export default function AttendantDashboardPage() {
 
   // Small helper to fetch header totals with parameters
   async function fetchHeaderTotals(outletName: string, summaryDate?: string, periodPrevious?: boolean): Promise<{
-    todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number;
+    totals: {
+      todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number;
+    };
+    assistant?: {
+      expected: number;
+      recommendedNow: number;
+      depositedSoFar: number;
+      salesValue: number;
+      expensesValue: number;
+      periodState: string;
+      warnings?: string[];
+      breakdown?: Array<{ productKey: string; productName: string; salesUnits: number; salesValue: number; price: number }>;
+    };
   }> {
   const base = `/api/metrics/header?outlet=${encodeURIComponent(outletName)}`;
   const att = attendantCode ? `&attendant=${encodeURIComponent(attendantCode)}` : "";
   const url = `${base}${att}${summaryDate ? `&date=${encodeURIComponent(summaryDate)}` : ""}${periodPrevious ? `&period=previous` : ""}`;
-    const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number } }>(url);
+    const h = await getJSON<{ ok: boolean; totals?: { todayTillSales?: number; verifiedDeposits?: number; netTill?: number; expenses?: number; weightSales?: number; todayTotalSales?: number; amountToDeposit?: number; carryoverPrev?: number; openingValue?: number }; assistant?: any }>(url);
     if (!h || h.ok !== true || !h.totals) throw new Error("bad header response");
-    return h.totals as any;
+    return { totals: h.totals as any, assistant: h.assistant };
   }
 
   // After rotation to Previous, retry briefly if snapshot reads are momentarily lagging
@@ -1596,7 +1622,12 @@ export default function AttendantDashboardPage() {
               }
             }}
           />
-          <div className="flex items-center justify-between">
+            {isGeneralDeposit && assistantInsights && (
+              <p className="mt-3 text-xs text-blue-700 bg-blue-50/70 border border-blue-200 rounded-xl px-3 py-2">
+                Recommended deposit now: <span className="font-semibold">Ksh {fmt(assistantInsights.recommendedNow)}</span>. Sales {fmt(assistantInsights.salesValue)} - Expenses {fmt(assistantInsights.expensesValue)}.
+              </p>
+            )}
+            <div className="flex items-center justify-between">
             <h3 className="font-semibold">Deposits (M-Pesa)</h3>
           </div>
 
@@ -1842,6 +1873,52 @@ export default function AttendantDashboardPage() {
           </div>
 
           {/* ✅ Highlight red ONLY when > 0 */}
+          {isGeneralDeposit && assistantInsights && (
+            <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-3 text-sm">
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                <h4 className="font-semibold text-blue-900">Assistant Deposit Snapshot</h4>
+                <span className="text-xs text-blue-700">Period state: {assistantInsights.periodState || "unknown"}</span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2 mb-2">
+                <div>Sales from stock: <span className="font-medium">Ksh {fmt(assistantInsights.salesValue)}</span></div>
+                <div>Expenses: <span className="font-medium">Ksh {fmt(assistantInsights.expensesValue)}</span></div>
+                <div>Expected deposit: <span className="font-medium">Ksh {fmt(assistantInsights.expected)}</span></div>
+                <div>Deposited so far: <span className="font-medium">Ksh {fmt(assistantInsights.depositedSoFar)}</span></div>
+                <div className="sm:col-span-2">Recommended now: <span className="font-semibold text-blue-900">Ksh {fmt(assistantInsights.recommendedNow)}</span></div>
+              </div>
+              {assistantInsights.warnings && assistantInsights.warnings.length > 0 && (
+                <ul className="mb-2 text-xs text-blue-700 list-disc list-inside">
+                  {assistantInsights.warnings.map((w, idx) => (
+                    <li key={`assistant-warning-${idx}`}>{w}</li>
+                  ))}
+                </ul>
+              )}
+              {assistantInsights.breakdown && assistantInsights.breakdown.length > 0 && (
+                <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-900/5 text-blue-900">
+                      <tr>
+                        <th className="text-left px-3 py-2">Product</th>
+                        <th className="text-right px-3 py-2">Sold</th>
+                        <th className="text-right px-3 py-2">Price</th>
+                        <th className="text-right px-3 py-2">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assistantInsights.breakdown.map((row, idx) => (
+                        <tr key={`${row.productKey}-${idx}`} className="border-t border-blue-100">
+                          <td className="px-3 py-2 font-medium text-blue-900">{row.productName}</td>
+                          <td className="px-3 py-2 text-right">{fmt(row.salesUnits)}</td>
+                          <td className="px-3 py-2 text-right">Ksh {fmt(row.price)}</td>
+                          <td className="px-3 py-2 text-right">Ksh {fmt(row.salesValue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-4">
             {(() => {
               const amt = Number(kpi.amountToDeposit || 0);

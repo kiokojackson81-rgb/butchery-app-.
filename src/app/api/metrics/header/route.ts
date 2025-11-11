@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { isGeneralDepositAttendant } from "@/server/general_deposit";
+import { computeAssistantExpectedDeposit, isAssistant } from "@/server/assistant";
 import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 import { computeSnapshotTotals } from "@/server/finance";
 
@@ -19,6 +20,36 @@ export async function GET(req: Request) {
   // If a date is explicitly provided, treat the request as asking for the previous period view
   const period = (periodParam || (dateParam ? 'previous' : '')).toLowerCase(); // "previous" to show previous trading period for given date
   const isCurrent = !dateParam || dateParam === today;
+  const assistantCode = (attendantCode || "").trim();
+  const assistantMode = assistantCode ? await isAssistant(assistantCode) : false;
+  if (assistantMode) {
+    const calc = await computeAssistantExpectedDeposit({ code: assistantCode, date, outletName: outlet || null });
+    return NextResponse.json({
+      ok: calc.ok,
+      totals: {
+        weightSales: calc.salesValue,
+        expenses: calc.expensesValue,
+        todayTotalSales: calc.expected,
+        tillSalesGross: 0,
+        todayTillSales: 0,
+        verifiedDeposits: calc.depositedSoFar,
+        netTill: 0,
+        openingValue: 0,
+        carryoverPrev: 0,
+        amountToDeposit: calc.recommendedNow,
+      },
+      assistant: {
+        expected: calc.expected,
+        recommendedNow: calc.recommendedNow,
+        depositedSoFar: calc.depositedSoFar,
+        salesValue: calc.salesValue,
+        expensesValue: calc.expensesValue,
+        periodState: calc.periodState,
+        warnings: calc.warnings,
+        breakdown: calc.breakdownByProduct,
+      },
+    });
+  }
   if (!outlet)
     return NextResponse.json({
       ok: true,

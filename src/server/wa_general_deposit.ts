@@ -1,4 +1,4 @@
-import { computeAmountToDepositCurrent } from "@/server/deposit_metrics";
+import { computeAssistantExpectedDeposit, isAssistant } from "@/server/assistant";
 import { isGeneralDepositAttendant } from "@/server/general_deposit";
 import { prisma } from "@/lib/prisma";
 import { sendTextSafe } from "@/lib/wa";
@@ -67,12 +67,15 @@ function buildDeepLink(opts: { attendantCode: string; outletCode: string; amount
 export async function sendGeneralDepositPrompt(opts: { attendantCode: string; outletName: string; phoneE164: string }) {
   const code = String(opts.attendantCode || '').trim().toUpperCase();
   if (!code) return { ok: false, error: 'attendantCode required' };
-  const isSpecial = await isGeneralDepositAttendant(code);
+  const isSpecial = (await isAssistant(code)) || (await isGeneralDepositAttendant(code));
   if (!isSpecial) return { ok: false, error: 'not-special-attendant' };
   const can = await canSendPrompt(code);
   if (!can) return { ok: false, error: 'rate-limited' };
-  const metrics = await computeAmountToDepositCurrent({ outletName: opts.outletName, attendantCode: code });
-  const outstanding = Math.max(0, metrics.amountToDeposit || 0);
+  const metrics = await computeAssistantExpectedDeposit({ code, outletName: opts.outletName });
+  if (!metrics.ok && metrics.reason === "period-locked") {
+    return { ok: false, error: 'period-locked' };
+  }
+  const outstanding = Math.max(0, metrics.recommendedNow || 0);
   if (outstanding <= 0) return { ok: false, error: 'no-outstanding' };
   const link = buildDeepLink({ attendantCode: code, outletCode: opts.outletName, amount: outstanding, phone: opts.phoneE164.replace(/^\+/, '') });
   const text = `You need to deposit KSh ${Math.round(outstanding)} for GENERAL items today. Tap to deposit now:\n${link}`;
