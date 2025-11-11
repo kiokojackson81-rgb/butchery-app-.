@@ -298,7 +298,18 @@ export default function AdminPage() {
         const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
         const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
         const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
-        const c = parseLS<PersonCode[]>(K_CODES) ?? [];
+        const rawCodes = parseLS<PersonCode[]>(K_CODES) ?? [];
+        let codesMutated = false;
+        const c = rawCodes.map((row) => {
+          const base = row && typeof row === "object" ? row : ({ name: "", code: "", role: "attendant", active: true } as PersonCode);
+          const id = typeof base.id === "string" && base.id.trim().length > 0 ? base.id : "";
+          if (id) return base;
+          codesMutated = true;
+          return { ...base, id: rid() };
+        });
+        if (codesMutated) {
+          saveLS(K_CODES, c);
+        }
         const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
         const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
         setOutlets(o); setProducts(p); setExpenses(e);
