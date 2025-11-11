@@ -183,6 +183,8 @@ export default function AdminPage() {
   const [codes, setCodes]       = useState<PersonCode[]>([]);
   // Separate role state keyed by unique id to avoid any accidental cross-row propagation
   const [rolesById, setRolesById] = useState<Record<string, PersonCode["role"]>>({});
+  // Debug flag for inspecting role behavior via DevTools
+  const [debugRoles, setDebugRoles] = useState<boolean>(false);
   const [scope, setScope]       = useState<ScopeMap>({});
   const [pricebook, setPricebook] = useState<PriceBook>({});
   const [hydrated, setHydrated] = useState(false); // <<< NEW: prevents autosave writing {} before load
@@ -251,6 +253,24 @@ export default function AdminPage() {
 
   /** ----- Load once ----- */
   useEffect(() => {
+    // Enable debug via query ?debug=roles or sessionStorage('debug_admin_roles'='1')
+    try {
+      const dbg = (searchParams.get("debug") || "").toLowerCase();
+      if (dbg === "roles") setDebugRoles(true);
+      if (typeof window !== 'undefined') {
+        const ss = sessionStorage.getItem('debug_admin_roles');
+        if (ss === '1') setDebugRoles(true);
+        // Expose helpers
+        (window as any).dumpAdminRoles = () => ({
+          codes,
+          rolesById,
+          ids: codes.map(c => c.id),
+          codesById: Object.fromEntries(codes.map(c => [c.id, { code: c.code, role: c.role, name: c.name }]))
+        });
+        (window as any).enableAdminRolesDebug = () => { try { sessionStorage.setItem('debug_admin_roles','1'); } catch {}; setDebugRoles(true); };
+        (window as any).disableAdminRolesDebug = () => { try { sessionStorage.removeItem('debug_admin_roles'); } catch {}; setDebugRoles(false); };
+      }
+    } catch {}
     (async () => {
       try {
         // 1) DB-first: try relational bootstrap first
@@ -287,6 +307,9 @@ export default function AdminPage() {
   const seed: Record<string, PersonCode["role"]> = {};
   c.forEach(r => { if (r?.id) seed[r.id] = r.role; });
   setRolesById(seed);
+        if (debugRoles) {
+          try { console.debug('[admin:roles] hydrate', { count: c.length, roles: seed }); } catch {}
+        }
       } catch {
         setOutlets(seedDefaultOutlets());
         setProducts(seedDefaultProducts());
@@ -488,6 +511,12 @@ export default function AdminPage() {
         normalized.forEach(r => { if (r.id) next[r.id] = r.role; });
         return next;
       });
+      if (debugRoles) {
+        try {
+          const snapshot = normalized.map(r => ({ id: r.id, code: r.code, role: r.role }));
+          console.debug('[admin:roles] after-save refresh snapshot', snapshot);
+        } catch {}
+      }
       setScope((prev) => {
         const allow = new Set(normalized.map((c) => normCode(c.code)));
         const next: ScopeMap = {};
@@ -763,6 +792,12 @@ export default function AdminPage() {
       cleaned.forEach(r => { if (r.id) next[r.id] = r.role; });
       return next;
     });
+    if (debugRoles) {
+      try {
+        const snapshot = cleaned.map(r => ({ id: r.id, code: r.code, role: r.role }));
+        console.debug('[admin:roles] persistCodes cleaned snapshot', snapshot);
+      } catch {}
+    }
   }, [codes]);
 
   // Outlets
@@ -936,6 +971,12 @@ export default function AdminPage() {
   const updateCode = (id: string, patch: Partial<PersonCode>) => {
     setCodes(v => v.map(c => (c.id === id ? { ...c, ...patch, role: patch.role ? patch.role : c.role } : c)));
     if (patch.role) setRolesById(m => ({ ...m, [id]: patch.role as PersonCode["role"] }));
+    if (debugRoles && patch.role) {
+      try {
+        const row = codes.find(x => x.id === id);
+        console.debug('[admin:roles] onChange', { id, code: row?.code, from: rolesById[id] ?? row?.role, to: patch.role });
+      } catch {}
+    }
   };
 
   /** ----- Assignments (Attendants) ----- */
