@@ -450,13 +450,22 @@ export default function AdminPage() {
         if (nc) prevByCode.set(nc, item);
       });
       const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
-      const normalized = refreshed.map((row: any) => {
+      const usedPrevIds = new Set<string>();
+      const normalized = refreshed.map((row: any, idx: number) => {
         const nc = normCode(row?.code || '');
         const prev = (row?.id && prevById.get(String(row.id))) || (nc && prevByCode.get(nc)) || undefined;
         const rawRole = String(row?.role || '').toLowerCase();
         const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : (prev?.role || 'attendant');
+        let idFinal: string;
+        if (typeof row?.id === 'string' && row.id) {
+          idFinal = row.id;
+        } else if (prev?.id && !usedPrevIds.has(prev.id)) {
+          idFinal = prev.id; usedPrevIds.add(prev.id);
+        } else {
+          idFinal = rid();
+        }
         return {
-          id: typeof row?.id === 'string' && row.id ? row.id : (prev?.id ?? rid()),
+          id: idFinal,
           name: typeof row?.name === 'string' ? row.name : (prev?.name || ''),
           code: typeof row?.code === 'string' ? row.code : (prev?.code || ''),
           role,
@@ -688,14 +697,23 @@ export default function AdminPage() {
     const allowedRoles = new Set(['assistant','supervisor','supplier','attendant']);
     const prevById = new Map<string, PersonCode>();
     codes.forEach(c => { if (c?.id) prevById.set(c.id, c); });
+    const usedPrevIds = new Set<string>();
     const cleaned: PersonCode[] = nextCodes.map(row => {
       const prev = row?.id ? prevById.get(row.id) : undefined;
       const rawRole = String(row.role || '').toLowerCase();
       const role: PersonCode['role'] = allowedRoles.has(rawRole) ? rawRole as any : (prev?.role || 'attendant');
+      let idFinal: string;
+      if (typeof row.id === 'string' && row.id) {
+        idFinal = row.id;
+      } else if (prev?.id && !usedPrevIds.has(prev.id)) {
+        idFinal = prev.id; usedPrevIds.add(prev.id);
+      } else {
+        idFinal = rid();
+      }
       return {
         ...row,
         role,
-        id: typeof row.id === 'string' && row.id ? row.id : (prev?.id || rid()),
+        id: idFinal,
         code: typeof row.code === 'string' ? row.code.trim() : (prev?.code || ''),
         name: typeof row.name === 'string' ? row.name : (prev?.name || ''),
       };
