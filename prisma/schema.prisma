@@ -68,6 +68,8 @@ model SupplyOpeningRow {
   qty        Float
   buyPrice   Float  @default(0)
   unit       String
+  lockedAt   DateTime?
+  lockedBy   String?
 
   @@unique([date, outletName, itemKey])
 }

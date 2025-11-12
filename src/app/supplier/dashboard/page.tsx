@@ -47,6 +47,9 @@ type SupplyRow = {
   qty: number;        // weight or pieces
   buyPrice: number;   // per unit
   unit: Unit;         // "kg" or "pcs" (copied from product)
+  locked?: boolean;
+  lockedAt?: string | null;
+  lockedBy?: string | null;
 };
 
 /** Minimal opening row (what Attendant reads) */

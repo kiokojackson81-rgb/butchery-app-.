@@ -29,13 +29,36 @@ export async function POST(req: Request) {
       where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
     });
     const existedQty = Number(existing?.qty || 0);
+    if (existing?.lockedAt) {
+      return NextResponse.json(
+        { ok: false, error: "locked", message: "Supply already submitted and locked for this product." },
+        { status: 409 },
+      );
+    }
 
     const totalQty = mode === "add" ? existedQty + qtyNum : qtyNum;
+    const lockedBy = String(body?.supplierCode || body?.supplierName || "supplier_portal").trim() || "supplier_portal";
+    const lockTimestamp = new Date();
 
     const row = await (prisma as any).supplyOpeningRow.upsert({
       where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
-      update: { qty: totalQty, buyPrice: buyPriceNum || Number(existing?.buyPrice || 0), unit: unit || (existing?.unit || "kg") },
-      create: { date, outletName: outlet, itemKey, qty: totalQty, buyPrice: buyPriceNum, unit },
+      update: {
+        qty: totalQty,
+        buyPrice: buyPriceNum || Number(existing?.buyPrice || 0),
+        unit: unit || (existing?.unit || "kg"),
+        lockedAt: existing?.lockedAt ?? lockTimestamp,
+        lockedBy: existing?.lockedBy ?? lockedBy,
+      },
+      create: {
+        date,
+        outletName: outlet,
+        itemKey,
+        qty: totalQty,
+        buyPrice: buyPriceNum,
+        unit,
+        lockedAt: lockTimestamp,
+        lockedBy,
+      },
     });
   // Single-item immediate notify (attendant only) for dispute capability
   try { await notifySupplyItem({ outlet, date, itemKey, supplierCode: body?.supplierCode || null, supplierName: body?.supplierName || null }); } catch {}
