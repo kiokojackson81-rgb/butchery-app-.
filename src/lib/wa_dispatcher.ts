@@ -32,6 +32,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
 
   // If outside the 24h window: send ops_role_notice (or WA_TEMPLATE_NAME) to reopen
   let stale = true;
+  let reopenedSent = false;
   try {
     const at = await lastInboundAt(to);
     stale = minutesSince(at) > 24 * 60; // strictly 24h for template reopen
@@ -42,17 +43,27 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   try { deepLink = (await createLoginLink(to)).url; } catch { deepLink = null; }
 
   if (stale) {
-  const name = process.env.WA_TEMPLATE_NAME || "ops_role_notice";
-    const p1 = "BarakaOps needs your attention";
     const p2 = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
-    // Throttle: ReminderSend unique per day/phone/type
+    // Choose template by context so login reads exactly as our in-session copy
+    const isLogin = ctx?.kind === "login_prompt";
+    const template = isLogin
+      ? (process.env.WA_TEMPLATE_LOGIN_NAME || "login_text_link_v1")
+      : (process.env.WA_TEMPLATE_NAME || "ops_role_notice");
+    const params = isLogin
+      ? [p2] // Template body should be: "You're not logged in. Open {{1}} to continue."
+      : ["BarakaOps needs your attention", p2];
+
+    // Throttle: ReminderSend unique per day/phone/type (separate types per template)
     const today = new Date();
     const keyDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const type = "ops_role_notice_v1";
-    const exists = await (prisma as any).reminderSend.findUnique({ where: { type_phoneE164_date: { type, phoneE164: to, date: keyDate } } }).catch(() => null);
+    const type = isLogin ? "login_text_link_v1" : "ops_role_notice_v1";
+    const exists = await (prisma as any).reminderSend
+      .findUnique({ where: { type_phoneE164_date: { type, phoneE164: to, date: keyDate } } })
+      .catch(() => null);
     if (!exists) {
       try {
-        await sendTemplate({ to, template: name, params: [p1, p2], contextType: "TEMPLATE_REOPEN" });
+        await sendTemplate({ to, template, params, contextType: "TEMPLATE_REOPEN" });
+        reopenedSent = true;
         await (prisma as any).reminderSend.create({ data: { type, phoneE164: to, date: keyDate } });
       } catch {}
     }
@@ -80,27 +91,18 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
         try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx }, status: "SENT", type: "MENU_SEND" }); } catch {}
         result = { ok: true };
       } else if (ctx.kind === "login_prompt") {
-        // Send a compact interactive button prompting to open the deep link, then send only the human text (no OOC)
+        // If we just sent a template to reopen, avoid a second follow-up; single message policy
+        if (stale && reopenedSent) {
+          result = { ok: true, reopened: true } as any;
+          return result;
+        }
+        // Single concise text with deep link; avoid multi-message spam
         const deep = deepLink || (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login";
-        const payload = {
-          messaging_product: "whatsapp",
-          to,
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: { text: `Please sign in to continue.` },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "SEND_LOGIN_LINK", title: "LOGIN" } },
-                { type: "reply", reply: { id: "HELP", title: "HELP" } },
-              ],
-            },
-          },
-        };
-        try { await sendInteractive(payload as any, "AI_DISPATCH_INTERACTIVE"); } catch { }
-        try { await sendText(to, `Please log in to continue. Tap LOGIN above.`, "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
-        try { await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx }, status: "SENT", type: "MENU_SEND" }); } catch {}
-        result = { ok: true };
+        try {
+          await sendText(to, `You're not logged in. Open ${deep} to continue.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+          await logOutbound({ direction: "out", templateName: null, payload: { phoneE164: to, ctx }, status: "SENT", type: "MENU_SEND" });
+          result = { ok: true };
+        } catch {}
       }
     }
   } catch (e) {}
