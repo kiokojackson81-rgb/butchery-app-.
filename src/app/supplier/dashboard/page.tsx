@@ -272,32 +272,58 @@ export default function SupplierDashboard(): JSX.Element {
     async (opts?: { skipTransfers?: boolean }) => {
       if (!selectedOutletName) return;
 
+      const fullKey = supplierOpeningFullKey(dateStr, selectedOutletName);
+      const minimalKey = supplierOpeningKey(dateStr, selectedOutletName);
+      const costKey = supplierCostKey(dateStr, selectedOutletName);
+
+      let rowsFromServer: Array<{ itemKey: string; qty: number }> | null = null;
       try {
         const query = new URLSearchParams({ date: dateStr, outlet: selectedOutletName }).toString();
         const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
         if (r.ok) {
           const j = await r.json();
-          const rowsServer: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({
+          rowsFromServer = (j?.rows || []).map((x: any) => ({
             itemKey: String(x?.itemKey || ""),
             qty: Number(x?.qty || 0),
           }));
-          saveLS(supplierOpeningKey(dateStr, selectedOutletName), rowsServer);
+          saveLS(minimalKey, rowsFromServer);
         }
       } catch {
-        // Ignore network errors; local storage fallback below keeps UI responsive offline.
+        // Ignore network errors; we'll fall back to cached local storage.
       }
 
-      const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, selectedOutletName), []);
-      if (full.length > 0) {
-        setRows(full);
-      } else {
-        const minimal = loadLS<OpeningItem[]>(supplierOpeningKey(dateStr, selectedOutletName), []);
-        const hydrated: SupplyRow[] = minimal.map((mi) => {
-          const p = productByKey[mi.itemKey];
-          return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: p?.unit ?? "kg" };
+      const existingFull = loadLS<SupplyRow[]>(fullKey, []);
+      let nextRows: SupplyRow[] = existingFull;
+
+      if (rowsFromServer !== null) {
+        const costMap = loadLS<Record<string, number>>(costKey, {});
+        const previousByItem = new Map<string, SupplyRow>();
+        for (const row of existingFull) previousByItem.set(row.itemKey, row);
+
+        nextRows = rowsFromServer.map((mi) => {
+          const prev = previousByItem.get(mi.itemKey);
+          const product = productByKey[mi.itemKey];
+          return {
+            id: prev?.id ?? rid(),
+            itemKey: mi.itemKey,
+            qty: mi.qty,
+            buyPrice: costMap[mi.itemKey] ?? prev?.buyPrice ?? 0,
+            unit: prev?.unit ?? product?.unit ?? "kg",
+          };
         });
-        setRows(hydrated);
+
+        saveLS(fullKey, nextRows);
       }
+
+      if (nextRows.length === 0) {
+        const minimal = loadLS<OpeningItem[]>(minimalKey, []);
+        nextRows = minimal.map((mi) => {
+          const product = productByKey[mi.itemKey];
+          return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: product?.unit ?? "kg" };
+        });
+      }
+
+      setRows(nextRows);
 
       const isSubmitted = loadLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), false);
       setSubmitted(isSubmitted);
