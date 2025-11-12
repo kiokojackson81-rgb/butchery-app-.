@@ -1939,6 +1939,15 @@ export default function AttendantDashboardPage() {
             {summaryMode === 'current' && (
               <CardKPI label="Till Variance (Ksh)" value={`Ksh ${fmt(computed.varianceKsh)}`} highlightDanger={Math.abs(computed.varianceKsh) > 0.5} />
             )}
+            {assistantMode && assistantInsights && (
+              <CardKPI
+                label="Recommended Deposit (Ksh)"
+                value={`Ksh ${fmt(assistantInsights.recommendedNow)}`}
+                tooltip="Sales from stock - expenses - deposits so far."
+                highlightDanger={assistantInsights.recommendedNow > 0}
+                highlightSuccess={assistantInsights.recommendedNow <= 0}
+              />
+            )}
             {summaryMode === 'current' && savedClosingTodayCount === 0 && depositsFromServer.length === 0 && !expenses.some(e=>e.saved) && toNum(countedTill) === 0 && (kpi.openingValue || 0) > 0 && (
               <CardKPI
                 label="Opening Value (supply)"
@@ -1948,85 +1957,8 @@ export default function AttendantDashboardPage() {
             )}
           </div>
 
-          {/* ✅ Highlight red ONLY when > 0 */}
-          {assistantMode && assistantInsights && (
-            <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-3 text-sm">
-              <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-                <h4 className="font-semibold text-blue-900">Assistant Deposit Snapshot</h4>
-                <span className="text-xs text-blue-700">Period state: {assistantInsights.periodState || "unknown"}</span>
-              </div>
-              <div className="grid sm:grid-cols-2 gap-2 mb-2">
-                <div>Sales from stock: <span className="font-medium">Ksh {fmt(assistantInsights.salesValue)}</span></div>
-                <div>Expenses: <span className="font-medium">Ksh {fmt(assistantInsights.expensesValue)}</span></div>
-                <div>Expected deposit: <span className="font-medium">Ksh {fmt(assistantInsights.expected)}</span></div>
-                <div>Deposited so far: <span className="font-medium">Ksh {fmt(assistantInsights.depositedSoFar)}</span></div>
-                <div className="sm:col-span-2">Recommended now: <span className="font-semibold text-blue-900">Ksh {fmt(assistantInsights.recommendedNow)}</span></div>
-              </div>
-              {assistantInsights.warnings && assistantInsights.warnings.length > 0 && (
-                <ul className="mb-2 text-xs text-blue-700 list-disc list-inside">
-                  {assistantInsights.warnings.map((w, idx) => (
-                    <li key={`assistant-warning-${idx}`}>{w}</li>
-                  ))}
-                </ul>
-              )}
-              {assistantInsights.breakdown && assistantInsights.breakdown.length > 0 && (
-                <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
-                  <table className="min-w-full text-xs">
-                    <thead className="bg-blue-900/5 text-blue-900">
-                      <tr>
-                        <th className="text-left px-3 py-2">Product</th>
-                        <th className="text-right px-3 py-2">Sold</th>
-                        <th className="text-right px-3 py-2">Price</th>
-                        <th className="text-right px-3 py-2">Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {assistantInsights.breakdown.map((row, idx) => (
-                        <tr key={`${row.productKey}-${idx}`} className="border-t border-blue-100">
-                          <td className="px-3 py-2 font-medium text-blue-900">{row.productName}</td>
-                          <td className="px-3 py-2 text-right">{fmt(row.salesUnits)}</td>
-                          <td className="px-3 py-2 text-right">Ksh {fmt(row.price)}</td>
-                          <td className="px-3 py-2 text-right">Ksh {fmt(row.salesValue)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-          {assistantMode && assistantOpeningView.length > 0 && (
-            <div className="mt-6 rounded-2xl border border-gray-200 bg-white">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                <div>
-                  <h4 className="font-semibold text-gray-900">Opening Stock</h4>
-                  <p className="text-xs text-gray-500">Read-only view sourced from supplier submissions.</p>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left px-4 py-2">Item</th>
-                      <th className="text-right px-4 py-2">Qty</th>
-                      <th className="text-left px-4 py-2">Unit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assistantOpeningView.map((row) => (
-                      <tr key={`assistant-open-${row.key}`} className="border-t border-gray-100">
-                        <td className="px-4 py-2 font-medium text-gray-900">{row.name}</td>
-                        <td className="px-4 py-2 text-right">{fmt(row.qty)}</td>
-                        <td className="px-4 py-2 text-gray-600">{row.unit}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
           <div className="mt-4">
-            {(() => {
+            {!assistantMode && (() => {
               const amt = Number(kpi.amountToDeposit || 0);
               const isExcess = amt < 0;
               const label = isExcess ? "Excess (Ksh)" : "Amount to Deposit (Ksh)";
