@@ -1,9 +1,9 @@
 // src/app/supplier/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
+import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 import { notifyToast, registerAdminToast } from '@/lib/toast';
 import { promptSync, confirmSync } from '@/lib/ui';
@@ -268,6 +268,89 @@ export default function SupplierDashboard(): JSX.Element {
     [outletById, outletId]
   );
 
+  const refreshSupplyState = useCallback(
+    async (opts?: { skipTransfers?: boolean }) => {
+      if (!selectedOutletName) return;
+
+      try {
+        const query = new URLSearchParams({ date: dateStr, outlet: selectedOutletName }).toString();
+        const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          const rowsServer: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({
+            itemKey: String(x?.itemKey || ""),
+            qty: Number(x?.qty || 0),
+          }));
+          saveLS(supplierOpeningKey(dateStr, selectedOutletName), rowsServer);
+        }
+      } catch {
+        // Ignore network errors; local storage fallback below keeps UI responsive offline.
+      }
+
+      const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, selectedOutletName), []);
+      if (full.length > 0) {
+        setRows(full);
+      } else {
+        const minimal = loadLS<OpeningItem[]>(supplierOpeningKey(dateStr, selectedOutletName), []);
+        const hydrated: SupplyRow[] = minimal.map((mi) => {
+          const p = productByKey[mi.itemKey];
+          return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: p?.unit ?? "kg" };
+        });
+        setRows(hydrated);
+      }
+
+      const isSubmitted = loadLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), false);
+      setSubmitted(isSubmitted);
+
+      if (!opts?.skipTransfers) {
+        try {
+          const r = await fetch(`/api/supply/transfer?date=${encodeURIComponent(dateStr)}`, { cache: "no-store" });
+          if (r.ok) {
+            const j = await r.json();
+            const list: TransferRow[] = (j?.rows || []).map((t: any) => ({
+              id: String(t?.id || rid()),
+              date: String(t?.date || dateStr),
+              fromOutletName: String(t?.fromOutletName || ""),
+              toOutletName: String(t?.toOutletName || ""),
+              itemKey: String(t?.itemKey || ""),
+              qty: Number(t?.qty || 0),
+              unit: (t?.unit === "pcs" ? "pcs" : "kg") as Unit,
+            }));
+            saveLS(supplierTransfersKey(dateStr), list);
+            setTransfers(list);
+          } else {
+            const fallback = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
+            setTransfers(fallback);
+          }
+        } catch {
+          const fallback = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
+          setTransfers(fallback);
+        }
+      }
+
+      const amendList = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
+      setAmends(
+        amendList.filter(
+          (a) =>
+            (a.outlet && a.outlet === selectedOutletName) ||
+            (a.outletName && a.outletName === selectedOutletName)
+        )
+      );
+    },
+    [dateStr, selectedOutletName, productByKey]
+  );
+
+  useEffect(() => {
+    if (!selectedOutletName) {
+      setRows([]);
+      setTransfers([]);
+      setAmends([]);
+      setSubmitted(false);
+      return;
+    }
+    refreshSupplyState();
+  }, [dateStr, selectedOutletName, refreshSupplyState]);
+
   /* Pricebook filter helpers */
   const isProductActiveForOutlet = (p: Product, outletName: string): boolean => {
     const row = pricebook[outletName]?.[p.key];
@@ -328,80 +411,6 @@ export default function SupplierDashboard(): JSX.Element {
     }
   }, [outlets, outletId]);
 
-  /* Load rows + submitted lock + transfers + disputes when date/outlet changes */
-  useEffect(() => {
-    if (!selectedOutletName) return;
-
-    // DB-first hydrate minimal opening for this date/outlet into local mirror
-    (async () => {
-      try {
-        const query = new URLSearchParams({ date: dateStr, outlet: selectedOutletName }).toString();
-        const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
-        if (r.ok) {
-          const j = await r.json();
-          const rows: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({ itemKey: String(x?.itemKey || ""), qty: Number(x?.qty || 0) }));
-          saveLS(supplierOpeningKey(dateStr, selectedOutletName), rows);
-        }
-      } catch {}
-    })();
-
-    // Prefer FULL editable rows; if absent, hydrate from minimal opening
-    const full = loadLS<SupplyRow[]>(
-      supplierOpeningFullKey(dateStr, selectedOutletName),
-      []
-    );
-
-    if (full.length > 0) {
-      setRows(full);
-    } else {
-      const minimal = loadLS<OpeningItem[]>(
-        supplierOpeningKey(dateStr, selectedOutletName),
-        []
-      );
-      const hydrated: SupplyRow[] = minimal.map(mi => {
-        const p = productByKey[mi.itemKey];
-        return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: p?.unit ?? "kg" };
-      });
-      setRows(hydrated);
-    }
-
-    const isSubmitted = loadLS<boolean>(
-      supplierSubmittedKey(dateStr, selectedOutletName),
-      false
-    );
-    setSubmitted(isSubmitted);
-
-    // transfers for date (server-first if available)
-    (async () => {
-      try {
-        const r = await fetch(`/api/supply/transfer?date=${encodeURIComponent(dateStr)}`, { cache: "no-store" });
-        if (r.ok) {
-          const j = await r.json();
-          const list: TransferRow[] = (j?.rows || []).map((t: any) => ({
-            id: String(t?.id || rid()),
-            date: String(t?.date || dateStr),
-            fromOutletName: String(t?.fromOutletName || ""),
-            toOutletName: String(t?.toOutletName || ""),
-            itemKey: String(t?.itemKey || ""),
-            qty: Number(t?.qty || 0),
-            unit: (t?.unit === "pcs" ? "pcs" : "kg") as Unit,
-          }));
-          saveLS(supplierTransfersKey(dateStr), list);
-          setTransfers(list);
-          return;
-        }
-      } catch {}
-      const tx = loadLS<TransferRow[]>(supplierTransfersKey(dateStr), []);
-      setTransfers(tx);
-    })();
-
-    // disputes (show open supply disputes for this outlet or all)
-    const rawAmends = loadLS<AnyAmend[]>(AMEND_REQUESTS_KEY, []);
-    const list = rawAmends.filter(a => (a.type === "supply" || a.type === "supplier_adjustment") &&
-      ((a.outlet && a.outlet === selectedOutletName) || (a.outletName && a.outletName === selectedOutletName)));
-    setAmends(list);
-  }, [dateStr, selectedOutletName, productByKey]);
-
   // Load outlet pricebook for info (supplier can compare against buy price)
   async function refreshPrices() {
     if (!selectedOutletName) return;
@@ -446,8 +455,8 @@ export default function SupplierDashboard(): JSX.Element {
   };
 
   /* ===== Save (draft) ===== */
-  const saveDraft = async (): Promise<void> => {
-    if (!selectedOutletName) return;
+  const saveDraft = async (opts?: { silent?: boolean }): Promise<boolean> => {
+    if (!selectedOutletName) return false;
     // Save full rows for supplier UI
     saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), rows);
     // Also save minimal (aggregated) for attendants
@@ -459,17 +468,32 @@ export default function SupplierDashboard(): JSX.Element {
       return acc;
     }, {});
     saveLS(supplierCostKey(dateStr, selectedOutletName), costMap);
-    // Persist to server (non-blocking)
-    try { await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows }); } catch {}
-  notifyToast("Saved.");
+    // Persist to server (best effort so attendants see updates on dashboard)
+    let synced = false;
+    try {
+      await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows });
+      synced = true;
+    } catch (err) {
+      console.error("Failed to sync supply opening rows", err);
+    }
+    await refreshSupplyState({ skipTransfers: true });
+    if (!opts?.silent) {
+      notifyToast(synced ? "Saved." : "Saved locally. Will sync when back online.");
+    }
+    return synced;
   };
 
   /* ===== Submit (lock) ===== */
   const submitDay = async (): Promise<void> => {
     if (!selectedOutletName) return;
     // For supplier per requirements: do NOT lock because multiple suppliers may submit same item.
-    await saveDraft();
-  notifyToast("Submitted. Day remains open for additional supplies.");
+    const synced = await saveDraft({ silent: true });
+    await refreshSupplyState();
+    notifyToast(
+      synced
+        ? "Submitted. Day remains open for additional supplies."
+        : "Submitted locally. Day stays open; please retry when online."
+    );
   };
 
   /* ===== Request modification to Supervisor ===== */
@@ -934,7 +958,7 @@ export default function SupplierDashboard(): JSX.Element {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Opening Supply — {selectedOutletName || "—"} ({dateStr})</h2>
           <div className="flex gap-2">
-              <button className="border rounded-xl px-3 py-1 text-xs" onClick={saveDraft} disabled={!selectedOutletName}>
+              <button className="border rounded-xl px-3 py-1 text-xs" onClick={() => void saveDraft()} disabled={!selectedOutletName}>
                 Save
               </button>
               {/* NEW: Download PDF */}
@@ -1141,7 +1165,7 @@ export default function SupplierDashboard(): JSX.Element {
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-white/80">Supply ready?</span>
             <div className="flex items-center gap-2">
-              <button className="px-3 py-2 rounded-lg bg-white text-black text-sm font-semibold" onClick={saveDraft} disabled={!selectedOutletName}>
+              <button className="px-3 py-2 rounded-lg bg-white text-black text-sm font-semibold" onClick={() => void saveDraft()} disabled={!selectedOutletName}>
                 Save
               </button>
               <button className="px-3 py-2 rounded-lg bg-white/10 text-white ring-1 ring-white/20 text-sm" onClick={downloadPdfReport} disabled={!selectedOutletName}>
