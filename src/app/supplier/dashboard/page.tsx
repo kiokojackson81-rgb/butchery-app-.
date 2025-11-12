@@ -173,6 +173,7 @@ export default function SupplierDashboard(): JSX.Element {
   const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({});
   const [priceDraftById, setPriceDraftById] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<boolean>(false);
+  const [submittingDay, setSubmittingDay] = useState<boolean>(false); // loading state for 'Submit & Lock'
 
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
@@ -657,9 +658,12 @@ export default function SupplierDashboard(): JSX.Element {
   /* ===== Submit (lock) ===== */
   const submitDay = async (): Promise<void> => {
     if (!selectedOutletName) return;
+    if (submittingDay) return; // guard double clicks
+    setSubmittingDay(true);
     const unlocked = rows.filter((r) => !r.locked && r.qty > 0);
     if (unlocked.length === 0) {
       notifyToast("Nothing to submit; all rows already locked.");
+      setSubmittingDay(false);
       return;
     }
 
@@ -673,10 +677,14 @@ export default function SupplierDashboard(): JSX.Element {
 
     await refreshSupplyState({ skipTransfers: true });
     if (success > 0) {
-      notifyToast(`Submitted & locked ${success} item${success === 1 ? "" : "s"}. Day remains open for new supplies.`);
+      // Mark submitted flag locally so UI can hide row-level controls (still day can remain open for new items)
+      try { saveLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), true); } catch {}
+      setSubmitted(true);
+      notifyToast(`Submitted & locked ${success} item${success === 1 ? "" : "s"}.`);
     } else {
       notifyToast("No new rows were submitted.");
     }
+    setSubmittingDay(false);
   };
 
   /* ===== Request modification to Supervisor ===== */
@@ -1187,12 +1195,13 @@ export default function SupplierDashboard(): JSX.Element {
                 Download PDF
               </button>
               <button
-                className="border rounded-xl px-3 py-1 text-xs bg-black text-white"
+                className="border rounded-xl px-3 py-1 text-xs bg-black text-white disabled:opacity-50"
                 onClick={submitDay}
-                disabled={!selectedOutletName}
-                title="Submit (keeps day open)"
+                disabled={!selectedOutletName || submittingDay}
+                title="Submit & Lock all unlocked items (day stays open for new items)"
+                aria-busy={submittingDay}
               >
-                Submit
+                {submittingDay ? 'Locking…' : 'Submit & Lock'}
               </button>
             </div>
         </div>
@@ -1415,8 +1424,8 @@ export default function SupplierDashboard(): JSX.Element {
               <button className="px-3 py-2 rounded-lg bg-white/10 text-white ring-1 ring-white/20 text-sm" onClick={downloadPdfReport} disabled={!selectedOutletName}>
                 PDF
               </button>
-              <button className="px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold" onClick={submitDay} disabled={!selectedOutletName}>
-                Submit
+              <button className="px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold disabled:opacity-50" onClick={submitDay} disabled={!selectedOutletName || submittingDay} aria-busy={submittingDay}>
+                {submittingDay ? 'Locking…' : 'Submit & Lock'}
               </button>
             </div>
           </div>
@@ -1424,7 +1433,7 @@ export default function SupplierDashboard(): JSX.Element {
 
         {submitted && (
           <p className="text-xs text-green-700 mt-2">
-            Submitted and locked. Supervisor can adjust later if needed.
+            Day submitted & items locked. You can still add new items; Supervisor can adjust existing ones later.
           </p>
         )}
         </section>
