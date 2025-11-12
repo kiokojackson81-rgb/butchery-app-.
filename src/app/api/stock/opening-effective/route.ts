@@ -18,7 +18,11 @@ export async function GET(req: Request) {
     if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
 
     const [openingRows, productRows, prevClosing] = await Promise.all([
-      (prisma as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
+      // Select only legacy-safe columns to avoid errors on DBs missing new fields (lockedAt/lockedBy)
+      (prisma as any).supplyOpeningRow.findMany({
+        where: { date, outletName: outlet },
+        select: { itemKey: true, qty: true, unit: true },
+      }),
       (prisma as any).product.findMany(),
       (prisma as any).attendantClosing.findMany({ where: { date: prevDateISO(date), outletName: outlet } }),
     ]);

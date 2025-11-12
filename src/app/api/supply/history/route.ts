@@ -67,7 +67,10 @@ export async function GET(req: Request) {
       date: { gte: from, lte: to },
       ...(productKeys.length ? { itemKey: { in: productKeys } } : {}),
     };
-    const rows = await (prisma as any).supplyOpeningRow.findMany({ where });
+    const rows = await (prisma as any).supplyOpeningRow.findMany({
+      where,
+      select: { date: true, outletName: true, itemKey: true, qty: true, unit: true, buyPrice: true },
+    });
 
     // Resolve names and units
     const keys = Array.from(new Set(rows.map((r: any) => r.itemKey).filter(Boolean)));

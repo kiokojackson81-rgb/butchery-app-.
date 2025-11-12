@@ -65,7 +65,7 @@ export async function GET(req: Request) {
     });
 
   const [openRows, closingRows, pbRows, products, expenses, deposits, tillCountRows, snap1, snap2] = await Promise.all([
-    prisma.supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
+    prisma.supplyOpeningRow.findMany({ where: { date, outletName: outlet }, select: { itemKey: true, qty: true } }),
     prisma.attendantClosing.findMany({ where: { date, outletName: outlet } }),
     prisma.pricebookRow.findMany({ where: { outletName: outlet } }),
     prisma.product.findMany(),
@@ -118,7 +118,7 @@ export async function GET(req: Request) {
   // Compute previous period/day carryover regardless, used even when we gate Current totals to zero
   const y = addDaysISO(date, -1, tz);
   const [yOpenRows, yClosingRows, yExpenses, yDeposits] = await Promise.all([
-    prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet } }),
+    prisma.supplyOpeningRow.findMany({ where: { date: y, outletName: outlet }, select: { itemKey: true, qty: true } }),
     prisma.attendantClosing.findMany({ where: { date: y, outletName: outlet } }),
     prisma.attendantExpense.findMany({ where: { date: y, outletName: outlet } }),
     prisma.$queryRaw`SELECT "id", "date", "outletName", "code", "note", "amount", "status", "createdAt" FROM "AttendantDeposit" WHERE "date"=${y} AND "outletName"=${outlet}` as any,
