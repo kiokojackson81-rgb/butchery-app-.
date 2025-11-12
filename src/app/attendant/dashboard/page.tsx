@@ -676,6 +676,25 @@ export default function AttendantDashboardPage() {
     });
   }, [openingRowsRaw, catalog, outlet, supplyHistory, stockDate]);
 
+  const assistantOpeningView = useMemo(() => {
+    if (!assistantMode) return [];
+    const list: Array<{ key: string; name: string; unit: Unit; qty: number }> = [];
+    (openingRowsRaw || []).forEach((r) => {
+      const rawKey = String(r.itemKey || "");
+      if (!rawKey) return;
+      const qty = Number(r.qty || 0);
+      if (!Number.isFinite(qty)) return;
+      const prod = catalog[rawKey as ItemKey];
+      const unitRaw = String(prod?.unit || r.unit || "kg").toLowerCase();
+      const unit: Unit = unitRaw === "pcs" ? "pcs" : "kg";
+      const name = prod?.name || rawKey.toUpperCase();
+      list.push({ key: rawKey, name, unit, qty });
+    });
+    return list
+      .filter((row) => row.qty > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [assistantMode, openingRowsRaw, catalog]);
+
   // Derive today supply by item (lowercased keys) from supplyHistory
   const supplyTodayLc = useMemo(() => {
     const map: Record<string, number> = {};
@@ -1962,6 +1981,36 @@ export default function AttendantDashboardPage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+          {assistantMode && assistantOpeningView.length > 0 && (
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-white">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <div>
+                  <h4 className="font-semibold text-gray-900">Opening Stock</h4>
+                  <p className="text-xs text-gray-500">Read-only view sourced from supplier submissions.</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="text-left px-4 py-2">Item</th>
+                      <th className="text-right px-4 py-2">Qty</th>
+                      <th className="text-left px-4 py-2">Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assistantOpeningView.map((row) => (
+                      <tr key={`assistant-open-${row.key}`} className="border-t border-gray-100">
+                        <td className="px-4 py-2 font-medium text-gray-900">{row.name}</td>
+                        <td className="px-4 py-2 text-right">{fmt(row.qty)}</td>
+                        <td className="px-4 py-2 text-gray-600">{row.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           <div className="mt-4">
