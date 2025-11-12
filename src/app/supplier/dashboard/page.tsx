@@ -591,14 +591,26 @@ export default function SupplierDashboard(): JSX.Element {
   /* ===== Submit (lock) ===== */
   const submitDay = async (): Promise<void> => {
     if (!selectedOutletName) return;
-    // For supplier per requirements: do NOT lock because multiple suppliers may submit same item.
-    const synced = await saveDraft({ silent: true });
-    await refreshSupplyState();
-    notifyToast(
-      synced
-        ? "Submitted. Day remains open for additional supplies."
-        : "Submitted locally. Day stays open; please retry when online."
-    );
+    const unlocked = rows.filter((r) => !r.locked && r.qty > 0);
+    if (unlocked.length === 0) {
+      notifyToast("Nothing to submit; all rows already locked.");
+      return;
+    }
+
+    await saveDraft({ silent: true });
+
+    let success = 0;
+    for (const row of unlocked) {
+      const ok = await submitRow(row, { silent: true, mode: "add" });
+      if (ok) success += 1;
+    }
+
+    await refreshSupplyState({ skipTransfers: true });
+    if (success > 0) {
+      notifyToast(`Submitted & locked ${success} item${success === 1 ? "" : "s"}. Day remains open for new supplies.`);
+    } else {
+      notifyToast("No new rows were submitted.");
+    }
   };
 
   /* ===== Request modification to Supervisor ===== */
@@ -628,16 +640,21 @@ export default function SupplierDashboard(): JSX.Element {
   };
 
   // Per-row submit (one item at a time) with duplicate prompt
-  const submitRow = async (r: SupplyRow) => {
-    if (!selectedOutletName) return;
+  const submitRow = async (
+    r: SupplyRow,
+    opts?: { silent?: boolean; mode?: "add" | "replace" }
+  ): Promise<boolean> => {
+    if (!selectedOutletName) return false;
     if (r.locked) {
-      notifyToast("Already submitted.");
-      return;
+      if (!opts?.silent) notifyToast("Already submitted.");
+      return false;
     }
     const exists = rows.some((x) => x.itemKey === r.itemKey && x.id !== r.id);
-    let mode: "add" | "replace" = "add";
-    if (exists) {
-  const confirm = confirmSync(`You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`);
+    let mode: "add" | "replace" = opts?.mode ?? "add";
+    if (!opts?.mode && exists) {
+      const confirm = confirmSync(
+        `You've already submitted ${r.itemKey} today. Do you want to add to existing quantity? Click Cancel to replace instead.`
+      );
       mode = confirm ? "add" : "replace";
     }
     try {
@@ -678,10 +695,14 @@ export default function SupplierDashboard(): JSX.Element {
       const minimal = toMinimal(nextFull);
       saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
       setRows(nextFull);
-  notifyToast(`Submitted ${r.itemKey} - locked at ${j.totalQty}`);
+      if (!opts?.silent) notifyToast(`Submitted ${r.itemKey} - locked at ${j.totalQty}`);
+      return true;
     } catch (e: any) {
-  if (String(e?.message || "").toLowerCase().includes("locked")) notifyToast("Already locked for today.");
-  else notifyToast(e?.message || "Submit failed");
+      if (!opts?.silent) {
+        if (String(e?.message || "").toLowerCase().includes("locked")) notifyToast("Already locked for today.");
+        else notifyToast(e?.message || "Submit failed");
+      }
+      return false;
     }
   };
 
@@ -1267,7 +1288,7 @@ export default function SupplierDashboard(): JSX.Element {
                         <div className="flex gap-2">
                           <button
                             className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                            onClick={() => submitRow(r)}
+                            onClick={() => { void submitRow(r); }}
                           >
                             Submit
                           </button>
