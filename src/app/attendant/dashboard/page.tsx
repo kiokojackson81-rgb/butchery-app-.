@@ -631,8 +631,11 @@ export default function AttendantDashboardPage() {
     (openingRowsRaw || []).forEach((r) => {
       const rawKey = String(r.itemKey || "");
       const lc = rawKey.toLowerCase();
-      const fallbackKey = rawKey.toLowerCase() as ItemKey;
-      const canon = canonByLc[lc] ?? fallbackKey;
+      const canon = canonByLc[lc];
+      if (!canon) {
+        // Skip items that are outside this attendant/assistant scope; they belong to another code.
+        return;
+      }
       const qty = Number(r.qty || 0);
       if (!Number.isFinite(qty) || qty < 0) return;
 
