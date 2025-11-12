@@ -383,15 +383,41 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
   const header = outlet ? `You're logged in as an attendant at ${outlet}.` : "You're logged in as an attendant.";
   await sendText(phone, `${header} What would you like to do?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
 
-  const rows = [
-    { id: "ATT_CLOSING", title: "Enter Closing", description: "Record today's closing quantities" },
-    { id: "ATT_DEPOSIT", title: "Deposit", description: "Record till deposit (paste SMS)" },
-    { id: "ATT_EXPENSE", title: "Expense", description: "Capture outlet expenses" },
-    { id: "MENU_SUMMARY", title: "Summary", description: "Review today's snapshot" },
-    { id: "MENU_TXNS", title: "Till Count", description: "See today's till payments" },
-    { id: "MENU_SUPPLY", title: "Supply", description: "Check opening stock & deliveries" },
-    { id: "LOGOUT", title: "Logout", description: "End session and re-login" },
-  ];
+  // Determine if opening stock exists today for this outlet
+  let hasOpening = false;
+  try {
+    if (outlet) {
+      const todayDate = today();
+      const cnt = await (prisma as any).supplyOpeningRow.count({ where: { outletName: outlet, date: todayDate } }).catch(() => 0);
+      hasOpening = Number(cnt || 0) > 0;
+    }
+  } catch {}
+
+  // If no opening stock, guide user to supply first and hide the closing option
+  if (!hasOpening && outlet) {
+    try { await sendText(phone, "No opening stock set for today. Start by entering supply or choose another action.", "AI_DISPATCH_TEXT", { gpt_sent: true }); } catch {}
+  }
+
+  const rows = (
+    hasOpening
+      ? [
+          { id: "ATT_CLOSING", title: "Enter Closing", description: "Record today's closing quantities" },
+          { id: "ATT_DEPOSIT", title: "Deposit", description: "Record till deposit (paste SMS)" },
+          { id: "ATT_EXPENSE", title: "Expense", description: "Capture outlet expenses" },
+          { id: "MENU_SUMMARY", title: "Summary", description: "Review today's snapshot" },
+          { id: "MENU_TXNS", title: "Till Count", description: "See today's till payments" },
+          { id: "MENU_SUPPLY", title: "Supply", description: "Check opening stock & deliveries" },
+          { id: "LOGOUT", title: "Logout", description: "End session and re-login" },
+        ]
+      : [
+          { id: "MENU_SUPPLY", title: "Supply", description: "Enter today's opening stock & deliveries" },
+          { id: "ATT_DEPOSIT", title: "Deposit", description: "Record till deposit (paste SMS)" },
+          { id: "ATT_EXPENSE", title: "Expense", description: "Capture outlet expenses" },
+          { id: "MENU_SUMMARY", title: "Summary", description: "Review today's snapshot" },
+          { id: "MENU_TXNS", title: "Till Count", description: "See today's till payments" },
+          { id: "LOGOUT", title: "Logout", description: "End session and re-login" },
+        ]
+  );
 
   const payload = buildListPayload(phone.replace(/^\+/, ""), {
     type: "list",
@@ -1996,11 +2022,21 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
     const prods = (assigned || []).filter((p: any) => !closed.has(p.key) && (!restrictByOpening || openingMap.has(p.key)));
 
     if (!restrictByOpening) {
+      // When there is no opening stock set for today, do not allow closing yet.
       await sendText(
         phone,
-        "No opening stock set for today. Listing your assigned products to record closing.",
+        "No opening stock set for today. Start by entering supply or choose another action.",
         "AI_DISPATCH_TEXT",
       );
+      await safeSendGreetingOrMenu({
+        phone,
+        role: s.role || "attendant",
+        outlet: s.outlet,
+        force: true,
+        source: "closing_no_opening",
+        sessionLike: s,
+      });
+      return true;
     }
     if (!prods.length) {
       if (restrictByOpening) {
@@ -2014,7 +2050,7 @@ export async function handleInteractiveReply(phone: string, payload: any): Promi
       return true;
     }
 
-    await saveSession(phone, { state: "CLOSING_PICK", ...cur });
+  await saveSession(phone, { state: "CLOSING_PICK", ...cur });
 
     const phoneE164 = phone.startsWith("+") ? phone : "+" + phone;
     const stateSnapshot = await getWaState(phoneE164);
