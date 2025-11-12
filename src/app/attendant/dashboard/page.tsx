@@ -236,8 +236,7 @@ export default function AttendantDashboardPage() {
         return;
       }
 
-      const arr = safeReadJSON<AdminProduct[]>(ADMIN_PRODUCTS_KEY, []);
-  // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
+      // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
   useEffect(() => {
     if (!attendantCode || isAssistantRole) return;
     (async () => {
@@ -252,10 +251,8 @@ export default function AttendantDashboardPage() {
       } catch {}
     })();
   }, [attendantCode, isAssistantRole]);
-      if (arr && arr.length > 0) {
-        const map = arr.filter(p => p.active).reduce((acc, p) => { acc[p.key as ItemKey] = p; return acc; }, {} as Record<ItemKey, AdminProduct>);
-        setCatalog(map);
-      }
+      // Important: Do NOT pre-populate catalog from admin products.
+      // Catalog must be driven strictly by attendant scope to avoid leakage across attendants.
     })();
   }, [router]);
 
@@ -289,16 +286,31 @@ export default function AttendantDashboardPage() {
         if (!res.ok) return;
         const j = await res.json();
         if (j?.outlet) setOutlet(j.outlet as Outlet);
-        if (Array.isArray(j?.productKeys) && j.productKeys.length > 0) {
-          setCatalog(prev => {
-            const filtered: Record<ItemKey, AdminProduct> = {} as any;
-            (j.productKeys as string[]).forEach((k: any) => { if (prev[k as ItemKey]) filtered[k as ItemKey] = prev[k as ItemKey]; });
-            return Object.keys(filtered).length ? filtered : prev;
+        if (Array.isArray(j?.productKeys)) {
+          // Build a fresh catalog strictly from assigned keys
+          const next: Record<ItemKey, AdminProduct> = {} as any;
+          (j.productKeys as string[]).forEach((k: any) => {
+            const key = String(k) as ItemKey;
+            // Try to preserve existing metadata if present; otherwise default
+            const prev = (next as any)[key] || ({} as Partial<AdminProduct>);
+            (next as any)[key] = {
+              key,
+              name: (prev as any).name || key.toUpperCase(),
+              unit: (prev as any).unit || "kg",
+              sellPrice: Number((prev as any).sellPrice || 0),
+              active: true,
+            } as AdminProduct;
           });
+          setCatalog(next);
+        } else {
+          // No keys resolved -> clear catalog to avoid showing unassigned items
+          setCatalog({} as any);
         }
-      } catch {}
+      } catch {
+        // On failure, do not widen catalog; keep as-is
+      }
     })();
-  }, [catalog]);
+  }, []);
 
   useEffect(() => {
     if (!outlet) return;
@@ -346,42 +358,34 @@ export default function AttendantDashboardPage() {
       if (res && res.ok) {
         setProducts(res.products || []);
         setProductsOutlet(res.outlet || null);
-        // Sync prices into catalog so computed totals reflect latest pricebook
+        // Overwrite catalog strictly with assigned products from server
         if (Array.isArray(res.products)) {
-          setCatalog((prev) => {
-            const next: Record<ItemKey, AdminProduct> = { ...prev } as any;
-            for (const p of res.products) {
-              const k = p.key as ItemKey;
-              if (next[k]) {
-                if (Number(next[k].sellPrice) !== Number(p.price)) {
-                  next[k] = { ...next[k], sellPrice: Number(p.price) };
-                }
-              } else {
-                // Add missing product to catalog with sensible defaults
-                // Note: assumes union ItemKey covers admin keys in practice
-                try {
-                  next[k] = {
-                    key: k,
-                    name: (p.name || String(k)) as any,
-                    unit: (((next as any)[k]?.unit) || "kg") as Unit,
-                    sellPrice: Number(p.price || 0),
-                    active: true,
-                  } as any;
-                } catch {}
-              }
-            }
-            return next;
-          });
+          const next: Record<ItemKey, AdminProduct> = {} as any;
+          for (const p of res.products) {
+            const k = p.key as ItemKey;
+            next[k] = {
+              key: k,
+              name: (p.name || String(k)) as any,
+              unit: "kg", // Unit is not provided here; default to kg
+              sellPrice: Number(p.price || 0),
+              active: true,
+            } as any;
+          }
+          setCatalog(next);
+        } else {
+          setCatalog({} as any);
         }
       } else {
         setProducts([]);
         setProductsOutlet(null);
         setProductsError("Failed to load products");
+        setCatalog({} as any);
       }
     } catch (e: any) {
       setProductsError(typeof e?.message === "string" ? e.message : "Failed to load products");
       setProducts([]);
       setProductsOutlet(null);
+      setCatalog({} as any);
     } finally {
       setProductsLoading(false);
     }
