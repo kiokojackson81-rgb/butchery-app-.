@@ -81,7 +81,7 @@ export default function AttendantDashboardPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [locked, setLocked] = useState<Record<string, boolean>>({}); // per-item stock row saved flag
-  const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: ItemKey; qty: number }>>([]);
+  const [openingRowsRaw, setOpeningRowsRaw] = useState<Array<{ itemKey: string; qty: number; unit?: string }>>([]);
   const [supplyHistory, setSupplyHistory] = useState<Array<{ date: string; itemKey: string; name: string; qty: number; unit: string }>>([]);
   // For transparency: show OpeningEff = yesterday closing + today supply per item
   const [prevClosingLc, setPrevClosingLc] = useState<Record<string, number>>({}); // keys lowercased
@@ -610,31 +610,54 @@ export default function AttendantDashboardPage() {
   // Build Stock rows whenever openingRowsRaw or catalog changes (fix race with async fetch)
   useEffect(() => {
     if (!outlet) return;
-    // Map external API keys to our canonical catalog keys, case-insensitive
+
     const canonByLc: Record<string, ItemKey> = {} as any;
     (Object.keys(catalog) as ItemKey[]).forEach((k) => { canonByLc[String(k).toLowerCase()] = k; });
-    const byItem: Record<ItemKey, number> = {} as any;
-    (openingRowsRaw || []).forEach((r: { itemKey: ItemKey; qty: number }) => {
-      const lc = String(r.itemKey).toLowerCase();
-      const canon = canonByLc[lc];
-      if (!canon) return;
-      byItem[canon] = (byItem[canon] || 0) + Number(r.qty || 0);
+
+    const infoByKey = new Map<string, { name: string; unit: Unit }>();
+    const qtyByKey = new Map<string, number>();
+
+    const supplyInfoByKey = new Map<string, { name?: string; unit?: string }>();
+    (supplyHistory || []).forEach((row) => {
+      if (row.date !== stockDate) return;
+      const lc = String(row.itemKey || "").toLowerCase();
+      if (!supplyInfoByKey.has(lc)) supplyInfoByKey.set(lc, { name: row.name, unit: row.unit });
     });
-    const built: Row[] = (Object.keys(byItem) as ItemKey[])
-      .filter((k) => !!catalog[k])
-      .map((k) => {
-        const key = k as ItemKey;
-        const prod = catalog[key];
-        return {
-          key,
-          name: prod?.name || String(key).toUpperCase(),
-          unit: prod?.unit || "kg",
-          opening: byItem[key] || 0,
-          closing: "",
-          waste: "",
-        };
-      });
-    // Preserve any in-progress user input by merging with previous rows
+
+    (openingRowsRaw || []).forEach((r) => {
+      const rawKey = String(r.itemKey || "");
+      const lc = rawKey.toLowerCase();
+      const fallbackKey = rawKey.toLowerCase() as ItemKey;
+      const canon = canonByLc[lc] ?? fallbackKey;
+      const qty = Number(r.qty || 0);
+      if (!Number.isFinite(qty) || qty < 0) return;
+
+      const keyStr = String(canon);
+      qtyByKey.set(keyStr, (qtyByKey.get(keyStr) || 0) + qty);
+
+      if (!infoByKey.has(keyStr)) {
+        const prod = catalog[canon as ItemKey];
+        const supplyMeta = supplyInfoByKey.get(lc);
+        const unitRaw = String(prod?.unit || r.unit || supplyMeta?.unit || "kg").toLowerCase();
+        const unit: Unit = unitRaw === "pcs" ? "pcs" : "kg";
+        const name = prod?.name || supplyMeta?.name || rawKey.toUpperCase();
+        infoByKey.set(keyStr, { name, unit });
+      }
+    });
+
+    const built: Row[] = Array.from(qtyByKey.entries()).map(([keyStr, openingQty]) => {
+      const info = infoByKey.get(keyStr) || { name: keyStr.toUpperCase(), unit: "kg" as Unit };
+      const key = keyStr as ItemKey;
+      return {
+        key,
+        name: info.name,
+        unit: info.unit,
+        opening: openingQty,
+        closing: "",
+        waste: "",
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
     setRows((prev) => {
       if (!prev || prev.length === 0) return built;
       const prevByKey = new Map(prev.map((r) => [r.key, r] as const));
@@ -644,7 +667,7 @@ export default function AttendantDashboardPage() {
         return { ...b, closing: p.closing, waste: p.waste };
       });
     });
-  }, [openingRowsRaw, catalog, outlet]);
+  }, [openingRowsRaw, catalog, outlet, supplyHistory, stockDate]);
 
   // Derive today supply by item (lowercased keys) from supplyHistory
   const supplyTodayLc = useMemo(() => {
