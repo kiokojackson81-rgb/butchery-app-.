@@ -75,6 +75,15 @@ async function postJSON<T>(url: string, body: any): Promise<T> {
 export default function AttendantDashboardPage() {
   const router = useRouter();
 
+  const readAssistantFlag = () => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (sessionStorage.getItem("attendant_role") || "").toLowerCase() === "assistant";
+    } catch {
+      return false;
+    }
+  };
+
   const [dateStr] = useState(today()); // locked to today
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [catalog, setCatalog] = useState<Record<ItemKey, AdminProduct>>({} as any);
@@ -172,8 +181,8 @@ export default function AttendantDashboardPage() {
   const [tillSort, setTillSort] = useState<'createdAt:asc' | 'createdAt:desc'>('createdAt:desc');
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
-  const [isGeneralDeposit, setIsGeneralDeposit] = useState(false);
-  const [isAssistantRole, setIsAssistantRole] = useState(false);
+  const [isAssistantRole, setIsAssistantRole] = useState<boolean>(() => readAssistantFlag());
+  const [isGeneralDeposit, setIsGeneralDeposit] = useState<boolean>(() => readAssistantFlag());
   const [assistantInsights, setAssistantInsights] = useState<{
     expected: number;
     recommendedNow: number;
@@ -205,10 +214,14 @@ export default function AttendantDashboardPage() {
           }
           const nm = (j?.attendant?.name || "").toString();
           if (nm) setAttendantName(nm);
-          const roleRaw = (j?.attendant?.role || "").toString().toLowerCase();
+          const roleRaw = (j?.attendant?.role || j?.role || "").toString().toLowerCase();
           if (roleRaw === "assistant") {
             setIsAssistantRole(true);
             setIsGeneralDeposit(true);
+            try { sessionStorage.setItem("attendant_role", "assistant"); } catch {}
+          } else if (roleRaw === "attendant") {
+            setIsAssistantRole(false);
+            try { sessionStorage.setItem("attendant_role", "attendant"); } catch {}
           }
           const cd = (j?.attendant?.code || "").toString();
           if (cd) setAttendantCode(cd);

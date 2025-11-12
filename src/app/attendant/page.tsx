@@ -42,6 +42,8 @@ export default function AttendantLoginPage() {
 
       try {
         sessionStorage.setItem("attendant_code", norm);
+        const roleValue = String(payload?.role || "attendant").toLowerCase();
+        sessionStorage.setItem("attendant_role", roleValue === "assistant" ? "assistant" : "attendant");
       } catch (err) {
         console.warn("Failed to persist attendant_code", err);
       }

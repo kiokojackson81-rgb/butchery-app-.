@@ -7,8 +7,9 @@ import { normalizeCode, canonNum, canonFull, canonLoose } from "@/lib/codeNormal
 import { createSession, serializeSessionCookie } from "@/lib/session";
 import { serializeRoleCookie } from "@/lib/roleSession";
 import { randomUUID } from "crypto";
+import { isGeneralDepositAttendant } from "@/server/general_deposit";
 
-async function ensureLoginProvision(loginCode: string) {
+async function ensureLoginProvision(loginCode: string, roleHint: "attendant" | "assistant" = "attendant") {
   const code = canonLoose(loginCode || "");
   if (!code) return null;
 
@@ -20,8 +21,9 @@ async function ensureLoginProvision(loginCode: string) {
     (prisma as any).attendantScope.findFirst({ where: { codeNorm: code } }).catch(() => null),
   ]);
 
-  // Fallback: consult admin_codes Setting (active attendant records)
+  // Fallback: consult admin_codes Setting (active attendant/assistant records)
   let fallbackOutlet: string | null = null;
+  let fallbackRole: "attendant" | "assistant" | null = null;
   if (!assignment && !scope) {
     try {
       // 3a) Prefer the structured scope mirror if present (admin UI writes Setting 'attendant_scope').
@@ -51,16 +53,29 @@ async function ensureLoginProvision(loginCode: string) {
 
       const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
       const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
-      const attendants = list.filter(
-        (p: any) => !!p?.active && String(p?.role || "").toLowerCase() === "attendant"
+      const allowedRoles = new Set(["attendant", "assistant"]);
+      const staff = list.filter(
+        (p: any) => !!p?.active && allowedRoles.has(String(p?.role || "").toLowerCase())
       );
-      const selected = attendants.find((p: any) => normalizeCode(p?.code || "") === code);
+      const selected = staff.find((p: any) => normalizeCode(p?.code || "") === code);
       if (!fallbackOutlet && selected?.outlet) fallbackOutlet = String(selected.outlet);
+      if (!fallbackRole && selected?.role) {
+        const r = String(selected.role).toLowerCase();
+        if (r === "assistant") fallbackRole = "assistant";
+        else if (r === "attendant") fallbackRole = "attendant";
+      }
     } catch {}
   }
   if (!assignment && !scope && !fallbackOutlet && !existing) return null;
 
   const person = await (prisma as any).personCode.findUnique({ where: { code } }).catch(() => null);
+  let desiredRole: "attendant" | "assistant" = roleHint;
+  if (!person && fallbackRole) desiredRole = fallbackRole;
+  if (person) {
+    const existingRole = String(person.role || "").toLowerCase();
+    if (existingRole === "assistant") desiredRole = "assistant";
+    else if (existingRole === "attendant" && desiredRole !== "assistant") desiredRole = "attendant";
+  }
   let outletRow = null;
   const outletName: string | null =
     (assignment as any)?.outlet || (scope as any)?.outletName || fallbackOutlet || null;
@@ -135,13 +150,18 @@ async function ensureLoginProvision(loginCode: string) {
 
   if (!person) {
     await (prisma as any).personCode.create({
-      data: { code, role: "attendant", name: attendant.name, active: true },
+      data: { code, role: desiredRole, name: attendant.name, active: true },
     }).catch(() => null);
-  } else if (person.role !== "attendant" || person.active === false) {
-    await (prisma as any).personCode.update({
-      where: { id: person.id },
-      data: { role: "attendant", active: true },
-    }).catch(() => null);
+  } else {
+    const updates: Record<string, any> = {};
+    if (String(person.role || "").toLowerCase() !== desiredRole) updates.role = desiredRole;
+    if (person.active === false) updates.active = true;
+    if (Object.keys(updates).length > 0) {
+      await (prisma as any).personCode.update({
+        where: { id: person.id },
+        data: updates,
+      }).catch(() => null);
+    }
   }
 
   const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
@@ -163,6 +183,38 @@ function prismaIsSchemaError(err: any) {
   } catch (_) {
     return false;
   }
+}
+
+async function detectRoleForCode(loginCode: string): Promise<"attendant" | "assistant"> {
+  const full = canonFull(loginCode || "");
+  if (!full) return "attendant";
+  const norm = normalizeCode(full);
+
+  try {
+    const person = await (prisma as any).personCode.findUnique({ where: { code: full }, select: { role: true, active: true } });
+    const existingRole = String(person?.role || "").toLowerCase();
+    if (person && person.active !== false) {
+      if (existingRole === "assistant") return "assistant";
+      if (existingRole === "attendant") return "attendant";
+    }
+  } catch {}
+
+  try {
+    const settingsRow = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } });
+    const list: any[] = Array.isArray((settingsRow as any)?.value) ? (settingsRow as any).value : [];
+    const match = list.find((entry: any) => normalizeCode(entry?.code || "") === norm);
+    if (match && match.role) {
+      const r = String(match.role).toLowerCase();
+      if (r === "assistant") return "assistant";
+      if (r === "attendant") return "attendant";
+    }
+  } catch {}
+
+  try {
+    if (await isGeneralDepositAttendant(full)) return "assistant";
+  } catch {}
+
+  return "attendant";
 }
 
 export async function POST(req: Request) {
@@ -195,7 +247,9 @@ export async function POST(req: Request) {
 
     if (!row && (loose || full)) {
       // Prefer loose (punctuation-stripped) for provisioning to tolerate typos like trailing '/'
-      row = await ensureLoginProvision(loose || full);
+      const candidate = loose || full;
+      const roleGuess = await detectRoleForCode(candidate);
+      row = await ensureLoginProvision(candidate, roleGuess);
     }
 
     // 2) Fallback to digits-only if unique
@@ -218,7 +272,9 @@ export async function POST(req: Request) {
             LIMIT 3
           `;
           if (assignments.length === 1) {
-            row = await ensureLoginProvision(assignments[0]?.code || '');
+            const candidate = assignments[0]?.code || '';
+            const roleGuess = await detectRoleForCode(candidate);
+            row = await ensureLoginProvision(candidate, roleGuess);
           } else if (assignments.length > 1) {
             return NextResponse.json({ ok: false, error: "AMBIGUOUS_CODE" }, { status: 409 });
           }
@@ -246,7 +302,8 @@ export async function POST(req: Request) {
           else if (matches.length > 1) return NextResponse.json({ ok: false, error: 'AMBIGUOUS_CODE' }, { status: 409 });
         }
         if (selected?.code) {
-          row = await ensureLoginProvision(selected.code);
+          const roleGuess = await detectRoleForCode(selected.code);
+          row = await ensureLoginProvision(selected.code, roleGuess);
         }
       } catch (err) {
         console.error('admin_codes lookup failed', err);
@@ -272,13 +329,16 @@ export async function POST(req: Request) {
           }
           const outlet = entry && typeof entry === "object" ? String((entry as any)?.outlet || "").trim() : "";
           if (outlet) {
-            row = await ensureLoginProvision(loginCode || "");
+            const roleGuess = await detectRoleForCode(loginCode || "");
+            row = await ensureLoginProvision(loginCode || "", roleGuess);
           }
         }
       } catch {}
     }
 
     if (!row) return NextResponse.json({ ok: false, error: "INVALID_CODE" }, { status: 401 });
+
+    const roleKey = await detectRoleForCode(row.code);
 
     // Lookup attendant → outlet by row.code
     let att: any = null;
@@ -289,7 +349,7 @@ export async function POST(req: Request) {
       });
       if (!att?.outletId) {
         // Try to auto-heal binding now (e.g., existing LoginCode but no outlet)
-        await ensureLoginProvision(row.code);
+        await ensureLoginProvision(row.code, roleKey);
         att = await (prisma as any).attendant.findFirst({
           where: { loginCode: { equals: row.code, mode: "insensitive" } },
           select: { id: true, outletId: true, loginCode: true, name: true },
@@ -304,6 +364,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: "DB_SCHEMA_MISSING" }, { status: 503 });
       }
       return NextResponse.json({ ok: false, error: "SESSION_STORE_UNAVAILABLE" }, { status: 503 });
+    }
+
+    // Keep PersonCode role in sync with detected role
+    try {
+      await (prisma as any).personCode.update({
+        where: { code: row.code },
+        data: { role: roleKey, active: true },
+      });
+    } catch {
+      try {
+        await (prisma as any).personCode.create({
+          data: { code: row.code, role: roleKey, name: att?.name || row.code, active: true },
+        });
+      } catch {}
     }
 
     // Resolve outlet code (not id) for session convenience
@@ -333,11 +407,11 @@ export async function POST(req: Request) {
     }
 
     // Also set a unified role cookie for convenience
-    const res = NextResponse.json({ ok: true, role: "attendant", code: row.code, outlet: outletCode || null });
+    const res = NextResponse.json({ ok: true, role: roleKey, code: row.code, outlet: outletCode || null });
     if (typeof sessionHeader === "string") {
       res.headers.append("Set-Cookie", sessionHeader);
     }
-    res.headers.append("Set-Cookie", serializeRoleCookie({ role: "attendant", code: row.code, outlet: outletCode || null }));
+    res.headers.append("Set-Cookie", serializeRoleCookie({ role: roleKey, code: row.code, outlet: outletCode || null }));
     return res;
   } catch (e) {
     console.error(e);
