@@ -588,6 +588,7 @@ export default function SupplierDashboard(): JSX.Element {
     const lockable = rows.filter(r => !r.locked && r.qty > 0 && r.buyPrice > 0);
     if (lockable.length) {
       let lockedCount = 0;
+      let rateLimited = false;
       for (const r of lockable) {
         try {
           const supplierCode = sessionStorage.getItem("supplier_code");
@@ -608,7 +609,30 @@ export default function SupplierDashboard(): JSX.Element {
               supplierName,
             }),
           });
-          if (res.ok) lockedCount += 1; // individual lock success
+          if (res.ok) {
+            lockedCount += 1; // success
+          } else if (res.status === 409) {
+            // Already locked (race or prior submit) — count as success to avoid confusing the user
+            lockedCount += 1;
+          } else if (res.status === 429) {
+            // Rate limited — read retryAfter if present and stop attempting further locks
+            let retryAfterSec: number | undefined;
+            try {
+              const j = await res.json();
+              if (typeof j?.retryAfterSec === 'number') retryAfterSec = j.retryAfterSec;
+            } catch {}
+            rateLimited = true;
+            if (!opts?.silent) {
+              notifyToast(`Too many submissions. Please wait${retryAfterSec ? ` ~${retryAfterSec}s` : ''} and try again.`);
+            }
+            break;
+          } else {
+            // Other failure — continue to next item
+            try {
+              const j = await res.json();
+              console.warn("Auto-lock failed for", r.itemKey, j);
+            } catch {}
+          }
         } catch (e) {
           // Non-fatal; continue locking other rows
           console.warn("Auto-lock failed for", r.itemKey, e);
@@ -618,6 +642,9 @@ export default function SupplierDashboard(): JSX.Element {
         // Refresh state so UI reflects newly locked items
         await refreshSupplyState({ skipTransfers: true });
         if (!opts?.silent) notifyToast(`Auto-locked ${lockedCount} item${lockedCount === 1 ? "" : "s"}.`);
+      } else if (!opts?.silent && !rateLimited) {
+        // No items locked and not due to rate limit — surface a generic message
+        notifyToast("No items were locked. Check entries and try again.");
       }
     }
     await refreshSupplyState({ skipTransfers: true });
@@ -716,6 +743,11 @@ export default function SupplierDashboard(): JSX.Element {
         }),
       });
       const j = await res.json().catch(()=>({ ok: false }));
+      if (res.status === 429) {
+        const wait = typeof j?.retryAfterSec === 'number' ? ` ~${j.retryAfterSec}s` : '';
+        if (!opts?.silent) notifyToast(`Too many submissions. Please wait${wait} and try again.`);
+        return false;
+      }
       if (!j?.ok) throw new Error(j?.error || "Failed");
       // Mirror minimal + full locally
       const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, selectedOutletName), []);
