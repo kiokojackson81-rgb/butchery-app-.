@@ -103,6 +103,88 @@ async function notifySupervisorsAdmins(outlet: string, text: string) {
   }
 }
 
+type SupplierIdentity = {
+  supplierCode?: string;
+  supplierName?: string;
+  lockedBy: string;
+};
+
+async function resolveSupplierIdentity(sess: any, phoneE164: string): Promise<SupplierIdentity> {
+  let supplierCode = typeof sess?.code === "string" && sess.code.trim() ? sess.code.trim() : undefined;
+  let supplierName: string | undefined;
+  try {
+    if (supplierCode) {
+      const pc = await (prisma as any).personCode.findFirst({
+        where: { code: { equals: canonFull(supplierCode), mode: "insensitive" }, active: true },
+      });
+      supplierName = pc?.name || undefined;
+    }
+    if (!supplierName) {
+      const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supplier" } });
+      if (pm?.code) {
+        supplierCode = pm.code;
+        const pc2 = await (prisma as any).personCode.findFirst({
+          where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true },
+        });
+        supplierName = pc2?.name || undefined;
+      }
+    }
+  } catch {}
+  const lockedBy = (supplierName || supplierCode || "wa_supplier_flow").slice(0, 120);
+  return { supplierCode, supplierName, lockedBy };
+}
+
+type SaveLockedResult =
+  | { status: "locked"; existedQty: number }
+  | { status: "saved"; existedQty: number; totalQty: number; row: any };
+
+async function saveLockedSupplyRow(opts: {
+  date: string;
+  outlet: string;
+  itemKey: string;
+  qty: number;
+  buyPrice: number;
+  unit: "kg" | "pcs";
+  mode: "add" | "replace";
+  identity: SupplierIdentity;
+}): Promise<SaveLockedResult> {
+  const { date, outlet, itemKey, qty, buyPrice, unit, mode, identity } = opts;
+  const lockTimestamp = new Date();
+  return prisma.$transaction(async (tx: any) => {
+    const existing = await tx.supplyOpeningRow.findUnique({
+      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+    });
+    const existedQty = Number(existing?.qty || 0);
+    if (existing?.lockedAt) {
+      return { status: "locked", existedQty };
+    }
+
+    const totalQty = mode === "add" && existing ? existedQty + qty : qty;
+    const effectiveBuyPrice = Number.isFinite(buyPrice) ? buyPrice : Number(existing?.buyPrice || 0);
+    const row = await tx.supplyOpeningRow.upsert({
+      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+      update: {
+        qty: totalQty,
+        buyPrice: effectiveBuyPrice,
+        unit,
+        lockedAt: existing?.lockedAt ?? lockTimestamp,
+        lockedBy: existing?.lockedBy ?? identity.lockedBy,
+      },
+      create: {
+        date,
+        outletName: outlet,
+        itemKey,
+        qty: totalQty,
+        buyPrice: effectiveBuyPrice,
+        unit,
+        lockedAt: lockTimestamp,
+        lockedBy: identity.lockedBy,
+      },
+    });
+    return { status: "saved", row, existedQty, totalQty };
+  });
+}
+
 function parseQty(t: string): number | null {
   // Accept inputs like "8", "8.5", "8,5", and trim whitespace.
   // Normalize comma decimal separators to dot, remove thousands separators (spaces or commas in thousands position),
@@ -369,6 +451,15 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
     const outlet = c.outlet;
     if (outlet) {
       const existed = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: today, outletName: outlet, itemKey: productKey } } });
+      if (existed?.lockedAt) {
+        await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, productKey: undefined, qty: undefined, buyPrice: undefined, unit: undefined } });
+        await sendTextSafe(gp, `${productKey} is already submitted and locked for ${outlet}. Contact supervisor for adjustments.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        const recent = await (prisma as any).supplyOpeningRow.findMany({ where: { outletName: outlet, date: today }, orderBy: { id: "desc" }, take: 5, select: { itemKey: true } });
+        const recentKeys = (recent || []).map((r: any) => r.itemKey);
+        const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
+        products.sort((a: any, b: any) => (recentKeys.indexOf(a.key) === -1 ? 1 : 0) - (recentKeys.indexOf(b.key) === -1 ? 1 : 0));
+        return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
+      }
       if (!existed) {
         // Ask the supplier to confirm adding a new product to the outlet
         await saveSessionPatch(sess.id, { state: "SPL_DELIV_CONFIRM", cursor: { ...c, productKey } });
@@ -444,38 +535,31 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c } });
       return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock: true }) as any }, "AI_DISPATCH_INTERACTIVE");
     }
-    // If exists, automatically ADD to current opening; otherwise create
-    const existed = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
-    if (existed) {
-      await (prisma as any).supplyOpeningRow.update({
-        where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
-        data: { qty: { increment: qty }, buyPrice, unit },
-      });
-    } else {
-      await (prisma as any).supplyOpeningRow.create({ data: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit } });
-    }
     try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
-    // Resolve supplier identity (name) from session code or phone mapping and notify attendant
-    let supplierName: string | undefined = undefined;
-    let supplierCode: string | undefined = sess.code || undefined;
-    try {
-      if (supplierCode) {
-        const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(supplierCode), mode: "insensitive" }, active: true } });
-        supplierName = pc?.name || undefined;
-      }
-      if (!supplierName) {
-        const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supplier" } });
-        if (pm?.code) {
-          supplierCode = pm.code;
-          const pc2 = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true } });
-          supplierName = pc2?.name || undefined;
-        }
-      }
-    } catch {}
+    const identity = await resolveSupplierIdentity(sess, phoneE164);
+    const result = await saveLockedSupplyRow({
+      date: c.date,
+      outlet,
+      itemKey: productKey,
+      qty,
+      buyPrice,
+      unit,
+      mode: "add",
+      identity,
+    });
+    if (result.status === "locked") {
+      await sendTextSafe(gp, `${productKey} is already submitted and locked for ${outlet}. Contact supervisor for adjustments.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
+      const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
     // Auto-notify after every individual save (per request) regardless of config flags
-    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
+    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: identity.supplierCode, supplierName: identity.supplierName }); } catch {}
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
-  await sendTextSafe(gp, `Saved: ${productKey} ${qty}${unit} @ Ksh ${buyPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+    const savedQty = result.totalQty;
+    const savedUnit = result.row?.unit || unit;
+    const savedPrice = Number(result.row?.buyPrice ?? buyPrice);
+  await sendTextSafe(gp, `Saved & locked: ${productKey} ${savedQty}${savedUnit} @ Ksh ${savedPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, lastSig: sig, lastSigTs: now } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
   }
@@ -531,48 +615,34 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       await saveSessionPatch(sess.id, { state: "SPL_MENU", cursor: { date: today } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildSupplierMenu() as any }, "AI_DISPATCH_INTERACTIVE");
     }
-    const existing = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } } });
-    if (replyId === "SPL_SAVE_ADD") {
-      if (existing) {
-        await (prisma as any).supplyOpeningRow.update({
-          where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
-          data: { qty: { increment: qty }, buyPrice, unit },
-        });
-      } else {
-        await (prisma as any).supplyOpeningRow.create({ data: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit } });
-      }
-    } else { // SPL_SAVE_REPLACE
-      await (prisma as any).supplyOpeningRow.upsert({
-        where: { date_outletName_itemKey: { date: c.date, outletName: outlet, itemKey: productKey } },
-        update: { qty, buyPrice, unit },
-        create: { date: c.date, outletName: outlet, itemKey: productKey, qty, buyPrice, unit },
-      });
-    }
     try { await (prisma as any).waSession.update({ where: { id: sess.id }, data: { outlet } }); } catch {}
-    // Resolve supplier identity (name) and notify attendant on update/add
-    let supplierName: string | undefined = undefined;
-    let supplierCode: string | undefined = sess.code || undefined;
-    try {
-      if (supplierCode) {
-        const pc = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(supplierCode), mode: "insensitive" }, active: true } });
-        supplierName = pc?.name || undefined;
-      }
-      if (!supplierName) {
-        const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164, role: "supplier" } });
-        if (pm?.code) {
-          supplierCode = pm.code;
-          const pc2 = await (prisma as any).personCode.findFirst({ where: { code: { equals: canonFull(pm.code), mode: "insensitive" }, active: true } });
-          supplierName = pc2?.name || undefined;
-        }
-      }
-    } catch {}
-    // Auto-notify after update/add aggregate
-    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode, supplierName }); } catch {}
+    const identity = await resolveSupplierIdentity(sess, phoneE164);
+    const mode: "add" | "replace" = replyId === "SPL_SAVE_ADD" ? "add" : "replace";
+    const result = await saveLockedSupplyRow({
+      date: c.date,
+      outlet,
+      itemKey: productKey,
+      qty,
+      buyPrice,
+      unit,
+      mode,
+      identity,
+    });
+    if (result.status === "locked") {
+      await sendTextSafe(gp, `${productKey} is already submitted and locked for ${outlet}. Contact supervisor for adjustments.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
+      const products = await (prisma as any).product.findMany({ where: { active: true }, select: { key: true, name: true } });
+      return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildProductList(products) as any }, "AI_DISPATCH_INTERACTIVE");
+    }
+    try { await notifySupplyItem({ outlet, date: c.date, itemKey: productKey!, supplierCode: identity.supplierCode, supplierName: identity.supplierName }); } catch {}
+    const latestQty = result.totalQty;
+    const latestUnit = result.row?.unit || unit;
+    const latestPrice = Number(result.row?.buyPrice ?? buyPrice);
     const canLock = (await (prisma as any).supplyOpeningRow.count({ where: { date: c.date, outletName: outlet } })) > 0;
     if (replyId === "SPL_SAVE_ADD") {
-      await sendTextSafe(gp, `Added: ${productKey} +${qty}${unit} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await sendTextSafe(gp, `Added & locked: ${productKey} ${latestQty}${latestUnit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     } else {
-      await sendTextSafe(gp, `Replaced: ${productKey} ${qty}${unit} total for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await sendTextSafe(gp, `Replaced & locked: ${productKey} ${latestQty}${latestUnit} @ Ksh ${latestPrice} for ${outlet} (${c.date}).`, "AI_DISPATCH_TEXT", { gpt_sent: true });
     }
     await saveSessionPatch(sess.id, { state: "SPL_DELIV_PICK_PRODUCT", cursor: { ...c, qty: undefined, buyPrice: undefined, unit: undefined } });
   return sendInteractiveSafe({ messaging_product: "whatsapp", to: gp, type: "interactive", interactive: buildAfterSaveButtons({ canLock }) as any }, "AI_DISPATCH_INTERACTIVE");
@@ -584,6 +654,8 @@ export async function handleSupplierAction(sess: any, replyId: string, phoneE164
       const row = await (prisma as any).supplyOpeningRow.findUnique({ where: { id: Number(id) } });
       if (!row) {
         await sendTextSafe(gp, "Row not found.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      } else if (row.lockedAt) {
+        await sendTextSafe(gp, `Cannot delete ${row.itemKey}; it is already locked. Ask supervisor for changes.`, "AI_DISPATCH_TEXT", { gpt_sent: true });
       } else {
         await (prisma as any).supplyOpeningRow.delete({ where: { id: Number(id) } });
         await sendTextSafe(gp, `Deleted ${row.itemKey} ${row.qty}${row.unit} from ${row.outletName}.`, "AI_DISPATCH_TEXT", { gpt_sent: true });

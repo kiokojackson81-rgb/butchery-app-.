@@ -53,10 +53,35 @@ export async function upsertOpeningRow(input: unknown) {
     throw e;
   }
 
+  const existing = await (prisma as any).supplyOpeningRow.findUnique({
+    where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
+  });
+  if (existing?.lockedAt) {
+    const e: any = new Error("Item already locked");
+    e.code = 409;
+    throw e;
+  }
+
+  const lockStamp = existing?.lockedAt ?? new Date();
   const row = await (prisma as any).supplyOpeningRow.upsert({
     where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
-    update: { qty, buyPrice: buyPrice ?? 0, unit },
-    create: { date, outletName: outlet, itemKey, qty, buyPrice: buyPrice ?? 0, unit },
+    update: {
+      qty,
+      buyPrice: buyPrice ?? 0,
+      unit,
+      lockedAt: existing?.lockedAt ?? lockStamp,
+      lockedBy: existing?.lockedBy ?? "supplier_portal",
+    },
+    create: {
+      date,
+      outletName: outlet,
+      itemKey,
+      qty,
+      buyPrice: buyPrice ?? 0,
+      unit,
+      lockedAt: lockStamp,
+      lockedBy: "supplier_portal",
+    },
   });
 
   return row;

@@ -47,15 +47,57 @@ export async function POST(req: Request) {
       // non-fatal: continue to normal flow if check fails to avoid blocking admin when DB oddities occur
     }
 
+    const lockedConflicts: SupplyRow[] = [];
+    for (const r of rows) {
+      const existing = await (prisma as any).supplyOpeningRow.findUnique({
+        where: { date_outletName_itemKey: { date: r.date, outletName: r.outletName, itemKey: r.itemKey } },
+        select: { lockedAt: true },
+      }).catch(() => null);
+      if (existing?.lockedAt) {
+        lockedConflicts.push(r);
+      }
+    }
+    if (lockedConflicts.length) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "locked_rows",
+          locked: lockedConflicts.map((r) => ({ date: r.date, outletName: r.outletName, itemKey: r.itemKey })),
+        },
+        { status: 409 },
+      );
+    }
+
     const result = await (prisma as any).$transaction(async (tx: any) => {
       let processed = 0;
       for (const r of rows) {
+        const lockStamp = new Date();
         const where = { date_outletName_itemKey: { date: r.date, outletName: r.outletName, itemKey: r.itemKey } };
         const existing = await tx.supplyOpeningRow.findUnique({ where }).catch(() => null);
         if (existing) {
-          await tx.supplyOpeningRow.update({ where: { id: existing.id }, data: { qty: typeof r.qty === 'number' ? r.qty : existing.qty, buyPrice: typeof r.buyPrice === 'number' ? r.buyPrice : existing.buyPrice, unit: r.unit ?? existing.unit } });
+          await tx.supplyOpeningRow.update({
+            where: { id: existing.id },
+            data: {
+              qty: typeof r.qty === "number" ? r.qty : existing.qty,
+              buyPrice: typeof r.buyPrice === "number" ? r.buyPrice : existing.buyPrice,
+              unit: r.unit ?? existing.unit,
+              lockedAt: existing.lockedAt ?? lockStamp,
+              lockedBy: existing.lockedBy ?? "admin_api",
+            },
+          });
         } else {
-          await tx.supplyOpeningRow.create({ data: { date: r.date, outletName: r.outletName, itemKey: r.itemKey, qty: typeof r.qty === 'number' ? r.qty : 0, buyPrice: typeof r.buyPrice === 'number' ? r.buyPrice : 0, unit: r.unit ?? 'kg' } });
+          await tx.supplyOpeningRow.create({
+            data: {
+              date: r.date,
+              outletName: r.outletName,
+              itemKey: r.itemKey,
+              qty: typeof r.qty === "number" ? r.qty : 0,
+              buyPrice: typeof r.buyPrice === "number" ? r.buyPrice : 0,
+              unit: r.unit ?? "kg",
+              lockedAt: lockStamp,
+              lockedBy: "admin_api",
+            },
+          });
         }
         processed += 1;
       }

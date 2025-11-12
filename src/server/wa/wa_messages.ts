@@ -47,7 +47,7 @@ export function buildAfterSaveButtons(opts: { canLock: boolean }) {
     { type: "reply", reply: { id: "SPL_ADD_MORE", title: "Add another" } },
     { type: "reply", reply: { id: "SPL_MENU", title: "Finish" } },
   ];
-  if (opts.canLock) buttons.splice(1, 0, { type: "reply", reply: { id: "SPL_LOCK", title: "Submit & Lock" } });
+  if (opts.canLock) buttons.splice(1, 0, { type: "reply", reply: { id: "SPL_LOCK", title: "Notify done" } });
   return { type: "button", body: { text: "Next:" }, action: { buttons } } as const;
 }
 

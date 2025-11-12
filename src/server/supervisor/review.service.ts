@@ -67,17 +67,27 @@ async function applySideEffects(item: any, action: "approve" | "reject", note?: 
       break;
     }
 
-  case "supply_edit": {
+    case "supply_edit": {
       const rows = (item.payload as any)?.rows as Array<{ itemKey: string; qty?: number; buyPrice?: number }>;
       if (rows?.length) {
         await (prisma as any).$transaction(async (tx: any) => {
           for (const r of rows) {
+            const lockStamp = new Date();
             const existing = await tx.supplyOpeningRow.findUnique({
               where: { date_outletName_itemKey: { date, outletName: outlet, itemKey: r.itemKey } as any },
             });
             if (!existing) {
               await tx.supplyOpeningRow.create({
-                data: { date, outletName: outlet, itemKey: r.itemKey, qty: r.qty ?? 0, buyPrice: r.buyPrice ?? 0, unit: "kg" },
+                data: {
+                  date,
+                  outletName: outlet,
+                  itemKey: r.itemKey,
+                  qty: r.qty ?? 0,
+                  buyPrice: r.buyPrice ?? 0,
+                  unit: "kg",
+                  lockedAt: lockStamp,
+                  lockedBy: "supervisor_review",
+                },
               });
             } else {
               await tx.supplyOpeningRow.update({
@@ -85,6 +95,8 @@ async function applySideEffects(item: any, action: "approve" | "reject", note?: 
                 data: {
                   qty: typeof r.qty === "number" ? r.qty : existing.qty,
                   buyPrice: typeof r.buyPrice === "number" ? r.buyPrice : existing.buyPrice,
+                  lockedAt: existing.lockedAt ?? lockStamp,
+                  lockedBy: existing.lockedBy ?? "supervisor_review",
                 },
               });
             }

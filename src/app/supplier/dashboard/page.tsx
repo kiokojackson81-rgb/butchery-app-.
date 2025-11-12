@@ -279,7 +279,15 @@ export default function SupplierDashboard(): JSX.Element {
       const minimalKey = supplierOpeningKey(dateStr, selectedOutletName);
       const costKey = supplierCostKey(dateStr, selectedOutletName);
 
-      let rowsFromServer: Array<{ itemKey: string; qty: number }> | null = null;
+      let rowsFromServer: Array<{
+        itemKey: string;
+        qty: number;
+        unit?: Unit;
+        buyPrice?: number;
+        locked?: boolean;
+        lockedAt?: string | null;
+        lockedBy?: string | null;
+      }> | null = null;
       try {
         const query = new URLSearchParams({ date: dateStr, outlet: selectedOutletName }).toString();
         const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
@@ -288,8 +296,12 @@ export default function SupplierDashboard(): JSX.Element {
           rowsFromServer = (j?.rows || []).map((x: any) => ({
             itemKey: String(x?.itemKey || ""),
             qty: Number(x?.qty || 0),
+            unit: x?.unit === "pcs" ? "pcs" : "kg",
+            buyPrice: Number(x?.buyPrice || 0),
+            locked: Boolean(x?.locked),
+            lockedAt: typeof x?.lockedAt === "string" ? x.lockedAt : null,
+            lockedBy: x?.lockedBy ? String(x.lockedBy) : null,
           }));
-          saveLS(minimalKey, rowsFromServer);
         }
       } catch {
         // Ignore network errors; we'll fall back to cached local storage.
@@ -303,26 +315,56 @@ export default function SupplierDashboard(): JSX.Element {
         const previousByItem = new Map<string, SupplyRow>();
         for (const row of existingFull) previousByItem.set(row.itemKey, row);
 
-        nextRows = rowsFromServer.map((mi) => {
-          const prev = previousByItem.get(mi.itemKey);
-          const product = productByKey[mi.itemKey];
-          return {
-            id: prev?.id ?? rid(),
-            itemKey: mi.itemKey,
-            qty: mi.qty,
-            buyPrice: costMap[mi.itemKey] ?? prev?.buyPrice ?? 0,
-            unit: prev?.unit ?? product?.unit ?? "kg",
-          };
-        });
+        const merged: SupplyRow[] = [];
+        const seen = new Set<string>();
 
+        for (const serverRow of rowsFromServer) {
+          const prev = previousByItem.get(serverRow.itemKey);
+          const product = productByKey[serverRow.itemKey];
+          const locked = Boolean(serverRow.locked);
+          const qty = locked ? serverRow.qty : (prev?.qty ?? serverRow.qty);
+          const buyPriceCandidate = locked
+            ? serverRow.buyPrice ?? prev?.buyPrice ?? costMap[serverRow.itemKey] ?? 0
+            : prev?.buyPrice ?? serverRow.buyPrice ?? costMap[serverRow.itemKey] ?? 0;
+
+          merged.push({
+            id: prev?.id ?? rid(),
+            itemKey: serverRow.itemKey,
+            qty,
+            buyPrice: Number.isFinite(buyPriceCandidate) ? buyPriceCandidate : 0,
+            unit: prev?.unit ?? serverRow.unit ?? product?.unit ?? "kg",
+            locked,
+            lockedAt: serverRow.lockedAt ?? prev?.lockedAt ?? null,
+            lockedBy: serverRow.lockedBy ?? prev?.lockedBy ?? null,
+          });
+          seen.add(serverRow.itemKey);
+        }
+
+        // Preserve any local draft rows that haven't been synced yet
+        for (const row of existingFull) {
+          if (seen.has(row.itemKey)) continue;
+          merged.push(row);
+        }
+
+        nextRows = merged;
         saveLS(fullKey, nextRows);
+        saveLS(minimalKey, nextRows.map((r) => ({ itemKey: r.itemKey, qty: r.qty })));
       }
 
       if (nextRows.length === 0) {
         const minimal = loadLS<OpeningItem[]>(minimalKey, []);
         nextRows = minimal.map((mi) => {
           const product = productByKey[mi.itemKey];
-          return { id: rid(), itemKey: mi.itemKey, qty: mi.qty, buyPrice: 0, unit: product?.unit ?? "kg" };
+          return {
+            id: rid(),
+            itemKey: mi.itemKey,
+            qty: mi.qty,
+            buyPrice: 0,
+            unit: product?.unit ?? "kg",
+            locked: false,
+            lockedAt: null,
+            lockedBy: null,
+          };
         });
       }
 
@@ -471,16 +513,38 @@ export default function SupplierDashboard(): JSX.Element {
     if (!p) return;
     setRows((prev) => [
       ...prev,
-      { id: rid(), itemKey, qty: 0, buyPrice: 0, unit: p.unit },
+      {
+        id: rid(),
+        itemKey,
+        qty: 0,
+        buyPrice: 0,
+        unit: p.unit,
+        locked: false,
+        lockedAt: null,
+        lockedBy: null,
+      },
     ]);
   };
 
   const updateRow = (id: string, patch: Partial<SupplyRow>): void => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        if (r.locked) return r;
+        return { ...r, ...patch };
+      }),
+    );
   };
 
   const removeRow = (id: string): void => {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    setRows((prev) => {
+      const target = prev.find((r) => r.id === id);
+      if (target?.locked) {
+        notifyToast("Item already locked; contact supervisor for changes.");
+        return prev;
+      }
+      return prev.filter((r) => r.id !== id);
+    });
   };
 
   /* ===== Save (draft) ===== */
@@ -500,7 +564,19 @@ export default function SupplierDashboard(): JSX.Element {
     // Persist to server (best effort so attendants see updates on dashboard)
     let synced = false;
     try {
-      await postJSON("/api/supply/opening", { date: dateStr, outlet: selectedOutletName, rows });
+      const draftRows = rows.filter((r) => !r.locked);
+      if (draftRows.length > 0) {
+        await postJSON("/api/supply/opening", {
+          date: dateStr,
+          outlet: selectedOutletName,
+          rows: draftRows.map((r) => ({
+            itemKey: r.itemKey,
+            qty: r.qty,
+            buyPrice: r.buyPrice,
+            unit: r.unit,
+          })),
+        });
+      }
       synced = true;
     } catch (err) {
       console.error("Failed to sync supply opening rows", err);
@@ -554,6 +630,10 @@ export default function SupplierDashboard(): JSX.Element {
   // Per-row submit (one item at a time) with duplicate prompt
   const submitRow = async (r: SupplyRow) => {
     if (!selectedOutletName) return;
+    if (r.locked) {
+      notifyToast("Already submitted.");
+      return;
+    }
     const exists = rows.some((x) => x.itemKey === r.itemKey && x.id !== r.id);
     let mode: "add" | "replace" = "add";
     if (exists) {
@@ -561,11 +641,23 @@ export default function SupplierDashboard(): JSX.Element {
       mode = confirm ? "add" : "replace";
     }
     try {
+      const supplierCode = sessionStorage.getItem("supplier_code");
+      const supplierName = sessionStorage.getItem("supplier_name");
       const res = await fetch("/api/supply/opening/item", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName, itemKey: r.itemKey, qty: r.qty, buyPrice: r.buyPrice, unit: r.unit, mode }),
+        body: JSON.stringify({
+          date: dateStr,
+          outlet: selectedOutletName,
+          itemKey: r.itemKey,
+          qty: r.qty,
+          buyPrice: r.buyPrice,
+          unit: r.unit,
+          mode,
+          supplierCode,
+          supplierName,
+        }),
       });
       const j = await res.json().catch(()=>({ ok: false }));
       if (!j?.ok) throw new Error(j?.error || "Failed");
@@ -573,15 +665,23 @@ export default function SupplierDashboard(): JSX.Element {
       const full = loadLS<SupplyRow[]>(supplierOpeningFullKey(dateStr, selectedOutletName), []);
       const idx = full.findIndex((x) => x.itemKey === r.itemKey);
       let nextFull = full.slice();
-      if (idx === -1) nextFull.push({ ...r });
-      else nextFull[idx] = { ...r, qty: j.totalQty };
+      const lockedSnapshot: SupplyRow = {
+        ...r,
+        qty: j.totalQty,
+        locked: true,
+        lockedAt: j?.row?.lockedAt ?? new Date().toISOString(),
+        lockedBy: j?.row?.lockedBy ?? (supplierCode || "supplier_portal"),
+      };
+      if (idx === -1) nextFull.push(lockedSnapshot);
+      else nextFull[idx] = lockedSnapshot;
       saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), nextFull);
       const minimal = toMinimal(nextFull);
       saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
       setRows(nextFull);
-  notifyToast(`Submitted ${r.itemKey} — total today: ${j.totalQty}`);
+  notifyToast(`Submitted ${r.itemKey} - locked at ${j.totalQty}`);
     } catch (e: any) {
-  notifyToast(e?.message || "Submit failed");
+  if (String(e?.message || "").toLowerCase().includes("locked")) notifyToast("Already locked for today.");
+  else notifyToast(e?.message || "Submit failed");
     }
   };
 
@@ -1058,7 +1158,14 @@ export default function SupplierDashboard(): JSX.Element {
                 const marginPerUnit = sell - (r.buyPrice || 0);
                 return (
                   <tr key={r.id} className="border-b">
-                    <td className="py-2">{name}</td>
+                    <td className="py-2">
+                      {name}
+                      {r.locked ? (
+                        <span className="ml-2 inline-block rounded bg-gray-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-600">
+                          Locked
+                        </span>
+                      ) : null}
+                    </td>
                     <td>
                       <input
                         className="input-mobile border rounded-xl p-2 w-28"
@@ -1066,7 +1173,9 @@ export default function SupplierDashboard(): JSX.Element {
                         inputMode={unit === "kg" ? "decimal" : "numeric"}
                         placeholder={unit === "kg" ? "e.g. 4.5 kg" : "e.g. 4 pcs"}
                         value={qtyDraftById[r.id] ?? normalizeQtyForInput(r.qty ?? 0, unit, r.itemKey)}
+                        disabled={submitted || r.locked}
                         onChange={(e) => {
+                          if (submitted || r.locked) return;
                           const raw = e.target.value;
                           if (raw === "") {
                             setQtyDraftById((prev) => ({ ...prev, [r.id]: raw }));
@@ -1083,6 +1192,7 @@ export default function SupplierDashboard(): JSX.Element {
                           updateRow(r.id, { qty: finalQty });
                         }}
                         onBlur={(e) => {
+                          if (submitted || r.locked) return;
                           const n = toNumStr(e.target.value);
                           const clamped = n < 0 ? 0 : n;
                           const allowFractional = allowsFractionalQty(unit, r.itemKey);
@@ -1095,7 +1205,6 @@ export default function SupplierDashboard(): JSX.Element {
                             return next;
                           });
                         }}
-                        disabled={submitted}
                       />
                     </td>
                     <td>{unit}</td>
@@ -1106,7 +1215,9 @@ export default function SupplierDashboard(): JSX.Element {
                         inputMode="decimal"
                         placeholder="e.g. 300"
                         value={priceDraftById[r.id] ?? (Number.isFinite(r.buyPrice) ? String(r.buyPrice) : "")}
+                        disabled={submitted || r.locked}
                         onChange={(e) => {
+                          if (submitted || r.locked) return;
                           const raw = e.target.value;
                           if (raw === "") {
                             setPriceDraftById((prev) => ({ ...prev, [r.id]: raw }));
@@ -1120,6 +1231,7 @@ export default function SupplierDashboard(): JSX.Element {
                           updateRow(r.id, { buyPrice: final });
                         }}
                         onBlur={(e) => {
+                          if (submitted || r.locked) return;
                           const n = toNumStr(e.target.value);
                           const final = n < 0 ? 0 : n;
                           updateRow(r.id, { buyPrice: final });
@@ -1130,7 +1242,6 @@ export default function SupplierDashboard(): JSX.Element {
                             return next;
                           });
                         }}
-                        disabled={submitted}
                       />
                     </td>
                     <td className="font-medium">
@@ -1142,28 +1253,40 @@ export default function SupplierDashboard(): JSX.Element {
                       )}
                     </td>
                     <td>
-                      <div className="flex gap-2">
-                        <button
-                          className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                          onClick={() => submitRow(r)}
-                        >
-                          Submit
-                        </button>
-                        <button
-                          className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                          onClick={() => requestRowModification(r)}
-                        >
-                          Request change
-                        </button>
-                        {!submitted && (
+                      {r.locked ? (
+                        <div className="flex gap-2 items-center">
+                          <span className="text-xs text-gray-500">Locked. Request supervisor change if needed.</span>
                           <button
                             className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                            onClick={() => removeRow(r.id)}
+                            onClick={() => requestRowModification(r)}
                           >
-                            ✕
+                            Request change
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                            onClick={() => submitRow(r)}
+                          >
+                            Submit
+                          </button>
+                          <button
+                            className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                            onClick={() => requestRowModification(r)}
+                          >
+                            Request change
+                          </button>
+                          {!submitted && (
+                            <button
+                              className="btn-mobile text-xs border rounded-lg px-2 py-1"
+                              onClick={() => removeRow(r.id)}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
-type Body = { id: string; qty?: number; unit?: string; buyPrice?: number; reason?: string };
+type Body = { id: string; qty?: number; unit?: string; buyPrice?: number; reason?: string; force?: boolean };
 
 export async function POST(req: Request) {
   try {
@@ -18,6 +18,17 @@ export async function POST(req: Request) {
 
     const before = await (prisma as any).supplyOpeningRow.findUnique({ where: { id } }).catch(()=>null);
     if (!before) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+    if (before.lockedAt && !body.force) {
+      return NextResponse.json({ ok: false, error: "locked", lockedAt: before.lockedAt }, { status: 409 });
+    }
+
+    if (!before.lockedAt) {
+      data.lockedAt = new Date();
+      data.lockedBy = "admin_edit";
+    } else if (body.force) {
+      data.lockedBy = before.lockedBy ?? "admin_edit";
+    }
+
     const after = await (prisma as any).supplyOpeningRow.update({ where: { id }, data });
 
     try {
