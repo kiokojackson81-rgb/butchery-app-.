@@ -309,8 +309,7 @@
 			"label": "Typecheck (tsc)",
 			"type": "shell",
 			"command": "npm run -s typecheck"
-		}
-		,
+		},
 		{
 			"label": "dev:sandbox (pwsh, :3003)",
 			"type": "shell",
@@ -325,6 +324,32 @@
 					"executable": "pwsh"
 				}
 			}
+		},
+		{
+			"label": "playwright: supply locking",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/supply.locking.spec.ts --reporter=line --workers=1"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"isBackground": false
+		},
+		{
+			"label": "playwright: GPT-only (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.gpt-only.smoke.spec.ts --reporter=line --workers=1"
+		},
+		{
+			"label": "playwright: legacy WA only (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.smoke.spec.ts --reporter=line --workers=1"
+		},
+		{
+			"label": "playwright: deposit/closing (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.deposit-and-closing.spec.ts --reporter=line --workers=1"
 		}
 	]
 }

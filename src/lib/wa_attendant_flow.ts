@@ -383,6 +383,51 @@ export async function sendAttendantMenu(phone: string, sess: any, opts?: { force
   const header = outlet ? `You're logged in as an attendant at ${outlet}.` : "You're logged in as an attendant.";
   await sendText(phone, `${header} What would you like to do?`, "AI_DISPATCH_TEXT", { gpt_sent: true });
 
+  // Optionally send a one-time locked-supply summary at start of day
+  try {
+    const flag = String(process.env.WA_SUPPLY_LOCKED_SUMMARY_ENABLED || '').toLowerCase();
+    const enabled = flag === '1' || flag === 'true' || flag === 'yes';
+    if (enabled && outlet) {
+      const todayDate = today();
+      // cross-process once-per-day guard using reminderSend unique constraint
+      let allowed = true;
+      try {
+        await (prisma as any).reminderSend.create({ data: { type: `supply_summary_v1:${outlet}` , phoneE164, date: todayDate } });
+      } catch (err: any) {
+        const msg = String(err?.message || err || "");
+        const code = (err && (err as any).code) || "";
+        const isUnique = code === 'P2002' || /unique constraint/i.test(msg);
+        // If duplicate, skip summary for today
+        if (isUnique) allowed = false;
+      }
+      if (allowed) {
+        const rows = await (prisma as any).supplyOpeningRow.findMany({
+          where: { outletName: outlet, date: todayDate, lockedAt: { not: null } },
+          orderBy: { itemKey: 'asc' },
+          take: 40,
+        }).catch(() => []);
+        if (rows && rows.length) {
+          // Tally kg vs pcs totals, list top 10 items for readability
+          let totalKg = 0, totalPcs = 0;
+          const lines: string[] = [];
+          for (const r of rows) {
+            const qty = Number((r as any).qty || 0);
+            const unit = (r as any).unit || 'kg';
+            if (unit === 'pcs') totalPcs += qty; else totalKg += qty;
+            if (lines.length < 10) lines.push(`- ${(r as any).itemKey}: ${fmtQty(qty)}${unit}`);
+          }
+          const more = rows.length > lines.length ? `\n(+${rows.length - lines.length} more)` : '';
+          const summaryHeader = `Locked supply for ${outlet} (${todayDate}):`;
+          const totalsLine = `Totals — ${totalKg ? `KG ${fmtQty(totalKg)}` : ''}${totalKg && totalPcs ? ', ' : ''}${totalPcs ? `PCS ${fmtQty(totalPcs)}` : ''}`.trim();
+          const body = [summaryHeader, ...lines, more, totalsLine, `Reply LIST to view indices or DISPUTE <reason> to raise an issue.`]
+            .filter(Boolean)
+            .join('\n');
+          await sendText(phone, body, "AI_DISPATCH_TEXT", { gpt_sent: true });
+        }
+      }
+    }
+  } catch {}
+
   // Determine if opening stock exists today for this outlet
   let hasOpening = false;
   try {

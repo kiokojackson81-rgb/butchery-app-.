@@ -581,6 +581,45 @@ export default function SupplierDashboard(): JSX.Element {
     } catch (err) {
       console.error("Failed to sync supply opening rows", err);
     }
+
+    // NEW: Auto-lock any newly entered rows that have a positive qty & buyPrice.
+    // This enforces the requirement that once supplier enters stock it is saved & locked per item.
+    // We only attempt locking for rows not yet locked and with sensible values (>0 for both qty & buyPrice).
+    const lockable = rows.filter(r => !r.locked && r.qty > 0 && r.buyPrice > 0);
+    if (lockable.length) {
+      let lockedCount = 0;
+      for (const r of lockable) {
+        try {
+          const supplierCode = sessionStorage.getItem("supplier_code");
+          const supplierName = sessionStorage.getItem("supplier_name");
+          const res = await fetch("/api/supply/opening/item", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({
+              date: dateStr,
+              outlet: selectedOutletName,
+              itemKey: r.itemKey,
+              qty: r.qty,
+              buyPrice: r.buyPrice,
+              unit: r.unit,
+              mode: "add",
+              supplierCode,
+              supplierName,
+            }),
+          });
+          if (res.ok) lockedCount += 1; // individual lock success
+        } catch (e) {
+          // Non-fatal; continue locking other rows
+          console.warn("Auto-lock failed for", r.itemKey, e);
+        }
+      }
+      if (lockedCount > 0) {
+        // Refresh state so UI reflects newly locked items
+        await refreshSupplyState({ skipTransfers: true });
+        if (!opts?.silent) notifyToast(`Auto-locked ${lockedCount} item${lockedCount === 1 ? "" : "s"}.`);
+      }
+    }
     await refreshSupplyState({ skipTransfers: true });
     if (!opts?.silent) {
       notifyToast(synced ? "Saved." : "Saved locally. Will sync when back online.");

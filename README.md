@@ -37,6 +37,27 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Additional API Endpoints (Project Specific)
 
+### Supply Per-Item Locking
+
+Per-item opening supply rows are locked immediately on submission (dashboard auto-lock or WA supplier flow). Once locked, the row is immutable for that (date, outlet, itemKey) unless a supervisor approves a `supply_edit` review. See `docs/supply-locking.md` for full behavior, impacted APIs, and QA tips.
+
+Key endpoints involved:
+- `POST /api/supply/opening` (draft only; skips locked rows)
+- `POST /api/supply/opening/item` (submit + lock single item)
+- `GET /api/supply/opening` (reflects lock state)
+- Supervisor review approval (`type: supply_edit`) applies adjustments while preserving existing lock metadata.
+
+Attendant opening-effective calculations rely on these locked supply rows; incorrect manual edits can distort sales KPIs, so locking preserves audit integrity.
+
+For adjustment procedure and validation checklist refer to: `docs/supply-locking.md`.
+
+#### Related runtime flags
+- `WA_SUPPLY_LOCKED_SUMMARY_ENABLED=1` — When enabled, attendants receive a one-time WhatsApp summary of today's locked supply when the menu is sent (per phone/outlet/date). Uses a DB uniqueness guard to avoid repeats.
+- `SUPPLY_ITEM_RATE_LIMIT` — Max submissions per window to `POST /api/supply/opening/item` (default 60).
+- `SUPPLY_ITEM_RATE_WINDOW_SEC` — Window size in seconds for the limiter (default 60).
+- `SUPPLY_ITEM_RATE_BURST` — Optional hard cap allowing brief bursts; defaults to the limit value.
+- `SUPPLY_ITEM_RATE_DISABLE=1` — Disable the in-process limiter (not recommended in production).
+
 ### POST /api/notify/supply
 
 Send multi-role WhatsApp supply notifications (attendant, supplier, supervisor) with 24h free‑text gating.

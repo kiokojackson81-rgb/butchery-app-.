@@ -58,4 +58,47 @@ describe('reviewItem service', () => {
     expect(res.ok).toBe(true);
     expect((prisma as any).supplyOpeningRow.create).toHaveBeenCalled();
   });
+
+  it('supply_edit preserves existing lock fields when updating a locked row', async () => {
+    const rows = [{ itemKey: 'beef', qty: 9, buyPrice: 210 }];
+    const item = { id: 'r3', status: 'pending', type: 'supply_edit', outlet: 'Outlet Z', date: '2025-11-12', payload: { rows } };
+    (prisma as any).reviewItem.findUnique.mockResolvedValueOnce(item);
+    (prisma as any).reviewItem.update.mockResolvedValueOnce({ ...item, status: 'approved' });
+
+    // existing row already locked
+    const existing = { id: 's9', itemKey: 'beef', qty: 5, buyPrice: 200, lockedAt: new Date('2025-11-12T06:00:00.000Z'), lockedBy: 'supplier_portal' };
+    (prisma as any).supplyOpeningRow.findUnique.mockResolvedValueOnce(existing);
+    (prisma as any).supplyOpeningRow.update.mockResolvedValueOnce({ ...existing, qty: 9, buyPrice: 210 });
+
+    const res = await reviewItem({ id: 'r3', action: 'approve' }, 'SUP999');
+    expect(res.ok).toBe(true);
+    expect((prisma as any).supplyOpeningRow.update).toHaveBeenCalledTimes(1);
+    const updateArgs = (prisma as any).supplyOpeningRow.update.mock.calls[0][0];
+    // qty/buyPrice updated; lock fields preserved (not overwritten)
+    expect(updateArgs.data.qty).toBe(9);
+    expect(updateArgs.data.buyPrice).toBe(210);
+    expect(updateArgs.data.lockedAt).toBe(existing.lockedAt); // stays as existing
+    expect(updateArgs.data.lockedBy).toBe(existing.lockedBy);
+  });
+
+  it('supply_edit sets lock fields when updating an unlocked existing row', async () => {
+    const rows = [{ itemKey: 'goat', qty: 12 }];
+    const item = { id: 'r4', status: 'pending', type: 'supply_edit', outlet: 'Outlet W', date: '2025-11-12', payload: { rows } };
+    (prisma as any).reviewItem.findUnique.mockResolvedValueOnce(item);
+    (prisma as any).reviewItem.update.mockResolvedValueOnce({ ...item, status: 'approved' });
+
+    // existing row without lock
+    const existing = { id: 's10', itemKey: 'goat', qty: 0, buyPrice: 0, lockedAt: null, lockedBy: null };
+    (prisma as any).supplyOpeningRow.findUnique.mockResolvedValueOnce(existing);
+    (prisma as any).supplyOpeningRow.update.mockResolvedValueOnce({ ...existing, qty: 12, lockedAt: new Date(), lockedBy: 'supervisor_review' });
+
+    const res = await reviewItem({ id: 'r4', action: 'approve' }, 'SUP888');
+    expect(res.ok).toBe(true);
+    expect((prisma as any).supplyOpeningRow.update).toHaveBeenCalledTimes(1);
+    const updateArgs = (prisma as any).supplyOpeningRow.update.mock.calls[0][0];
+    expect(updateArgs.data.qty).toBe(12);
+    // lock fields should be set when previously null
+    expect(updateArgs.data.lockedAt).toBeDefined();
+    expect(updateArgs.data.lockedBy).toBe('supervisor_review');
+  });
 });

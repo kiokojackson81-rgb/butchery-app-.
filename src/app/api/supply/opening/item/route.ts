@@ -5,6 +5,36 @@ export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 import { notifySupplyItem } from "@/server/supply_notify_item";
 
+// === Simple in-memory rate limiter (per process) ===
+// Keyed by (date|outlet) to avoid abusive burst submissions that could spam
+// review & notification flows. This is a pragmatic guard; for multi-instance
+// deployments consider a shared store (Redis) if stricter guarantees needed.
+// Config:
+//   SUPPLY_ITEM_RATE_LIMIT        max submissions per window (default 60)
+//   SUPPLY_ITEM_RATE_WINDOW_SEC   sliding window seconds (default 60)
+//   SUPPLY_ITEM_RATE_BURST        optional hard cap allowing brief bursts (default = limit)
+//   SUPPLY_ITEM_RATE_DISABLE=1    disables limiter
+type WindowRecord = { ts: number };
+const RL_BUCKET: Record<string, WindowRecord[]> = Object.create(null);
+
+function rateLimitCheck(key: string) {
+  if (process.env.SUPPLY_ITEM_RATE_DISABLE === '1') return { allowed: true } as const;
+  const limit = Math.max(1, Number(process.env.SUPPLY_ITEM_RATE_LIMIT || 60) || 60);
+  const windowSec = Math.max(1, Number(process.env.SUPPLY_ITEM_RATE_WINDOW_SEC || 60) || 60);
+  const burst = Math.max(limit, Number(process.env.SUPPLY_ITEM_RATE_BURST || limit) || limit);
+  const now = Date.now();
+  const winMs = windowSec * 1000;
+  const arr = (RL_BUCKET[key] = (RL_BUCKET[key] || []).filter(r => now - r.ts <= winMs));
+  if (arr.length >= burst) {
+    return { allowed: false, retryAfterSec: Math.ceil((winMs - (now - arr[0].ts)) / 1000), reason: 'BURST' } as const;
+  }
+  if (arr.length >= limit) {
+    return { allowed: false, retryAfterSec: Math.ceil((winMs - (now - arr[0].ts)) / 1000), reason: 'RATE_LIMIT' } as const;
+  }
+  arr.push({ ts: now });
+  return { allowed: true } as const;
+}
+
 // POST /api/supply/opening/item
 // Body: { date, outlet, itemKey, qty, buyPrice?, unit?, mode?: "add"|"replace" }
 // - If mode=="add" (default), qty is added to any existing row for the date/outlet/item.
@@ -24,6 +54,18 @@ export async function POST(req: Request) {
     if (!date || !outlet || !itemKey || !(qtyNum > 0)) {
       return NextResponse.json({ ok: false, error: "missing/invalid fields" }, { status: 400 });
     }
+
+    // Rate limit guard (before expensive DB lookups)
+    try {
+      const rlKey = `${date}|${outlet}`;
+      const rl = rateLimitCheck(rlKey);
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { ok: false, error: "RATE_LIMIT", message: `Too many submissions. Retry in ${rl.retryAfterSec}s`, retryAfterSec: rl.retryAfterSec },
+          { status: 429 },
+        );
+      }
+    } catch {}
 
     const existing = await (prisma as any).supplyOpeningRow.findUnique({
       where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
