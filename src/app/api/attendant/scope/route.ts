@@ -49,19 +49,8 @@ export async function GET(req: Request) {
       } catch {}
     }
 
-    // If we have an outlet but still no keys, derive from active pricebook
-    if (outletName && keys.length === 0) {
-      const [activeProducts, activePB] = await Promise.all([
-        (prisma as any).product.findMany({ where: { active: true }, select: { key: true } }),
-        (prisma as any).pricebookRow.findMany({ where: { outletName, active: true }, select: { productKey: true } }),
-      ]);
-      const productSet = new Set<string>((activeProducts || []).map((p: any) => String(p.key)));
-      const pbSet = new Set<string>((activePB || []).map((r: any) => String(r.productKey)));
-      keys = Array.from([...productSet].filter((k) => pbSet.has(k))).sort();
-
-      // Persist for consistency
-      try { if (keys.length > 0) await upsertAssignmentForCode(code, outletName, keys); } catch {}
-    }
+    // IMPORTANT: Do NOT auto-derive products from pricebook. If no explicit assignment
+    // is found, return an empty list so attendants only see products they manage.
 
     return NextResponse.json({ ok: true, outlet: outletName, productKeys: keys });
   } catch (e) {

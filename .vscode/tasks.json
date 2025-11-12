@@ -350,6 +350,12 @@
 			"label": "playwright: deposit/closing (BASE_URL=:3002)",
 			"type": "shell",
 			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/wa.deposit-and-closing.spec.ts --reporter=line --workers=1"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"isBackground": false
 		}
 	]
 }

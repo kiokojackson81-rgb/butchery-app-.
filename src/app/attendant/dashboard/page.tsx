@@ -1182,7 +1182,7 @@ export default function AttendantDashboardPage() {
     for (let i = 0; i < attempts.length; i++) {
       if (i > 0) await new Promise(r => setTimeout(r, attempts[i]));
       try {
-        const totals = await fetchHeaderTotals(outletName, closedDate, true);
+        const { totals } = await fetchHeaderTotals(outletName, closedDate, true);
         last = totals;
         // Heuristic: if all of these are zero, it might be before snapshot is visible; retry
         const looksEmpty = Number(totals.weightSales || 0) === 0 && Number(totals.expenses || 0) === 0 && Number(totals.verifiedDeposits || 0) === 0;
@@ -1252,11 +1252,11 @@ export default function AttendantDashboardPage() {
     }
   }, [outlet]);
 
-  // Ensure assistants never land on Till tab by redirecting tab selection
+  // Ensure assistants only see their flow: hide Stock, Supply, Expenses, Till tabs
   useEffect(() => {
-    if (assistantMode && tab === "till") {
-      setTab("summary");
-    }
+    if (!assistantMode) return;
+    const disallowed = new Set(["stock", "supply", "expenses", "till"]);
+    if (disallowed.has(tab)) setTab("deposits");
   }, [assistantMode, tab]);
 
   if (!outlet) {
@@ -1329,11 +1329,11 @@ export default function AttendantDashboardPage() {
 
       {/* Tabs */}
       <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2">
-        <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>
+        {!assistantMode && <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>}
         <TabBtn active={tab==="products"} onClick={()=>setTab("products")}>Products</TabBtn>
-        <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
+        {!assistantMode && <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>}
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
-        <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
+        {!assistantMode && <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>}
         {!assistantMode && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
         <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
       </nav>
@@ -1566,19 +1566,25 @@ export default function AttendantDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {(openingRowsRaw.filter(r => !!catalog[r.itemKey])).length === 0 && (
+                {(openingRowsRaw.filter(r => {
+                  const key = r.itemKey as any as ItemKey;
+                  return !!catalog[key];
+                })).length === 0 && (
                   <tr><td className="py-3 text-gray-500" colSpan={4}>
                     No opening stock captured for today yet. Opening will start from yesterday's closing plus any new deliveries.
                   </td></tr>
                 )}
-                {openingRowsRaw.filter(r => !!catalog[r.itemKey]).map((r, i) => (
+                {openingRowsRaw.filter(r => {
+                  const key = r.itemKey as any as ItemKey;
+                  return !!catalog[key];
+                }).map((r, i) => (
                   <tr key={`${r.itemKey}-${i}`} className="border-b">
-                    <td className="py-2">{catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()}</td>
+                    <td className="py-2">{catalog[(r.itemKey as any as ItemKey)]?.name ?? r.itemKey.toUpperCase()}</td>
                     <td>{fmt(r.qty)}</td>
-                    <td>{catalog[r.itemKey]?.unit ?? "kg"}</td>
+                    <td>{catalog[(r.itemKey as any as ItemKey)]?.unit ?? "kg"}</td>
                     <td>
                       <button className="btn-mobile text-xs border rounded-lg px-2 py-1" onClick={()=>{
-                        const reason = promptSync(`Raise a dispute for ${catalog[r.itemKey]?.name ?? r.itemKey.toUpperCase()} (qty ${r.qty}). Describe the issue:`, "") || "";
+                        const reason = promptSync(`Raise a dispute for ${catalog[(r.itemKey as any as ItemKey)]?.name ?? r.itemKey.toUpperCase()} (qty ${r.qty}). Describe the issue:`, "") || "";
                         if (!reason) return;
                         notifyToast("Dispute submitted to Supervisor.");
                       }}>

@@ -58,6 +58,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
+    // Enforce product scoping: if an attendant session is present but no products are
+    // explicitly assigned, do not fall back to showing all products.
+    if (sess?.attendant?.loginCode && productKeys.length === 0) {
+      return NextResponse.json({ ok: true, outlet: outletName, rows: [] });
+    }
+
     const from = dateNDaysAgoISO(days - 1);
     const to = todayISO();
 
