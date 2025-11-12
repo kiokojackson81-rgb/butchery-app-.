@@ -1278,11 +1278,10 @@ export default function AttendantDashboardPage() {
     }
   }, [outlet]);
 
-  // Ensure assistants only see their flow: hide Stock, Supply, Expenses, Till tabs
+  // Ensure assistants avoid Till tab (deposits go straight to General)
   useEffect(() => {
     if (!assistantMode) return;
-    const disallowed = new Set(["stock", "supply", "expenses", "till"]);
-    if (disallowed.has(tab)) setTab("deposits");
+    if (tab === "till") setTab("deposits");
   }, [assistantMode, tab]);
 
   if (!outlet) {
@@ -1355,11 +1354,11 @@ export default function AttendantDashboardPage() {
 
       {/* Tabs */}
       <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2">
-        {!assistantMode && <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>}
+        <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>
         <TabBtn active={tab==="products"} onClick={()=>setTab("products")}>Products</TabBtn>
-        {!assistantMode && <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>}
+        <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
         <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
-        {!assistantMode && <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>}
+        <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
         {!assistantMode && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
         <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
       </nav>
