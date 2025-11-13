@@ -69,9 +69,13 @@ export async function POST(req: Request) {
 
       // Compute effective opening for the just-closed period: yesterday closing + today's supply (before reset)
       const computedOpeningSnapshot: Record<string, number> = {};
+      const openingEffByItem: Record<string, number> = {};
       const allKeysPreReset = new Set<string>([...Object.keys(prevOpenByItem), ...Object.keys(supplyByItem)]);
       for (const k of allKeysPreReset) {
-        const qty = Number((prevOpenByItem[k] || 0)) + Number((supplyByItem[k] || 0));
+        const prevQty = Number(prevOpenByItem[k] || 0);
+        const supplyQty = Number(supplyByItem[k] || 0);
+        const qty = prevQty + supplyQty;
+        openingEffByItem[k] = qty;
         if (Number.isFinite(qty) && qty > 0) computedOpeningSnapshot[k] = qty;
       }
 
@@ -85,9 +89,9 @@ export async function POST(req: Request) {
       }
 
       // Period rotation behavior:
-      // - After first close of the day (nextCount === 1): set TODAY's opening rows = today's closing if present, else previous closing only.
+      // - After first close of the day (nextCount === 1): set TODAY's opening rows = today's closing if present, else opening-effective (yesterday closing + today's supply so far).
       //   Expenses are cleared; this starts a new in-day period with supply reset relative to the new base.
-      // - After second close (nextCount >= 2): seed TOMORROW's opening rows similarly (today's closing if present, else previous closing only).
+      // - After second close (nextCount >= 2): seed TOMORROW's opening rows similarly (today's closing if present, else opening-effective).
       const keys = new Set<string>([
         ...Object.keys(prevOpenByItem),
         ...Object.keys(supplyByItem),
@@ -114,14 +118,14 @@ export async function POST(req: Request) {
         } catch {}
         // Reset today's opening rows to the new base.
         // If there are closing rows today, carry forward CLOSING.
-        // If there are NO closing rows today, use only prevClosing (supply resets for the new period).
+        // If there are NO closing rows today, carry forward opening-effective (yesterday closing + today's supply so far).
         await (tx as any).supplyOpeningRow.deleteMany({ where: { date, outletName: outlet } });
         const hasClosings = (todaysClosings?.length || 0) > 0;
         const dataToday: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
         for (const key of keys) {
           const baseQty = hasClosings
             ? Number((closingByItem[key]?.closingQty) || 0)
-            : Number((prevOpenByItem[key] || 0));
+            : Number(openingEffByItem[key] ?? 0);
           const nextQty = Math.max(0, baseQty);
           if (nextQty > 0) dataToday.push({ date, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
         }
@@ -180,10 +184,10 @@ export async function POST(req: Request) {
           const dataTomorrow: Array<{ date: string; outletName: string; itemKey: string; qty: number; unit: string }> = [];
           for (const key of keys) {
             // If there are closing rows today, carry forward CLOSING.
-            // If not, seed tomorrow from prevClosing only (supply resets for the new period).
+            // If not, seed tomorrow from opening-effective (yesterday closing + today's supply) so we do not drop deliveries.
             const baseQty = hasClosings
               ? Number((closingByItem[key]?.closingQty) || 0)
-              : Number((prevOpenByItem[key] || 0));
+              : Number(openingEffByItem[key] ?? 0);
             const nextQty = Math.max(0, baseQty);
             if (nextQty > 0) dataTomorrow.push({ date: tomorrow, outletName: outlet, itemKey: key, qty: nextQty, unit: unitByKey[key] || "kg" });
           }
