@@ -42,6 +42,7 @@ type BreakdownRow = {
   openingQty: number;
   supplyQty: number;
   closingQty: number;
+  wasteQty: number;
   salesUnits: number;
   price: number;
   salesValue: number;
@@ -57,6 +58,7 @@ export type AssistantDepositComputation = {
   periodState: PeriodState;
   salesValue: number;
   expensesValue: number;
+  carryoverPrev: number;
   expected: number;
   depositedSoFar: number;
   recommendedNow: number;
@@ -70,6 +72,78 @@ type ComputeArgs = {
   outletName?: string | null;
   respectAllowlist?: boolean;
 };
+
+type ClosingInfo = { closing: number; waste: number };
+
+function buildClosingInfo(rows: Array<any>): Map<string, ClosingInfo> {
+  const map = new Map<string, ClosingInfo>();
+  for (const row of rows || []) {
+    const key = String(row?.itemKey || "").toLowerCase();
+    if (!key) continue;
+    const closing = Number(row?.closingQty || 0);
+    const waste = Number(row?.wasteQty || 0);
+    if (!Number.isFinite(closing) && !Number.isFinite(waste)) continue;
+    if (!map.has(key)) map.set(key, { closing: 0, waste: 0 });
+    const info = map.get(key)!;
+    if (Number.isFinite(closing)) info.closing += closing;
+    if (Number.isFinite(waste)) info.waste += waste;
+  }
+  return map;
+}
+
+function buildSupplyMap(rows: Array<any>): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows || []) {
+    const key = String(row?.itemKey || "").toLowerCase();
+    if (!key) continue;
+    const qty = Number(row?.qty || 0);
+    if (!Number.isFinite(qty)) continue;
+    map.set(key, (map.get(key) || 0) + qty);
+  }
+  return map;
+}
+
+function sumDeposits(rows: Array<any>): number {
+  return (rows || []).reduce((sum, row) => {
+    const amt = Number(row?.amount || 0);
+    const status = String(row?.status || "").toUpperCase();
+    if (!Number.isFinite(amt) || status === "INVALID") return sum;
+    return sum + Math.max(0, amt);
+  }, 0);
+}
+
+function computeSalesValue(
+  productKeys: string[],
+  openingInfo: Map<string, ClosingInfo>,
+  supplyMap: Map<string, number>,
+  closingInfo: Map<string, ClosingInfo>,
+  priceByKey: Map<string, number>
+): number {
+  let total = 0;
+  for (const originalKey of productKeys) {
+    const keyLc = originalKey.toLowerCase();
+    const price = Number(priceByKey.get(keyLc) || 0);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const openingQty = openingInfo.get(keyLc)?.closing || 0;
+    const supplyQty = supplyMap.get(keyLc) || 0;
+    const closingQty = closingInfo.get(keyLc)?.closing || 0;
+    const wasteQty = closingInfo.get(keyLc)?.waste || 0;
+    const salesUnits = Math.max(0, openingQty + supplyQty - closingQty - wasteQty);
+    total += salesUnits * price;
+  }
+  return total;
+}
+
+function buildOpeningFromClosings(source: Map<string, ClosingInfo>): Map<string, ClosingInfo> {
+  const map = new Map<string, ClosingInfo>();
+  for (const [key, info] of source.entries()) {
+    const closing = Number(info?.closing || 0);
+    const waste = Number(info?.waste || 0);
+    const openingQty = Math.max(0, closing + waste);
+    map.set(key, { closing: openingQty, waste: 0 });
+  }
+  return map;
+}
 
 async function ensureAssistant(codeRaw: string, respectAllowlist: boolean | undefined): Promise<AssistantCheck> {
   const code = canonFull(codeRaw || "");
@@ -93,6 +167,7 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
       periodState: "OPEN",
       salesValue: 0,
       expensesValue: 0,
+      carryoverPrev: 0,
       expected: 0,
       depositedSoFar: 0,
       recommendedNow: 0,
@@ -103,6 +178,7 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
 
   const date = normalizeDate(args.date);
   const prevDate = addDaysISO(date, -1, APP_TZ);
+  const prevPrevDate = addDaysISO(prevDate, -1, APP_TZ);
 
   // Resolve outlet + products from assignment snapshot unless explicitly provided
   const snapshot = await getAssignmentSnapshot(check.code);
@@ -119,6 +195,7 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
       periodState: "OPEN",
       salesValue: 0,
       expensesValue: 0,
+      carryoverPrev: 0,
       expected: 0,
       depositedSoFar: 0,
       recommendedNow: 0,
@@ -139,6 +216,7 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
       periodState,
       salesValue: 0,
       expensesValue: 0,
+      carryoverPrev: 0,
       expected: 0,
       depositedSoFar: 0,
       recommendedNow: 0,
@@ -152,20 +230,30 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
   const [
     prevClosings,
     todayClosings,
+    prevPrevClosings,
     supplyRows,
+    prevSupplyRows,
     pricebookRows,
     productRows,
     expenseRows,
+    prevExpenseRows,
     depositRows,
+    prevDepositRows,
   ] = await Promise.all([
     prisma.attendantClosing
-      .findMany({ where: { date: prevDate, outletName }, select: { itemKey: true, closingQty: true } })
+      .findMany({ where: { date: prevDate, outletName }, select: { itemKey: true, closingQty: true, wasteQty: true } })
       .catch(() => []),
     prisma.attendantClosing
-      .findMany({ where: { date, outletName }, select: { itemKey: true, closingQty: true } })
+      .findMany({ where: { date, outletName }, select: { itemKey: true, closingQty: true, wasteQty: true } })
+      .catch(() => []),
+    prisma.attendantClosing
+      .findMany({ where: { date: prevPrevDate, outletName }, select: { itemKey: true, closingQty: true, wasteQty: true } })
       .catch(() => []),
     prisma.supplyOpeningRow
       .findMany({ where: { date, outletName }, select: { itemKey: true, qty: true } })
+      .catch(() => []),
+    prisma.supplyOpeningRow
+      .findMany({ where: { date: prevDate, outletName }, select: { itemKey: true, qty: true } })
       .catch(() => []),
     prisma.pricebookRow
       .findMany({ where: { outletName }, select: { productKey: true, sellPrice: true, active: true } })
@@ -176,45 +264,40 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
     prisma.attendantExpense
       .findMany({ where: { date, outletName }, select: { amount: true } })
       .catch(() => []),
+    prisma.attendantExpense
+      .findMany({ where: { date: prevDate, outletName }, select: { amount: true } })
+      .catch(() => []),
     prisma.$queryRaw<
       Array<{ amount: number | null; status: string | null }>
     >`SELECT "amount", "status" FROM "AttendantDeposit" WHERE "date"=${date} AND "outletName"=${outletName}`
       .catch(() => []),
+    prisma.$queryRaw<
+      Array<{ amount: number | null; status: string | null }>
+    >`SELECT "amount", "status" FROM "AttendantDeposit" WHERE "date"=${prevDate} AND "outletName"=${outletName}`
+      .catch(() => []),
   ]);
 
-  const prevClosingMap = new Map<string, number>();
-  for (const row of prevClosings as any[]) {
-    const key = String(row?.itemKey || "").toLowerCase();
-    if (!keysLc.has(key)) continue;
-    const qty = Number(row?.closingQty || 0);
-    if (!Number.isFinite(qty)) continue;
-    prevClosingMap.set(key, (prevClosingMap.get(key) || 0) + qty);
-  }
+  const filterClosingRows = (rows: any[]) =>
+    (rows || []).filter((row) => keysLc.has(String(row?.itemKey || "").toLowerCase()));
+  const filterSupplyRows = (rows: any[]) =>
+    (rows || []).filter((row) => keysLc.has(String(row?.itemKey || "").toLowerCase()));
 
-  const supplyMap = new Map<string, number>();
-  for (const row of supplyRows as any[]) {
-    const key = String(row?.itemKey || "").toLowerCase();
-    if (!keysLc.has(key)) continue;
-    const qty = Number(row?.qty || 0);
-    if (!Number.isFinite(qty)) continue;
-    supplyMap.set(key, (supplyMap.get(key) || 0) + qty);
-  }
+  const prevClosingInfo = buildClosingInfo(filterClosingRows(prevClosings as any[]));
+  const todayClosingInfo = buildClosingInfo(filterClosingRows(todayClosings as any[]));
+  const prevPrevClosingInfo = buildClosingInfo(filterClosingRows(prevPrevClosings as any[]));
 
-  const closingMap = new Map<string, number>();
-  for (const row of todayClosings as any[]) {
-    const key = String(row?.itemKey || "").toLowerCase();
-    if (!keysLc.has(key)) continue;
-    const qty = Number(row?.closingQty || 0);
-    if (!Number.isFinite(qty)) continue;
-    closingMap.set(key, qty);
-  }
+  const openingInfoToday = buildOpeningFromClosings(prevClosingInfo);
+  const openingInfoPrev = buildOpeningFromClosings(prevPrevClosingInfo);
+
+  const supplyMapToday = buildSupplyMap(filterSupplyRows(supplyRows as any[]));
+  const supplyMapPrev = buildSupplyMap(filterSupplyRows(prevSupplyRows as any[]));
 
   const priceByKey = new Map<string, number>();
   for (const row of pricebookRows as any[]) {
     const key = String(row?.productKey || "").toLowerCase();
     if (!keysLc.has(key)) continue;
     const price = Number(row?.sellPrice || 0);
-    if (!Number.isFinite(price)) continue;
+    if (!Number.isFinite(price) || price <= 0) continue;
     if (row?.active) priceByKey.set(key, price);
   }
   for (const row of productRows as any[]) {
@@ -236,16 +319,36 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
     if (label) nameByKey.set(key, label);
   }
 
+  const salesValue = computeSalesValue(productKeys, openingInfoToday, supplyMapToday, todayClosingInfo, priceByKey);
+  const prevSalesValue = computeSalesValue(productKeys, openingInfoPrev, supplyMapPrev, prevClosingInfo, priceByKey);
+
+  const expensesValue = (expenseRows as any[]).reduce((sum, row) => {
+    const amt = Number(row?.amount || 0);
+    return Number.isFinite(amt) ? sum + amt : sum;
+  }, 0);
+  const prevExpensesValue = (prevExpenseRows as any[]).reduce((sum, row) => {
+    const amt = Number(row?.amount || 0);
+    return Number.isFinite(amt) ? sum + amt : sum;
+  }, 0);
+
+  const depositedSoFar = sumDeposits(depositRows as any[]);
+  const prevDeposited = sumDeposits(prevDepositRows as any[]);
+
+  const carryoverPrev = Math.max(0, prevSalesValue - prevExpensesValue - prevDeposited);
+  const expected = salesValue - expensesValue;
+  const recommendedNow = Math.max(carryoverPrev + expected - depositedSoFar, 0);
+
   const breakdown: BreakdownRow[] = [];
   const warnings: string[] = [];
-  let salesValue = 0;
-
   for (const originalKey of productKeys) {
     const keyLc = originalKey.toLowerCase();
-    const openingQty = Number(prevClosingMap.get(keyLc) || 0);
-    const supplyQty = Number(supplyMap.get(keyLc) || 0);
-    const closingQty = Number(closingMap.get(keyLc) || 0);
-    const salesUnits = Math.max(0, openingQty + supplyQty - closingQty);
+    const prevClose = prevClosingInfo.get(keyLc);
+    const openingQty = Math.max(0, (prevClose?.closing || 0) + (prevClose?.waste || 0));
+    const supplyQty = Number(supplyMapToday.get(keyLc) || 0);
+    const closeInfo = todayClosingInfo.get(keyLc);
+    const closingQty = Number(closeInfo?.closing || 0);
+    const wasteQty = Number(closeInfo?.waste || 0);
+    const salesUnits = Math.max(0, openingQty + supplyQty - closingQty - wasteQty);
     const price = Number(priceByKey.get(keyLc) || 0);
     const productName = nameByKey.get(keyLc) || originalKey;
     let excludedReason: string | undefined;
@@ -256,7 +359,6 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
       warnings.push(`No active price for ${productName}; excluded from sales.`);
     } else {
       salesValueRow = salesUnits * price;
-      salesValue += salesValueRow;
     }
 
     breakdown.push({
@@ -265,27 +367,13 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
       openingQty,
       supplyQty,
       closingQty,
+      wasteQty,
       salesUnits,
       price,
       salesValue: salesValueRow,
       excludedReason,
     });
   }
-
-  const expensesValue = (expenseRows as any[]).reduce((sum, row) => {
-    const amt = Number(row?.amount || 0);
-    return Number.isFinite(amt) ? sum + amt : sum;
-  }, 0);
-
-  const depositedSoFar = (depositRows as any[]).reduce((sum, row) => {
-    const amt = Number(row?.amount || 0);
-    const status = String(row?.status || "").toUpperCase();
-    if (!Number.isFinite(amt) || status === "INVALID") return sum;
-    return sum + Math.max(0, amt);
-  }, 0);
-
-  const expected = salesValue - expensesValue;
-  const recommendedNow = Math.max(expected - depositedSoFar, 0);
 
   return {
     ok: periodState === "OPEN",
@@ -296,6 +384,7 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
     periodState,
     salesValue,
     expensesValue,
+    carryoverPrev,
     expected,
     depositedSoFar,
     recommendedNow,
@@ -303,4 +392,3 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
     warnings,
   };
 }
-

@@ -35,11 +35,12 @@ export async function GET(req: Request) {
         verifiedDeposits: calc.depositedSoFar,
         netTill: 0,
         openingValue: 0,
-        carryoverPrev: 0,
+        carryoverPrev: calc.carryoverPrev,
         amountToDeposit: calc.recommendedNow,
       },
       assistant: {
         expected: calc.expected,
+        carryoverPrev: calc.carryoverPrev,
         recommendedNow: calc.recommendedNow,
         depositedSoFar: calc.depositedSoFar,
         salesValue: calc.salesValue,

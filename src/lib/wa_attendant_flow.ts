@@ -521,6 +521,7 @@ async function sendAssistantMenu(phone: string, sess: any, opts?: { force?: bool
             summaryLines = [
               `Sales: KSh ${fmtMoney(metrics.salesValue)}`,
               `Expenses: KSh ${fmtMoney(metrics.expensesValue)}`,
+              `Carryover prev: KSh ${fmtMoney(metrics.carryoverPrev)}`,
               `Deposited: KSh ${fmtMoney(metrics.depositedSoFar)}`,
               `Recommended: KSh ${fmtMoney(metrics.recommendedNow)}`,
             ];
@@ -598,6 +599,7 @@ async function sendAssistantSummary(phone: string, sess: any, cur: Cursor) {
     const summary = [
       `Sales: KSh ${fmtMoney(metrics.salesValue)}`,
       `Expenses: KSh ${fmtMoney(metrics.expensesValue)}`,
+      `Carryover prev: KSh ${fmtMoney(metrics.carryoverPrev)}`,
       `Deposited: KSh ${fmtMoney(metrics.depositedSoFar)}`,
       `Recommended now: KSh ${fmtMoney(metrics.recommendedNow)}`,
       "",

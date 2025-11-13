@@ -189,6 +189,7 @@ export default function AttendantDashboardPage() {
     depositedSoFar: number;
     salesValue: number;
     expensesValue: number;
+    carryoverPrev: number;
     periodState: string;
     warnings?: string[];
     breakdown?: Array<{ productKey: string; productName: string; salesUnits: number; salesValue: number; price: number }>;
@@ -1201,6 +1202,7 @@ export default function AttendantDashboardPage() {
       depositedSoFar: number;
       salesValue: number;
       expensesValue: number;
+      carryoverPrev: number;
       periodState: string;
       warnings?: string[];
       breakdown?: Array<{ productKey: string; productName: string; salesUnits: number; salesValue: number; price: number }>;
@@ -1700,7 +1702,7 @@ export default function AttendantDashboardPage() {
           />
           {assistantMode && assistantInsights && (
             <p className="mt-3 text-xs text-blue-700 bg-blue-50/70 border border-blue-200 rounded-xl px-3 py-2">
-              Recommended deposit now: <span className="font-semibold">Ksh {fmt(assistantInsights.recommendedNow)}</span>. Sales {fmt(assistantInsights.salesValue)} - Expenses {fmt(assistantInsights.expensesValue)}.
+              Recommended deposit now: <span className="font-semibold">Ksh {fmt(assistantInsights.recommendedNow)}</span>. Sales {fmt(assistantInsights.salesValue)} - Expenses {fmt(assistantInsights.expensesValue)}. Carryover prev: {fmt(assistantInsights.carryoverPrev)}.
             </p>
           )}
           <div className="flex items-center justify-between">
@@ -1943,7 +1945,7 @@ export default function AttendantDashboardPage() {
               <CardKPI
                 label="Recommended Deposit (Ksh)"
                 value={`Ksh ${fmt(assistantInsights.recommendedNow)}`}
-                tooltip="Sales from stock - expenses - deposits so far."
+                tooltip="Carryover prev + (sales from stock - expenses) - deposits so far."
                 highlightDanger={assistantInsights.recommendedNow > 0}
                 highlightSuccess={assistantInsights.recommendedNow <= 0}
               />
