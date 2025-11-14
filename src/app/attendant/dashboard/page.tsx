@@ -1293,6 +1293,24 @@ export default function AttendantDashboardPage() {
     }
   }, [outlet]);
 
+  // Live polling for supply/opening-effective while on Supply tab so newly submitted supplier rows reflect without full page reload.
+  useEffect(() => {
+    if (!outlet || tab !== 'supply') return;
+    let cancelled = false;
+    async function refreshOpeningEff() {
+      try {
+        const r = await getJSON<{ ok: boolean; rows: Array<{ itemKey: ItemKey; qty: number }> }>(`/api/stock/opening-effective?date=${encodeURIComponent(stockDate)}&outlet=${encodeURIComponent(String(outlet))}`);
+        if (!cancelled) setOpeningRowsRaw(r.rows || []);
+      } catch {
+        // swallow
+      }
+    }
+    // Initial immediate fetch (in case first effect ran before tab switch)
+    refreshOpeningEff();
+    const id = setInterval(refreshOpeningEff, 5000); // lightweight polling
+    return () => { cancelled = true; clearInterval(id); };
+  }, [outlet, tab, stockDate]);
+
   // Ensure assistants avoid Till tab (deposits go straight to General)
   useEffect(() => {
     if (!assistantMode) return;

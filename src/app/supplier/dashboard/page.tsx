@@ -549,7 +549,9 @@ export default function SupplierDashboard(): JSX.Element {
   };
 
   /* ===== Save (draft) ===== */
-  const saveDraft = async (opts?: { silent?: boolean }): Promise<boolean> => {
+  // Save current draft rows. Optionally sync to server and auto-lock newly entered rows.
+  // autoLock: when true, immediately lock any rows with qty & buyPrice > 0 (used only for explicit auto-lock actions).
+  const saveDraft = async (opts?: { silent?: boolean; autoLock?: boolean }): Promise<boolean> => {
     if (!selectedOutletName) return false;
     // Save full rows for supplier UI
     saveLS(supplierOpeningFullKey(dateStr, selectedOutletName), rows);
@@ -583,69 +585,58 @@ export default function SupplierDashboard(): JSX.Element {
       console.error("Failed to sync supply opening rows", err);
     }
 
-    // NEW: Auto-lock any newly entered rows that have a positive qty & buyPrice.
-    // This enforces the requirement that once supplier enters stock it is saved & locked per item.
-    // We only attempt locking for rows not yet locked and with sensible values (>0 for both qty & buyPrice).
-    const lockable = rows.filter(r => !r.locked && r.qty > 0 && r.buyPrice > 0);
-    if (lockable.length) {
-      let lockedCount = 0;
-      let rateLimited = false;
-      for (const r of lockable) {
-        try {
-          const supplierCode = sessionStorage.getItem("supplier_code");
-          const supplierName = sessionStorage.getItem("supplier_name");
-          const res = await fetch("/api/supply/opening/item", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            cache: "no-store",
-            body: JSON.stringify({
-              date: dateStr,
-              outlet: selectedOutletName,
-              itemKey: r.itemKey,
-              qty: r.qty,
-              buyPrice: r.buyPrice,
-              unit: r.unit,
-              mode: "add",
-              supplierCode,
-              supplierName,
-            }),
-          });
-          if (res.ok) {
-            lockedCount += 1; // success
-          } else if (res.status === 409) {
-            // Already locked (race or prior submit) — count as success to avoid confusing the user
-            lockedCount += 1;
-          } else if (res.status === 429) {
-            // Rate limited — read retryAfter if present and stop attempting further locks
-            let retryAfterSec: number | undefined;
-            try {
-              const j = await res.json();
-              if (typeof j?.retryAfterSec === 'number') retryAfterSec = j.retryAfterSec;
-            } catch {}
-            rateLimited = true;
-            if (!opts?.silent) {
-              notifyToast(`Too many submissions. Please wait${retryAfterSec ? ` ~${retryAfterSec}s` : ''} and try again.`);
+    if (opts?.autoLock) {
+      // Auto-lock any rows with positive qty & buyPrice to reduce friction for single-item entries.
+      const lockable = rows.filter(r => !r.locked && r.qty > 0 && r.buyPrice > 0);
+      if (lockable.length) {
+        let lockedCount = 0;
+        let rateLimited = false;
+        for (const r of lockable) {
+          try {
+            const supplierCode = sessionStorage.getItem("supplier_code");
+            const supplierName = sessionStorage.getItem("supplier_name");
+            const res = await fetch("/api/supply/opening/item", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({
+                date: dateStr,
+                outlet: selectedOutletName,
+                itemKey: r.itemKey,
+                qty: r.qty,
+                buyPrice: r.buyPrice,
+                unit: r.unit,
+                mode: "add",
+                supplierCode,
+                supplierName,
+              }),
+            });
+            if (res.ok) {
+              lockedCount += 1;
+            } else if (res.status === 409) {
+              lockedCount += 1; // already locked
+            } else if (res.status === 429) {
+              let retryAfterSec: number | undefined;
+              try {
+                const j = await res.json();
+                if (typeof j?.retryAfterSec === 'number') retryAfterSec = j.retryAfterSec;
+              } catch {}
+              rateLimited = true;
+              if (!opts?.silent) notifyToast(`Too many submissions. Please wait${retryAfterSec ? ` ~${retryAfterSec}s` : ''} and try again.`);
+              break;
+            } else {
+              try { const j = await res.json(); console.warn("Auto-lock failed", r.itemKey, j); } catch {}
             }
-            break;
-          } else {
-            // Other failure — continue to next item
-            try {
-              const j = await res.json();
-              console.warn("Auto-lock failed for", r.itemKey, j);
-            } catch {}
+          } catch (e) {
+            console.warn("Auto-lock exception", r.itemKey, e);
           }
-        } catch (e) {
-          // Non-fatal; continue locking other rows
-          console.warn("Auto-lock failed for", r.itemKey, e);
         }
-      }
-      if (lockedCount > 0) {
-        // Refresh state so UI reflects newly locked items
-        await refreshSupplyState({ skipTransfers: true });
-        if (!opts?.silent) notifyToast(`Auto-locked ${lockedCount} item${lockedCount === 1 ? "" : "s"}.`);
-      } else if (!opts?.silent && !rateLimited) {
-        // No items locked and not due to rate limit — surface a generic message
-        notifyToast("No items were locked. Check entries and try again.");
+        if (lockedCount > 0) {
+          await refreshSupplyState({ skipTransfers: true });
+          if (!opts?.silent) notifyToast(`Auto-locked ${lockedCount} item${lockedCount === 1 ? '' : 's'}.`);
+        } else if (!opts?.silent && !rateLimited) {
+          notifyToast("No items were locked. Check entries and try again.");
+        }
       }
     }
     await refreshSupplyState({ skipTransfers: true });
@@ -660,29 +651,29 @@ export default function SupplierDashboard(): JSX.Element {
     if (!selectedOutletName) return;
     if (submittingDay) return; // guard double clicks
     setSubmittingDay(true);
-    const unlocked = rows.filter((r) => !r.locked && r.qty > 0);
+    // First save WITHOUT auto-lock so we can count how many we explicitly submit here.
+    await saveDraft({ silent: true });
+    // Recompute unlocked from latest state (after draft save refresh may have run).
+    const fullKey = supplierOpeningFullKey(dateStr, selectedOutletName);
+    const latestFull = loadLS<SupplyRow[]>(fullKey, []);
+    const unlocked = latestFull.filter(r => !r.locked && r.qty > 0);
     if (unlocked.length === 0) {
-      notifyToast("Nothing to submit; all rows already locked.");
+      notifyToast("Nothing to submit; all rows already locked or empty.");
       setSubmittingDay(false);
       return;
     }
-
-    await saveDraft({ silent: true });
-
     let success = 0;
-    for (const row of unlocked) {
-      const ok = await submitRow(row, { silent: true, mode: "add" });
+    for (const r of unlocked) {
+      const ok = await submitRow(r, { silent: true, mode: "add" });
       if (ok) success += 1;
     }
-
     await refreshSupplyState({ skipTransfers: true });
     if (success > 0) {
-      // Mark submitted flag locally so UI can hide row-level controls (still day can remain open for new items)
       try { saveLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), true); } catch {}
       setSubmitted(true);
-      notifyToast(`Submitted & locked ${success} item${success === 1 ? "" : "s"}.`);
+      notifyToast(`Submitted & locked ${success} item${success === 1 ? '' : 's'}.`);
     } else {
-      notifyToast("No new rows were submitted.");
+      notifyToast("No rows were submitted (possible rate limit or already locked).");
     }
     setSubmittingDay(false);
   };
