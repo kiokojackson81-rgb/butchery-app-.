@@ -1293,9 +1293,9 @@ export default function AttendantDashboardPage() {
     }
   }, [outlet]);
 
-  // Live polling for supply/opening-effective while on Supply tab so newly submitted supplier rows reflect without full page reload.
+  // Live polling for opening-effective while on Supply OR Stock tab so newly submitted supplier rows reflect without full page reload.
   useEffect(() => {
-    if (!outlet || tab !== 'supply') return;
+    if (!outlet || (tab !== 'supply' && tab !== 'stock')) return;
     let cancelled = false;
     async function refreshOpeningEff() {
       try {

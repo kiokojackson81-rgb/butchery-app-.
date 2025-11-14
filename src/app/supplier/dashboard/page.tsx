@@ -124,8 +124,19 @@ const K_PRODUCTS_V2 = "admin_products_v2";
 function rid(): string {
   return Math.random().toString(36).slice(2);
 }
+// Nairobi (Africa/Nairobi) date helper so supplier and attendant use identical calendar boundaries.
 function ymd(d = new Date()): string {
-  return d.toISOString().split("T")[0];
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Nairobi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d).replace(/\//g, "-");
+  } catch {
+    // Fallback to UTC date slice (rare environments without Intl TZ support)
+    return d.toISOString().split("T")[0];
+  }
 }
 function loadLS<T>(key: string, fallback: T): T { return safeReadJSON<T>(key, fallback); }
 function saveLS<T>(key: string, value: T): void { try { safeWriteJSON(key, value); } catch {} }
@@ -470,7 +481,7 @@ export default function SupplierDashboard(): JSX.Element {
         const r = await fetch(`/api/period/active?outlet=${encodeURIComponent(outletName)}`, { cache: "no-store" });
         const j = await r.json().catch(()=>({ ok: true, active: null }));
         // We keep date as today; active period is validated server-side in API routes.
-        setDateStr(ymd());
+  setDateStr(ymd());
       } catch {}
     })();
   }, []);
