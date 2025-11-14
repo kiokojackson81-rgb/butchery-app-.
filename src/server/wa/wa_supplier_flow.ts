@@ -144,6 +144,20 @@ type SaveLockedResult = {
   row?: any;
 };
 
+// Runtime lock column detection (legacy compatibility)
+let __WA_SUPPLY_LOCK_COLS: boolean | null = null;
+async function ensureWaLockCols(): Promise<boolean> {
+  if (__WA_SUPPLY_LOCK_COLS != null) return __WA_SUPPLY_LOCK_COLS;
+  try {
+    await (prisma as any).supplyOpeningRow.findMany({ select: { id: true, lockedAt: true }, take: 1 });
+    __WA_SUPPLY_LOCK_COLS = true;
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    if (msg.includes('lockedat') && msg.includes('does not exist')) __WA_SUPPLY_LOCK_COLS = false; else __WA_SUPPLY_LOCK_COLS = true;
+  }
+  return __WA_SUPPLY_LOCK_COLS;
+}
+
 async function saveLockedSupplyRow(opts: {
   date: string;
   outlet: string;
@@ -156,38 +170,56 @@ async function saveLockedSupplyRow(opts: {
 }): Promise<SaveLockedResult> {
   const { date, outlet, itemKey, qty, buyPrice, unit, mode, identity } = opts;
   const lockTimestamp = new Date();
+  const hasLockCols = await ensureWaLockCols();
   return prisma.$transaction(async (tx: any) => {
     const existing = await tx.supplyOpeningRow.findUnique({
       where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
     });
     const existedQty = Number(existing?.qty || 0);
-    if (existing?.lockedAt) {
-      return { status: "locked", existedQty };
+    if (hasLockCols && existing?.lockedAt) {
+      return { status: "locked" as const, existedQty };
     }
 
     const totalQty = mode === "add" && existing ? existedQty + qty : qty;
     const effectiveBuyPrice = Number.isFinite(buyPrice) ? buyPrice : Number(existing?.buyPrice || 0);
-    const row = await tx.supplyOpeningRow.upsert({
-      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
-      update: {
-        qty: totalQty,
-        buyPrice: effectiveBuyPrice,
-        unit,
-        lockedAt: existing?.lockedAt ?? lockTimestamp,
-        lockedBy: existing?.lockedBy ?? identity.lockedBy,
-      },
-      create: {
-        date,
-        outletName: outlet,
-        itemKey,
-        qty: totalQty,
-        buyPrice: effectiveBuyPrice,
-        unit,
-        lockedAt: lockTimestamp,
-        lockedBy: identity.lockedBy,
-      },
-    });
-    return { status: "saved", row, existedQty, totalQty };
+    const row = hasLockCols
+      ? await tx.supplyOpeningRow.upsert({
+          where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+          update: {
+            qty: totalQty,
+            buyPrice: effectiveBuyPrice,
+            unit,
+            lockedAt: existing?.lockedAt ?? lockTimestamp,
+            lockedBy: existing?.lockedBy ?? identity.lockedBy,
+          },
+          create: {
+            date,
+            outletName: outlet,
+            itemKey,
+            qty: totalQty,
+            buyPrice: effectiveBuyPrice,
+            unit,
+            lockedAt: lockTimestamp,
+            lockedBy: identity.lockedBy,
+          },
+        })
+      : await tx.supplyOpeningRow.upsert({
+          where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+          update: {
+            qty: totalQty,
+            buyPrice: effectiveBuyPrice,
+            unit,
+          },
+          create: {
+            date,
+            outletName: outlet,
+            itemKey,
+            qty: totalQty,
+            buyPrice: effectiveBuyPrice,
+            unit,
+          },
+        });
+    return { status: "saved" as const, row, existedQty, totalQty };
   });
 }
 

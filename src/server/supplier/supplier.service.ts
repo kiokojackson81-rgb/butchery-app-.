@@ -53,38 +53,56 @@ export async function upsertOpeningRow(input: unknown) {
     throw e;
   }
 
+  // Runtime lock column detection (legacy DB compatibility)
+  let HAS_LOCK_COLS: boolean = true;
+  try {
+    await (prisma as any).supplyOpeningRow.findMany({ select: { id: true, lockedAt: true }, take: 1 });
+    HAS_LOCK_COLS = true;
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    if (msg.includes('lockedat') && msg.includes('does not exist')) HAS_LOCK_COLS = false; else HAS_LOCK_COLS = true;
+  }
+
   const existing = await (prisma as any).supplyOpeningRow.findUnique({
     where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
   });
-  if (existing?.lockedAt) {
+  if (HAS_LOCK_COLS && existing?.lockedAt) {
     const e: any = new Error("Item already locked");
     e.code = 409;
     throw e;
   }
 
-  const lockStamp = existing?.lockedAt ?? new Date();
-  const row = await (prisma as any).supplyOpeningRow.upsert({
-    where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
-    update: {
-      qty,
-      buyPrice: buyPrice ?? 0,
-      unit,
-      lockedAt: existing?.lockedAt ?? lockStamp,
-      lockedBy: existing?.lockedBy ?? "supplier_portal",
-    },
-    create: {
-      date,
-      outletName: outlet,
-      itemKey,
-      qty,
-      buyPrice: buyPrice ?? 0,
-      unit,
-      lockedAt: lockStamp,
-      lockedBy: "supplier_portal",
-    },
-  });
-
-  return row;
+  // If columns are present we persist lock metadata; legacy mode just updates qty/buyPrice
+  if (HAS_LOCK_COLS) {
+    const lockStamp = existing?.lockedAt ?? new Date();
+    return (prisma as any).supplyOpeningRow.upsert({
+      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
+      update: {
+        qty,
+        buyPrice: buyPrice ?? 0,
+        unit,
+        lockedAt: existing?.lockedAt ?? lockStamp,
+        lockedBy: existing?.lockedBy ?? "supplier_portal",
+      },
+      create: {
+        date,
+        outletName: outlet,
+        itemKey,
+        qty,
+        buyPrice: buyPrice ?? 0,
+        unit,
+        lockedAt: lockStamp,
+        lockedBy: "supplier_portal",
+      },
+    });
+  } else {
+    // Legacy path (no lockedAt/lockedBy columns)
+    return (prisma as any).supplyOpeningRow.upsert({
+      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } as any },
+      update: { qty, buyPrice: buyPrice ?? 0, unit },
+      create: { date, outletName: outlet, itemKey, qty, buyPrice: buyPrice ?? 0, unit },
+    });
+  }
 }
 
 export async function lockDay(input: unknown, actorCode: string) {
