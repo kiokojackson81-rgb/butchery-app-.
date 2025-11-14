@@ -134,9 +134,15 @@ async function resolveSupplierIdentity(sess: any, phoneE164: string): Promise<Su
   return { supplierCode, supplierName, lockedBy };
 }
 
-type SaveLockedResult =
-  | { status: "locked"; existedQty: number }
-  | { status: "saved"; existedQty: number; totalQty: number; row: any };
+// Simplified unified result type so downstream code can narrow on status while
+// still having optional fields present and avoid strict union incompat errors.
+// (Legacy callers may have expected optional row/totalQty.)
+type SaveLockedResult = {
+  status: "locked" | "saved";
+  existedQty: number;
+  totalQty?: number;
+  row?: any;
+};
 
 async function saveLockedSupplyRow(opts: {
   date: string;
