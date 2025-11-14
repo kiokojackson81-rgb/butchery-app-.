@@ -1307,7 +1307,9 @@ export default function AttendantDashboardPage() {
     }
     // Initial immediate fetch (in case first effect ran before tab switch)
     refreshOpeningEff();
-    const id = setInterval(refreshOpeningEff, 5000); // lightweight polling
+  // Reduced polling interval to improve near-real-time reflection after Supplier submits.
+  // NOTE: If this causes backend load issues, consider adaptive backoff or BroadcastChannel.
+  const id = setInterval(refreshOpeningEff, 2000); // was 5000ms
     return () => { cancelled = true; clearInterval(id); };
   }, [outlet, tab, stockDate]);
 

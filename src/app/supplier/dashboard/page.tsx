@@ -777,6 +777,20 @@ export default function SupplierDashboard(): JSX.Element {
       saveLS(supplierOpeningKey(dateStr, selectedOutletName), minimal);
       setRows(nextFull);
       if (!opts?.silent) notifyToast(`Submitted ${r.itemKey} - locked at ${j.totalQty}`);
+      // Immediately mirror to server AppState so Attendant dashboard sees change without waiting for polling interval.
+      try {
+        await fetch("/api/state/bulk-set", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            items: [
+              { key: supplierOpeningKey(dateStr, selectedOutletName), value: minimal },
+              { key: supplierOpeningFullKey(dateStr, selectedOutletName), value: nextFull },
+            ],
+          }),
+        });
+      } catch {}
       return true;
     } catch (e: any) {
       if (!opts?.silent) {
