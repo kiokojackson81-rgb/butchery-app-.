@@ -185,6 +185,27 @@ export default function SupplierDashboard(): JSX.Element {
   const [priceDraftById, setPriceDraftById] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [submittingDay, setSubmittingDay] = useState<boolean>(false); // loading state for 'Submit & Lock'
+  /* New-period auto reset: if the calendar day advances (attendant/assistant rotated to tomorrow) while supplier page is open,
+     automatically shift to the new date and clear submitted/locked UI state so fresh supply can be entered.
+     We poll every ~5s using Nairobi calendar boundary. */
+  useEffect(() => {
+    let cancelled = false;
+    const id = setInterval(() => {
+      if (cancelled) return;
+      const currentYmd = ymd();
+      if (currentYmd !== dateStr) {
+        // Advance to new day, clear local submission state; will re-hydrate from storage/server for new day
+        setDateStr(currentYmd);
+        setSubmitted(false);
+        setRows([]);
+        // Refresh for new date (selectedOutletName may still be the same)
+        if (selectedOutletName) {
+          try { refreshSupplyState({ skipTransfers: true }); } catch {}
+        }
+      }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [dateStr, selectedOutletName, refreshSupplyState]);
 
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
