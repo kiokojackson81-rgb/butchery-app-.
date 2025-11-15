@@ -1502,8 +1502,8 @@ export default function AdminPage() {
                         {/* Login as (impersonate) */}
                         <button
                           className="btn-mobile text-xs border rounded-lg px-2 py-1 ml-2"
-                          title="Login as this person"
-                          onClick={async ()=>{
+                          title="Login as this person (opens their dashboard)"
+                          onClick={async (ev)=>{
                             const role = c.role;
                             const codeVal = (c.code || '').trim();
                             if (!codeVal) { notifyToast('No code'); return; }
@@ -1515,22 +1515,33 @@ export default function AdminPage() {
                               });
                               const j = await r.json().catch(()=>({ ok:false }));
                               if (!j?.ok) throw new Error(j?.error || 'Failed');
-                              const to = j?.redirect || '/';
+                              const redirect = j?.redirect || '/';
+                              // Set sessionStorage for target dashboard UX (names not just codes)
                               try {
-                                const rj: any = j || {};
-                                if (rj.role === 'supervisor') {
-                                  sessionStorage.setItem('supervisor_code', rj.code || 'supervisor');
-                                  sessionStorage.setItem('supervisor_name', rj.code || 'Supervisor');
-                                } else if (rj.role === 'supplier') {
-                                  sessionStorage.setItem('supplier_code', rj.code || 'supplier');
-                                  sessionStorage.setItem('supplier_name', rj.code || 'Supplier');
+                                if (role === 'supervisor') {
+                                  sessionStorage.setItem('supervisor_code', codeVal);
+                                  sessionStorage.setItem('supervisor_name', c.name || codeVal || 'Supervisor');
+                                } else if (role === 'supplier') {
+                                  sessionStorage.setItem('supplier_code', codeVal);
+                                  sessionStorage.setItem('supplier_name', c.name || codeVal || 'Supplier');
+                                } else if (role === 'attendant' || role === 'assistant') {
+                                  sessionStorage.setItem('attendant_code', codeVal);
+                                  sessionStorage.setItem('attendant_name', c.name || codeVal || 'Attendant');
                                 }
                               } catch {}
-                              // Open impersonation in a new tab so admin stays on dashboard
-                              const w = window.open(to, '_blank', 'noopener,noreferrer');
-                              if (!w) {
-                                // Fallback: navigate current tab
-                                setTimeout(()=>{ window.location.href = to; }, 200);
+                              // Ensure admin auth flag exists so supplier dashboard shows overrides
+                              try {
+                                if (localStorage.getItem('admin_auth') !== 'true') {
+                                  localStorage.setItem('admin_auth','true');
+                                  const bc = new BroadcastChannel('auth'); bc.postMessage({ type: 'AUTH_SYNC' }); bc.close();
+                                }
+                              } catch {}
+                              // Default: navigate current tab; Shift+Click opens new tab
+                              if ((ev as any).shiftKey) {
+                                const w = window.open(redirect, '_blank', 'noopener,noreferrer');
+                                if (!w) window.location.href = redirect;
+                              } else {
+                                window.location.href = redirect;
                               }
                             } catch (e: any) {
                               notifyToast(e?.message || 'Failed to impersonate');
