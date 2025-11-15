@@ -189,6 +189,16 @@ export default function SupplierDashboard(): JSX.Element {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [dayLocked, setDayLocked] = useState<boolean>(false);
   const [dayLockedMeta, setDayLockedMeta] = useState<{ lockedAt?: string|null; by?: string|null }|null>(null);
+  // Update admin flag if login occurs after mount
+  useEffect(() => {
+    function syncAdminFlag() {
+      try { setIsAdmin(sessionStorage.getItem('admin_auth') === 'true'); } catch {}
+    }
+    syncAdminFlag();
+    const handler = (e: StorageEvent) => { if (e.key === 'admin_auth') syncAdminFlag(); };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, []);
   useEffect(() => {
     try {
       const val = sessionStorage.getItem('admin_auth') === 'true';
@@ -446,6 +456,7 @@ export default function SupplierDashboard(): JSX.Element {
     },
     [dateStr, selectedOutletName, productByKey]
   );
+  const hasLockedRows = useMemo(() => rows.some(r => r.locked), [rows]);
 
   useEffect(() => {
     if (!selectedOutletName) {
@@ -746,6 +757,29 @@ export default function SupplierDashboard(): JSX.Element {
     } catch (e) {
       console.error('Unlock day failed', e);
       notifyToast('Error unlocking day.');
+    }
+  }
+
+  // Bulk unlock all item-level locks (does not affect soft day lock)
+  async function bulkUnlockRows(): Promise<void> {
+    if (!isAdmin || !selectedOutletName) return;
+    const confirm = confirmSync('Unlock all item locks for this day? Quantities will remain.');
+    if (!confirm) return;
+    try {
+      const res = await fetch('/api/admin/supply/unlock-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' },
+        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName }),
+      });
+      if (res.ok) {
+        notifyToast('All item locks cleared.');
+        await refreshSupplyState({ skipTransfers: true });
+      } else {
+        notifyToast('Failed to clear item locks.');
+      }
+    } catch (e) {
+      console.error('Bulk unlock failed', e);
+      notifyToast('Error clearing item locks.');
     }
   }
 
@@ -1425,8 +1459,22 @@ export default function SupplierDashboard(): JSX.Element {
                   Unlock Day
                 </button>
               )}
+              {isAdmin && hasLockedRows && !dayLocked && (
+                <button
+                  className="border rounded-xl px-3 py-1 text-xs bg-orange-600 text-white disabled:opacity-50"
+                  onClick={() => void bulkUnlockRows()}
+                  title="Clear per-item locks (keeps quantities)."
+                >
+                  Unlock All Rows
+                </button>
+              )}
             </div>
         </div>
+        {isAdmin && (
+          <div className="mt-2 text-xs rounded-lg bg-white/5 p-2 border border-white/10">
+            <strong>Admin Override:</strong> {dayLocked ? 'Day is soft locked — use Unlock Day to reopen.' : 'Day not soft locked.'} {hasLockedRows ? 'Some rows have item locks; you can edit using Unlock & Save or click Unlock All Rows.' : 'No item locks present.'}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 mt-3 mobile-scroll-x">
           <label className="text-sm text-gray-600">Add Item:</label>
