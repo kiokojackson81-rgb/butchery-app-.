@@ -1,8 +1,9 @@
 // src/server/products.ts
 import { prisma } from "@/lib/prisma";
+import { canonFull } from "@/server/canon";
 
 export async function getAssignedProducts(code: string): Promise<Array<{ key: string; name: string }>> {
-  const codeNorm = String(code || "");
+  const codeNorm = canonFull(code || "");
   if (!codeNorm) {
     const all = await (prisma as any).product.findMany({ where: { active: true }, orderBy: { name: "asc" } });
     return (all || []).map((p: any) => ({ key: p.key, name: p.name }));
