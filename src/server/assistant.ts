@@ -157,6 +157,7 @@ async function ensureAssistant(codeRaw: string, respectAllowlist: boolean | unde
 export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promise<AssistantDepositComputation> {
   const { code: rawCode, respectAllowlist } = args;
   const check = await ensureAssistant(rawCode, respectAllowlist);
+  console.debug(`[assistant] computeAssistantExpectedDeposit called for raw=${String(rawCode)} check.code=${check.code} ok=${check.ok}`);
   if (!check.ok) {
     return {
       ok: false,
@@ -182,8 +183,27 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
 
   // Resolve outlet + products from assignment snapshot unless explicitly provided
   const snapshot = await getAssignmentSnapshot(check.code);
-  const outletName = args.outletName || snapshot.outlet || null;
-  const productKeys = Array.from(new Set(snapshot.productKeys || [])).filter((k) => k.length > 0);
+  console.debug(`[assistant] snapshot for code=${check.code} => outlet=${String(snapshot.outlet)} products=${JSON.stringify(snapshot.productKeys)}`);
+  let outletName = args.outletName || snapshot.outlet || null;
+  let productKeys = Array.from(new Set(snapshot.productKeys || [])).filter((k) => k.length > 0);
+
+  // Extra fallback (parity with /api/attendant/scope): consult mirrored Setting('attendant_scope')
+  if (!outletName || productKeys.length === 0) {
+    try {
+      const scopeRow = await (prisma as any).setting.findUnique({ where: { key: "attendant_scope" } });
+      const map = (scopeRow as any)?.value || null;
+      if (map && typeof map === "object") {
+        const entry = (map as any)[check.code] || null;
+        if (entry && typeof entry === "object") {
+          const outRaw = String((entry as any).outlet || "").trim();
+          const keysRaw = Array.isArray((entry as any).productKeys) ? ((entry as any).productKeys as any[]) : [];
+          const extra = keysRaw.map((k: any) => String(k || "").trim()).filter((k: string) => k.length > 0);
+          if (!outletName && outRaw) outletName = outRaw;
+          if (productKeys.length === 0 && extra.length > 0) productKeys = extra;
+        }
+      }
+    } catch {}
+  }
 
   if (!outletName) {
     return {
