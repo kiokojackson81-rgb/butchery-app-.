@@ -1,6 +1,12 @@
 // src/app/attendant/dashboard/page.tsx
 "use client";
 
+// Force Node.js runtime and disable static prerender to avoid build-time evaluation ordering issues.
+// This page is a large client component with dynamic session-dependent content.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hydrateLocalStorageFromDB } from "@/lib/settingsBridge";
@@ -104,11 +110,6 @@ export default function AttendantDashboardPage() {
   // Keyboard navigation support (Arrow/Home/End) similar to supplier dashboard
   const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const fullTabOrder: ("stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary")[] = ["stock", "products", "supply", "deposits", "expenses", "till", "summary"];
-  // Compute effective tab order without forward-referencing assistantMode (avoid TDZ runtime error)
-  const effectiveTabOrder = useMemo(
-    () => (isGeneralDeposit || isAssistantRole || !!assistantInsights) ? fullTabOrder.filter(t => t !== 'till') : fullTabOrder,
-    [isGeneralDeposit, isAssistantRole, assistantInsights]
-  );
   const focusTabAt = (idx: number) => { const el = tabRefs.current[idx]; if (el) el.focus(); };
   const handleTabKeyDown = (e: React.KeyboardEvent) => {
     const key = e.key;
@@ -232,6 +233,11 @@ export default function AttendantDashboardPage() {
   // Track whether there's any saved activity for today (closings, expenses, deposits, tillcount)
   const [savedClosingTodayCount, setSavedClosingTodayCount] = useState<number>(0);
   const assistantMode = useMemo(() => isGeneralDeposit || isAssistantRole || !!assistantInsights, [isGeneralDeposit, isAssistantRole, assistantInsights]);
+  // Effective tab order (after assistantMode & related states are defined to avoid TDZ)
+  const effectiveTabOrder = useMemo(
+    () => assistantMode ? fullTabOrder.filter(t => t !== 'till') : fullTabOrder,
+    [assistantMode]
+  );
 
   /** ===== Resolve outlet + products ===== */
   useEffect(() => {
@@ -1422,13 +1428,13 @@ export default function AttendantDashboardPage() {
 
       {/* Tabs */}
       <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2" onKeyDown={handleTabKeyDown} role="tablist" aria-label="Dashboard sections">
-        <TabBtn ref={el => tabRefs.current[0]=el} active={tab==="stock"} onClick={()=>setTab("stock")} aria-selected={tab==="stock"} role="tab">Stock</TabBtn>
-        <TabBtn ref={el => tabRefs.current[1]=el} active={tab==="products"} onClick={()=>setTab("products")} aria-selected={tab==="products"} role="tab">Products</TabBtn>
-        <TabBtn ref={el => tabRefs.current[2]=el} active={tab==="supply"} onClick={()=>setTab("supply")} aria-selected={tab==="supply"} role="tab">Supply</TabBtn>
-        <TabBtn ref={el => tabRefs.current[3]=el} active={tab==="deposits"} onClick={()=>setTab("deposits")} aria-selected={tab==="deposits"} role="tab">Deposits</TabBtn>
-        <TabBtn ref={el => tabRefs.current[4]=el} active={tab==="expenses"} onClick={()=>setTab("expenses")} aria-selected={tab==="expenses"} role="tab">Expenses</TabBtn>
-        {!assistantMode && <TabBtn ref={el => tabRefs.current[5]=el} active={tab==="till"} onClick={()=>setTab("till")} aria-selected={tab==="till"} role="tab">Till Payments</TabBtn>}
-        <TabBtn ref={el => tabRefs.current[assistantMode ? 5 : 6]=el} active={tab==="summary"} onClick={()=>setTab("summary")} aria-selected={tab==="summary"} role="tab">Summary</TabBtn>
+        <TabBtn ref={el => { tabRefs.current[0]=el; }} active={tab==="stock"} onClick={()=>setTab("stock")} aria-selected={tab==="stock"} role="tab">Stock</TabBtn>
+        <TabBtn ref={el => { tabRefs.current[1]=el; }} active={tab==="products"} onClick={()=>setTab("products")} aria-selected={tab==="products"} role="tab">Products</TabBtn>
+        <TabBtn ref={el => { tabRefs.current[2]=el; }} active={tab==="supply"} onClick={()=>setTab("supply")} aria-selected={tab==="supply"} role="tab">Supply</TabBtn>
+        <TabBtn ref={el => { tabRefs.current[3]=el; }} active={tab==="deposits"} onClick={()=>setTab("deposits")} aria-selected={tab==="deposits"} role="tab">Deposits</TabBtn>
+        <TabBtn ref={el => { tabRefs.current[4]=el; }} active={tab==="expenses"} onClick={()=>setTab("expenses")} aria-selected={tab==="expenses"} role="tab">Expenses</TabBtn>
+        {!assistantMode && <TabBtn ref={el => { tabRefs.current[5]=el; }} active={tab==="till"} onClick={()=>setTab("till")} aria-selected={tab==="till"} role="tab">Till Payments</TabBtn>}
+        <TabBtn ref={el => { tabRefs.current[assistantMode ? 5 : 6]=el; }} active={tab==="summary"} onClick={()=>setTab("summary")} aria-selected={tab==="summary"} role="tab">Summary</TabBtn>
       </nav>
 
       {/* Ensure assistants never land on Till tab */}
