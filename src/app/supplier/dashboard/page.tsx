@@ -219,6 +219,8 @@ export default function SupplierDashboard(): JSX.Element {
   const [pricesLoading, setPricesLoading] = useState(false);
   const [pricesError, setPricesError] = useState<string | null>(null);
   const sellPriceByKey = useMemo(() => Object.fromEntries(prices.map(p => [p.key, Number(p.price) || 0])), [prices]);
+  // Midday/date rotation banner
+  const [rotationBanner, setRotationBanner] = useState<{ kind: 'same-day' | 'date-advance'; msg: string } | null>(null);
   const [showPricebook, setShowPricebook] = useState<boolean>(false);
   const [tab, setTab] = useState<'supply' | 'pricebook' | 'transfers' | 'disputes'>('supply');
   // Refs for tab buttons to support keyboard navigation
@@ -487,6 +489,38 @@ export default function SupplierDashboard(): JSX.Element {
     tick();
     const id = setInterval(tick, 6000);
     return () => { cancelled = true; clearInterval(id); };
+  }, [selectedOutletName, dateStr, refreshSupplyState]);
+
+  // SSE subscription to period events for this outlet (avoids client polling)
+  useEffect(() => {
+    if (!selectedOutletName) return;
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/events/period?outlet=${encodeURIComponent(selectedOutletName)}`);
+      es.addEventListener('period', async (ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          const kind = (data?.kind === 'same-day' || data?.kind === 'date-advance') ? data.kind : null;
+          const newDate = String(data?.date || '');
+          if (!kind) return;
+
+          if (kind === 'same-day') {
+            try { saveLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), false); } catch {}
+            setSubmitted(false);
+            setRows([]);
+            try { await refreshSupplyState({ skipTransfers: true }); } catch {}
+            setRotationBanner({ kind: 'same-day', msg: 'Midday rotation detected. Supply unlocked for the next closing window.' });
+          } else if (kind === 'date-advance' && newDate && newDate !== dateStr) {
+            setDateStr(newDate);
+            setSubmitted(false);
+            setRows([]);
+            try { await refreshSupplyState({ skipTransfers: true }); } catch {}
+            setRotationBanner({ kind: 'date-advance', msg: 'New day started. Supply reset for the new trading period.' });
+          }
+        } catch {}
+      });
+    } catch {}
+    return () => { try { es?.close(); } catch {} };
   }, [selectedOutletName, dateStr, refreshSupplyState]);
 
   /* Pricebook filter helpers */
@@ -1159,6 +1193,13 @@ export default function SupplierDashboard(): JSX.Element {
             </p>
           </div>
         </div>
+
+        {rotationBanner && (
+          <div className="mt-3 mb-0 inline-flex items-start gap-3 rounded-2xl border px-3 py-2 text-sm w-full bg-blue-50 border-blue-200 text-blue-800">
+            <div>{rotationBanner.msg}</div>
+            <button className="ml-auto text-xs underline decoration-dotted" onClick={() => setRotationBanner(null)}>Dismiss</button>
+          </div>
+        )}
 
   {/* Menu bar (sticky) */}
   <div className="mt-3 sticky top-0 z-20 rounded-2xl border p-3 flex items-center gap-3 flex-wrap mobile-scroll-x bg-black/80 backdrop-blur supports-[backdrop-filter]:bg-black/60">
