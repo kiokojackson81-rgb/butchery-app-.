@@ -2080,14 +2080,22 @@ function CardKPI({
   );
 }
 
-const TabBtn = React.forwardRef<HTMLButtonElement, { children: React.ReactNode; active: boolean; onClick: () => void; role?: string; aria-selected?: boolean }>(
-  ({ children, active, onClick, role, aria-selected }, ref) => {
+type TabBtnProps = {
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+  role?: string;
+  "aria-selected"?: boolean;
+};
+
+const TabBtn = React.forwardRef<HTMLButtonElement, TabBtnProps>(
+  ({ children, active, onClick, role, ["aria-selected"]: ariaSelected }, ref) => {
     return (
       <button
         ref={ref}
         onClick={onClick}
         role={role}
-        aria-selected={aria-selected}
+        aria-selected={ariaSelected}
         className={`px-3 py-1.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-black/30 ${active ? "bg-black text-white" : ""}`}
       >
         {children}
