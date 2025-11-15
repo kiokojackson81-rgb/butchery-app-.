@@ -12,8 +12,9 @@ import { upsertAssignmentForCode } from "@/server/assignments";
 type ProductOut = {
   key: string;
   name: string;
-  price: number | null;
+  price: number | null;      // null => no active pricebook row
   updatedAt: string | null;
+  active: boolean;           // reflects pricebook active flag (false when absent or inactive)
 };
 
 export async function GET() {
@@ -95,20 +96,19 @@ export async function GET() {
       priceByKey.set(String(r.productKey), { price: Number(r.sellPrice || 0), active: !!r.active, updatedAt: null });
     }
 
-    const rows: ProductOut[] = productKeys
-      .map((key) => {
-        const pb = priceByKey.get(key);
-        return {
-          key,
-          name: nameByKey.get(key) || key,
-          price: pb?.price ?? null,
-          updatedAt: pb?.updatedAt ? pb.updatedAt.toISOString() : null,
-        } as ProductOut;
-      })
-      // Only show items with active pricebook rows
-      .filter((r) => (priceByKey.get(r.key)?.active ?? false) === true);
+    const rows: ProductOut[] = productKeys.map((key) => {
+      const pb = priceByKey.get(key);
+      const active = !!pb?.active;
+      return {
+        key,
+        name: nameByKey.get(key) || key,
+        price: active ? pb!.price : null,
+        updatedAt: pb?.updatedAt ? pb.updatedAt.toISOString() : null,
+        active,
+      };
+    });
 
-    return NextResponse.json({ ok: true, outlet: outletName, attendantCode: code, products: rows });
+  return NextResponse.json({ ok: true, outlet: outletName, attendantCode: code, products: rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
   }
