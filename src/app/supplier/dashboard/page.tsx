@@ -185,27 +185,6 @@ export default function SupplierDashboard(): JSX.Element {
   const [priceDraftById, setPriceDraftById] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [submittingDay, setSubmittingDay] = useState<boolean>(false); // loading state for 'Submit & Lock'
-  /* New-period auto reset: if the calendar day advances (attendant/assistant rotated to tomorrow) while supplier page is open,
-     automatically shift to the new date and clear submitted/locked UI state so fresh supply can be entered.
-     We poll every ~5s using Nairobi calendar boundary. */
-  useEffect(() => {
-    let cancelled = false;
-    const id = setInterval(() => {
-      if (cancelled) return;
-      const currentYmd = ymd();
-      if (currentYmd !== dateStr) {
-        // Advance to new day, clear local submission state; will re-hydrate from storage/server for new day
-        setDateStr(currentYmd);
-        setSubmitted(false);
-        setRows([]);
-        // Refresh for new date (selectedOutletName may still be the same)
-        if (selectedOutletName) {
-          try { refreshSupplyState({ skipTransfers: true }); } catch {}
-        }
-      }
-    }, 5000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [dateStr, selectedOutletName, refreshSupplyState]);
 
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
@@ -454,6 +433,61 @@ export default function SupplierDashboard(): JSX.Element {
     }
     refreshSupplyState();
   }, [dateStr, selectedOutletName, refreshSupplyState]);
+
+  /* New-period auto reset (calendar day change): if the calendar day advances while this page is open
+     automatically shift to the new date and clear submission state so fresh supply can be entered. */
+  useEffect(() => {
+    let cancelled = false;
+    const id = setInterval(() => {
+      if (cancelled) return;
+      const currentYmd = ymd();
+      if (currentYmd !== dateStr) {
+        setDateStr(currentYmd);
+        setSubmitted(false);
+        setRows([]);
+        if (selectedOutletName) {
+          try { refreshSupplyState({ skipTransfers: true }); } catch {}
+        }
+      }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [dateStr, selectedOutletName, refreshSupplyState]);
+
+  /* Midday (first-close) rotation auto-reset:
+     Detect a same-day trading period restart (periodStartAt changes but date does not).
+     Unlock supply so a fresh opening snapshot can be captured for second closing. */
+  useEffect(() => {
+    if (!selectedOutletName) return;
+    let prevStart: string | null = null;
+    let cancelled = false;
+    async function tick() {
+      if (cancelled) return;
+      try {
+        const res = await fetch(`/api/period/active?outlet=${encodeURIComponent(selectedOutletName)}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const j = await res.json().catch(()=>({}));
+        const startAt: string | null = j?.active?.periodStartAt ? String(j.active.periodStartAt) : null;
+        if (prevStart === null) { prevStart = startAt; return; }
+        if (startAt && prevStart && startAt !== prevStart) {
+          const startDate = ymd(new Date(startAt));
+          if (startDate === dateStr) {
+            // Same-day rotation; clear submission state and rehydrate supply
+            try { saveLS<boolean>(supplierSubmittedKey(dateStr, selectedOutletName), false); } catch {}
+            setSubmitted(false);
+            setRows([]);
+            try { await refreshSupplyState({ skipTransfers: true }); } catch {}
+            notifyToast('Midday rotation detected — supply unlocked.');
+          }
+        }
+        prevStart = startAt;
+      } catch {
+        // swallow transient errors
+      }
+    }
+    tick();
+    const id = setInterval(tick, 6000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [selectedOutletName, dateStr, refreshSupplyState]);
 
   /* Pricebook filter helpers */
   const isProductActiveForOutlet = (p: Product, outletName: string): boolean => {
