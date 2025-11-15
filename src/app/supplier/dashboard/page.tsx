@@ -204,6 +204,20 @@ export default function SupplierDashboard(): JSX.Element {
     return () => { window.removeEventListener('storage', handler); clearInterval(id); };
   }, [isAdmin]);
 
+  // Manual admin status refresh (button trigger)
+  const refreshAdminStatus = useCallback(async () => {
+    try {
+      const flag = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
+      setIsAdmin(flag);
+      notifyToast(flag ? 'Admin status active.' : 'Admin not detected.');
+      // Try server confirmation for robustness
+      try {
+        const r = await fetch('/api/admin/session', { cache: 'no-store' });
+        if (r.ok) { setIsAdmin(true); }
+      } catch {}
+    } catch {}
+  }, []);
+
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
     setQtyDraftById((prev) => {
@@ -1420,6 +1434,9 @@ export default function SupplierDashboard(): JSX.Element {
 
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
+          </button>
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => void refreshAdminStatus()} title="Force re-check of admin session flags">
+            Refresh Admin Status
           </button>
         </div>
       </header>
