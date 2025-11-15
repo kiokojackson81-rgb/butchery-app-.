@@ -105,17 +105,42 @@ export async function GET(req: Request) {
   let tillSalesGrossCurrent = 0;
   try {
     if (period !== 'previous' && outletEnum) {
-      // Establish current trading period window start
+      // Establish current trading period window start/end bounded to the selected calendar date in tz.
+      // This prevents payments from previous/other days leaking into the current day's totals.
       const active = await (prisma as any).activePeriod.findFirst({ where: { outletName: { equals: outlet, mode: 'insensitive' } } }).catch(() => null);
-      let fromTime: Date | null = active?.periodStartAt ? new Date(active.periodStartAt) : null;
-      if (!fromTime) {
-        const fixedOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00";
-        fromTime = new Date(`${today}T00:00:00${fixedOffset}`);
-      }
-      const wherePayments: any = { outletCode: outletEnum, status: 'SUCCESS' };
-      if (fromTime) wherePayments.createdAt = { gte: fromTime };
+      const fixedOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00";
+      const startOfDay = new Date(`${date}T00:00:00${fixedOffset}`);
+      const endOfDay = new Date(`${date}T23:59:59.999${fixedOffset}`);
+
+      // If an active period exists and starts after the calendar start, use it as the lower bound
+      let fromTime: Date = startOfDay;
+      try {
+        if (active?.periodStartAt) {
+          const activeStart = new Date(active.periodStartAt);
+          if (activeStart > startOfDay) fromTime = activeStart;
+        }
+      } catch {}
+
+      const wherePayments: any = { outletCode: outletEnum, status: 'SUCCESS', createdAt: { gte: fromTime, lte: endOfDay } };
       const agg = await (prisma as any).payment.aggregate({ where: wherePayments, _sum: { amount: true } });
       tillSalesGrossCurrent = Number(agg?._sum?.amount || 0);
+
+      // Small debug/log to help identify which payments contributed to the aggregated till total.
+      // Limit to a reasonable number to avoid massive logs in production (100 rows).
+      try {
+        const paymentsIncluded = await (prisma as any).payment.findMany({
+          where: wherePayments,
+          select: { id: true, amount: true, createdAt: true, receipt: true, ref: true },
+          orderBy: { createdAt: 'asc' },
+          take: 100,
+        });
+        // Compact log line: count and brief per-payment info (id:amount:receipt)
+        const brief = paymentsIncluded.map((p: any) => `${p.id}:${p.amount}:${p.receipt || p.ref || ''}`).join(',');
+        console.debug(`[metrics/header] outlet=${outletEnum} date=${date} from=${fromTime.toISOString()} to=${endOfDay.toISOString()} count=${paymentsIncluded.length} sum=${tillSalesGrossCurrent} payments=${brief}`);
+      } catch (e) {
+        // Non-fatal logging failure
+        console.debug(`[metrics/header] failed to enumerate payments for outlet=${outletEnum} date=${date}: ${String((e as any)?.message ?? e)}`);
+      }
     }
   } catch {}
 

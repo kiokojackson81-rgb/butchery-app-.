@@ -14,8 +14,9 @@ export async function GET(req: Request) {
     const activeOnly = (url.searchParams.get("activeOnly") || "true").toLowerCase() !== "false";
     if (!outlet) return NextResponse.json({ ok: false, error: "outlet required" }, { status: 400 });
 
+    // Use case-insensitive match for outlet name so admin-created rows are found
     const rows = await (prisma as any).pricebookRow.findMany({
-      where: { outletName: outlet },
+      where: { outletName: { equals: outlet, mode: 'insensitive' } },
       select: { productKey: true, sellPrice: true, active: true },
     });
     const keys = Array.from(new Set(rows.map((r: any) => String(r.productKey))));
