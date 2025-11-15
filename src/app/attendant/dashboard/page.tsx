@@ -1480,14 +1480,25 @@ export default function AttendantDashboardPage() {
                     <td className="py-2 text-gray-500" colSpan={4}>No products assigned.</td>
                   </tr>
                 )}
-                {products.map((p, i) => (
-                  <tr key={`${p.key}-${i}`} className="border-b">
-                    <td className="py-2">{p.name}</td>
-                    <td><code className="text-xs px-1 py-0.5 rounded bg-white/10 text-white">{p.key}</code></td>
-                    <td>Ksh {fmt(Number(p.price) || 0)}</td>
-                    <td className="text-xs text-gray-500">{p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "—"}</td>
-                  </tr>
-                ))}
+                {products.map((p, i) => {
+                  const hasPrice = typeof p.price === 'number' && isFinite(p.price) && p.price! > 0;
+                  const inactive = (p as any).active === false;
+                  return (
+                    <tr key={`${p.key}-${i}`} className="border-b">
+                      <td className="py-2">
+                        {p.name}
+                        {inactive && (
+                          <span className="ml-2 inline-flex items-center rounded-lg border px-1.5 py-0.5 text-[10px] bg-yellow-50 border-yellow-200 text-yellow-700" title="Assigned but no active price set">
+                            no price
+                          </span>
+                        )}
+                      </td>
+                      <td><code className="text-xs px-1 py-0.5 rounded bg-white/10 text-white">{p.key}</code></td>
+                      <td>{inactive || !hasPrice ? '—' : `Ksh ${fmt(Number(p.price) || 0)}`}</td>
+                      <td className="text-xs text-gray-500">{p.updatedAt ? new Date(p.updatedAt).toLocaleString() : '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
