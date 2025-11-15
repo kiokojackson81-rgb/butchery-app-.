@@ -15,13 +15,18 @@ function broadcastAuth() {
 
 export function setAdminAuth(payload: { issuedAt?: number; welcome?: string } | string) {
   const toStore = typeof payload === "string" ? { issuedAt: Date.now(), welcome: payload } : payload;
+  // Persist to localStorage for cross-tab and sessionStorage for same-tab legacy checks.
   try { localStorage.setItem(AuthKeys.admin, JSON.stringify(toStore)); } catch {}
   try { localStorage.setItem("admin_welcome", (toStore as any).welcome || ""); } catch {}
+  try { sessionStorage.setItem("admin_auth", "true"); } catch {}
+  try { sessionStorage.setItem("admin_welcome", (toStore as any).welcome || ""); } catch {}
   broadcastAuth();
 }
 export function clearAdminAuth() {
   try { localStorage.removeItem(AuthKeys.admin); } catch {}
   try { localStorage.removeItem("admin_welcome"); } catch {}
+  try { sessionStorage.removeItem("admin_auth"); } catch {}
+  try { sessionStorage.removeItem("admin_welcome"); } catch {}
   broadcastAuth();
 }
 export function getAdminAuth(): { issuedAt?: number; welcome?: string } | null {

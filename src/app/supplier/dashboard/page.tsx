@@ -191,17 +191,25 @@ export default function SupplierDashboard(): JSX.Element {
   const [dayLockedMeta, setDayLockedMeta] = useState<{ lockedAt?: string|null; by?: string|null }|null>(null);
   // Admin detection: listen for localStorage changes and poll periodically because sessionStorage changes do NOT fire 'storage' events.
   useEffect(() => {
-    function syncAdminFlag() {
+    let cancelled = false;
+    async function syncAdminFlag() {
       try {
-        const val = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
-        setIsAdmin(val);
+        const clientFlag = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
+        if (clientFlag !== isAdmin) setIsAdmin(clientFlag);
+        if (!clientFlag) {
+          // Attempt server cookie validation to elevate status if admin session cookie exists.
+          try {
+            const r = await fetch('/api/admin/session', { cache: 'no-store' });
+            if (!cancelled && r.ok) setIsAdmin(true);
+          } catch {}
+        }
       } catch {}
     }
     syncAdminFlag();
     const handler = (e: StorageEvent) => { if (e.key === 'admin_auth') syncAdminFlag(); };
     window.addEventListener('storage', handler);
-    const id = setInterval(() => { if (!isAdmin) syncAdminFlag(); }, 4000);
-    return () => { window.removeEventListener('storage', handler); clearInterval(id); };
+    const id = setInterval(() => { if (!cancelled) void syncAdminFlag(); }, 5000);
+    return () => { cancelled = true; window.removeEventListener('storage', handler); clearInterval(id); };
   }, [isAdmin]);
 
   // Manual admin status refresh (button trigger)
