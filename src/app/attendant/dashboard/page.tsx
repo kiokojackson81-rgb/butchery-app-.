@@ -104,7 +104,11 @@ export default function AttendantDashboardPage() {
   // Keyboard navigation support (Arrow/Home/End) similar to supplier dashboard
   const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const fullTabOrder: ("stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary")[] = ["stock", "products", "supply", "deposits", "expenses", "till", "summary"];
-  const effectiveTabOrder = useMemo(() => assistantMode ? fullTabOrder.filter(t => t !== 'till') : fullTabOrder, [assistantMode]);
+  // Compute effective tab order without forward-referencing assistantMode (avoid TDZ runtime error)
+  const effectiveTabOrder = useMemo(
+    () => (isGeneralDeposit || isAssistantRole || !!assistantInsights) ? fullTabOrder.filter(t => t !== 'till') : fullTabOrder,
+    [isGeneralDeposit, isAssistantRole, assistantInsights]
+  );
   const focusTabAt = (idx: number) => { const el = tabRefs.current[idx]; if (el) el.focus(); };
   const handleTabKeyDown = (e: React.KeyboardEvent) => {
     const key = e.key;
@@ -278,7 +282,12 @@ export default function AttendantDashboardPage() {
         return;
       }
 
-      // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
+      // Important: Do NOT pre-populate catalog from admin products.
+      // Catalog must be driven strictly by attendant scope to avoid leakage across attendants.
+    })();
+  }, [router]);
+
+  // Detect special attendant (general deposit allow-list). Runs when attendantCode resolves.
   useEffect(() => {
     if (!attendantCode || isAssistantRole) return;
     (async () => {
@@ -293,10 +302,6 @@ export default function AttendantDashboardPage() {
       } catch {}
     })();
   }, [attendantCode, isAssistantRole]);
-      // Important: Do NOT pre-populate catalog from admin products.
-      // Catalog must be driven strictly by attendant scope to avoid leakage across attendants.
-    })();
-  }, [router]);
 
   // Resolve and show this outlet's till number (read-only), and ensure Till Payments are scoped to the outlet only
   useEffect(() => {
