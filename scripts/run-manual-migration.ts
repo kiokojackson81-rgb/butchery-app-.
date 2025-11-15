@@ -1,9 +1,10 @@
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { Client } from 'pg';
 
 async function main(){
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = process.env.DATABASE_URL || process.env.DATABASE_URL_UNPOOLED;
   if (!databaseUrl) {
     console.error('DATABASE_URL not set');
     process.exit(2);

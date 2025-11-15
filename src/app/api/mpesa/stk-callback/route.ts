@@ -7,6 +7,7 @@ import { emitDepositConfirmed } from '@/lib/real_time';
 import { computeAmountToDepositCurrent } from '@/server/deposit_metrics';
 import { isGeneralDepositAttendant } from '@/server/general_deposit';
 import { sendTextSafe } from '@/lib/wa';
+import { sendPaymentAlerts } from '@/server/notifications/payment_alerts';
 
 const WA_DARAJA_ENABLED = String(process.env.WA_DARAJA_ENABLED ?? 'true').toLowerCase() === 'true';
 
@@ -89,6 +90,19 @@ export async function POST(req: Request) {
           }
         }
       } catch (e:any) { logger.error({ action: 'stkCallback:waSuccessNotify:error', error: String(e) }); }
+      // Notify supervisors/admins for large till payments (>= KSh 1,000)
+      try {
+        if (Number(update.amount || 0) >= 1000) {
+          await sendPaymentAlerts({
+            outletCode: String(update.outletCode || ''),
+            amount: Number(update.amount || 0),
+            receipt: update.mpesaReceipt,
+            payerMsisdn: phone || update.msisdn,
+          });
+        }
+      } catch (e: any) {
+        logger.error({ action: 'stkCallback:paymentAlert:error', error: String(e) });
+      }
     } else if (newStatus === 'FAILED') {
       // Failure notification for general deposit attempts
       try {

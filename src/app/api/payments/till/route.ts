@@ -9,17 +9,19 @@ export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
-    const sess = await getSession();
-    if (!sess) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-
-    // Parse query
+    // Parse query early (for test-only bypass in DRY mode)
     const url = new URL(req.url);
+    const allowAnon = (String(process.env.WA_DRY_RUN || "").toLowerCase() === "true") && (url.searchParams.get("allowAnon") === "1" || url.searchParams.get("test") === "1");
+
+    const sess = allowAnon ? null : await getSession().catch(()=>null);
+    if (!sess && !allowAnon) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+
     const outletParam = url.searchParams.get("outlet");
     const byParam = (url.searchParams.get("by") || "outlet").toLowerCase(); // 'outlet' | 'till'
     const codeParam = (url.searchParams.get("code") || "").trim();           // till number when by=till
     const inclusive = (url.searchParams.get("inclusive") || "false").toLowerCase() === "true";
     // Prefer explicit session.outletCode unless a valid-looking outlet query param is provided.
-  const rawOutlet = outletParam || (sess as any).outletCode || (sess as any).attendant?.outletRef?.code || (sess as any).attendant?.outletRef?.name;
+  const rawOutlet = outletParam || (sess as any)?.outletCode || (sess as any)?.attendant?.outletRef?.code || (sess as any)?.attendant?.outletRef?.name;
   // For outlet mode, require an outlet binding; for till mode, allow missing outlet
   if (byParam !== "till" && !rawOutlet) return NextResponse.json({ ok: false, error: "no_outlet_bound" }, { status: 400 });
 
@@ -115,24 +117,31 @@ export async function GET(req: Request) {
     }
 
     // Fetch recent payments for this outlet within the window
-    const raw = await (prisma as any).payment.findMany({
-      where: whereWindow,
-      orderBy: { [sortField]: sortDir },
-      take,
-      select: {
-        id: true,
-        amount: true,
-        outletCode: true,
-        msisdn: true,
-        status: true,
-        mpesaReceipt: true,
-        businessShortCode: true,
-        storeNumber: true,
-        headOfficeNumber: true,
-        accountReference: true,
-        createdAt: true,
-      },
-    });
+    let raw: any[] = [];
+    try {
+      raw = await (prisma as any).payment.findMany({
+        where: whereWindow,
+        orderBy: { [sortField]: sortDir },
+        take,
+        select: {
+          id: true,
+          amount: true,
+          outletCode: true,
+          msisdn: true,
+          status: true,
+          mpesaReceipt: true,
+          businessShortCode: true,
+          storeNumber: true,
+          headOfficeNumber: true,
+          accountReference: true,
+          createdAt: true,
+        },
+      });
+    } catch (e: any) {
+      console.error('[payments/till] findMany error', e?.message || e);
+      // Continue with empty list so UI shape remains stable
+      raw = [];
+    }
 
     // Map to UI-friendly shape expected by AttendantDashboard Till table
     const rows = (raw || []).map((r: any) => ({
@@ -144,13 +153,18 @@ export async function GET(req: Request) {
     }));
 
     // Compute total of SUCCESS amounts for this outlet (simple reflection metric)
-    const agg = await (prisma as any).payment.aggregate({
-      where: { ...whereWindow, status: "SUCCESS" },
-      _sum: { amount: true },
-    });
-    const total = Number(agg?._sum?.amount || 0);
-
-  return NextResponse.json({ ok: true, mode: byParam, outlet: rawOutlet, outletEnum, code: codeParam || null, inclusive, period: periodParam, sort: `${sortField}:${sortDir}`, total, rows });
+    let total = 0;
+    try {
+      const agg = await (prisma as any).payment.aggregate({
+        where: { ...whereWindow, status: "SUCCESS" },
+        _sum: { amount: true },
+      });
+      total = Number(agg?._sum?.amount || 0);
+    } catch (e: any) {
+      console.error('[payments/till] aggregate error (fallback to client sum)', e?.message || e);
+      total = raw.filter(r => String(r.status).toUpperCase() === 'SUCCESS').reduce((a, r) => a + Number(r.amount || 0), 0);
+    }
+    return NextResponse.json({ ok: true, mode: byParam, outlet: rawOutlet, outletEnum, code: codeParam || null, inclusive, period: periodParam, sort: `${sortField}:${sortDir}`, total, rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

@@ -88,7 +88,8 @@ export async function computeAmountToDepositCurrent(opts: {
     }
     const yExpensesSum = yExpenses.reduce((a, e) => a + (e.amount || 0), 0);
     const yVerifiedDeposits = (yDeposits as any[]).filter((d) => d?.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0)), 0);
-    let outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+  // Preserve sign: allow surplus (negative outstandingPrev) so attendant UI can show Excess
+  let outstandingPrev = (yRevenue - yExpensesSum - yVerifiedDeposits);
     const snapVal2: any = (snap2 as any)?.value || null;
     const snapVal1: any = (snap1 as any)?.value || null;
     const prevPeriodSnap: any = snapVal2 || snapVal1 || null;
@@ -100,7 +101,8 @@ export async function computeAmountToDepositCurrent(opts: {
         const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
         const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
         const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
-        outstandingPrev = Math.max(0, todayTotalPrev - verifiedDepositsPrev);
+        // Preserve sign so negative values indicate excess that can be applied to current period.
+        outstandingPrev = (todayTotalPrev - verifiedDepositsPrev);
       } catch {}
     }
 

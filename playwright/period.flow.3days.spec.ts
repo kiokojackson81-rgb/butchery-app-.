@@ -21,6 +21,14 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
       const body = { outlet, openingSnapshot: {}, pricebookSnapshot };
       const r = await request.post('/api/period/start', { data: body });
       expect(r.ok()).toBeTruthy();
+      // Also upsert via admin pricebook endpoint to guarantee presence regardless of rotation timing
+      const r2 = await request.post('/api/admin/save-scope-pricebook', { data: { scope: {}, pricebook: { [outlet]: pricebookSnapshot } } });
+      expect(r2.ok()).toBeTruthy();
+      // Quick sanity: pricebook for this outlet should exist
+      const r3 = await request.get(`/api/pricebook/outlet?outlet=${encodeURIComponent(outlet)}`);
+      expect(r3.ok()).toBeTruthy();
+      const j3 = await r3.json();
+      expect(Array.isArray(j3.products)).toBe(true);
     }
 
     // ===== Day 1 =====
@@ -46,7 +54,7 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
     // Header(D1): weightSales=3000, expenses=200, amountToDeposit= (3000-200) - 1000 = 1800, carryoverPrev≈0
     let amtToDepositD1 = 0;
     {
-      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D1}`);
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D1}&period=current`);
       expect(r.ok()).toBeTruthy();
       const j = await r.json();
       expect(j.ok).toBe(true);
@@ -73,7 +81,7 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
     }
     // Header(D2): carryoverPrev should equal D1 outstanding (= 1800). amountToDeposit = carryoverPrev + (1000 - 0) = 2800
     {
-      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D2}`);
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D2}&period=current`);
       expect(r.ok()).toBeTruthy();
       const j = await r.json();
       expect(j.ok).toBe(true);
@@ -86,7 +94,7 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
     // ===== Day 3 =====
     // No supply/closing — just verify carryover from Day 2 (which had revenue 1000, zero expenses/deposits)
     {
-      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D3}`);
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D3}&period=current`);
       expect(r.ok()).toBeTruthy();
       const j = await r.json();
       expect(j.ok).toBe(true);

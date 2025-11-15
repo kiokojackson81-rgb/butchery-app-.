@@ -17,9 +17,11 @@ export async function GET(req: Request) {
   const today = dateISOInTZ(new Date(), tz);
   const date = dateParam || today;
   const periodParam = searchParams.get("period");
-  // If a date is explicitly provided, treat the request as asking for the previous period view
-  const period = (periodParam || (dateParam ? 'previous' : '')).toLowerCase(); // "previous" to show previous trading period for given date
   const isCurrent = !dateParam || dateParam === today;
+  // Default behavior tweak:
+  // - If the request targets today (no date param OR date == today), default to CURRENT period unless explicitly overridden.
+  // - If the request targets any other date, default to PREVIOUS period unless explicitly overridden.
+  const period = (periodParam || (isCurrent ? 'current' : 'previous')).toLowerCase();
   const assistantCode = (attendantCode || "").trim();
   const assistantMode = assistantCode ? await isAssistant(assistantCode) : false;
   if (assistantMode) {
@@ -68,7 +70,7 @@ export async function GET(req: Request) {
   const [openRows, closingRows, pbRows, products, expenses, deposits, tillCountRows, snap1, snap2] = await Promise.all([
     prisma.supplyOpeningRow.findMany({ where: { date, outletName: outlet }, select: { itemKey: true, qty: true } }),
     prisma.attendantClosing.findMany({ where: { date, outletName: outlet } }),
-    prisma.pricebookRow.findMany({ where: { outletName: outlet } }),
+    prisma.pricebookRow.findMany({ where: { outletName: { equals: outlet, mode: 'insensitive' } } }),
     prisma.product.findMany(),
     prisma.attendantExpense.findMany({ where: { date, outletName: outlet } }),
     // Use raw SQL to avoid selecting a column that might be missing in some DB states (verifyPayload)
@@ -80,8 +82,9 @@ export async function GET(req: Request) {
     (prisma as any).setting.findUnique({ where: { key: `snapshot:closing:${date}:${outlet}:2` } }).catch(()=>null),
   ]);
 
-  const pb = new Map(pbRows.map((r) => [`${r.productKey}`, r] as const));
-  const prod = new Map(products.map((p) => [p.key, p] as const));
+  // Case-insensitive maps for product lookups
+  const pbLC = new Map<string, typeof pbRows[number]>(pbRows.map((r) => [String(r.productKey).toLowerCase(), r]));
+  const prodLC = new Map<string, typeof products[number]>(products.map((p) => [String(p.key).toLowerCase(), p]));
   const closingMap = new Map(closingRows.map((r) => [r.itemKey, r] as const));
 
   // --- Till Payments (Gross) for CURRENT trading period ---
@@ -131,13 +134,21 @@ export async function GET(req: Request) {
     const closing = cl?.closingQty || 0;
     const waste = cl?.wasteQty || 0;
     const soldQty = Math.max(0, (row.qty || 0) - closing - waste);
-    const pbr = pbRows.find((p) => `${p.productKey}` === row.itemKey);
-    const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : (products.find((p) => p.key === row.itemKey)?.active ? (products.find((p) => p.key === row.itemKey)?.sellPrice || 0) : 0);
+    const keyLc = String(row.itemKey).toLowerCase();
+    const pbr = pbLC.get(keyLc);
+    const price = pbr
+      ? (pbr.active ? Number(pbr.sellPrice || 0) : 0)
+      : (() => {
+          const prod = prodLC.get(keyLc);
+          return prod && prod.active ? Number(prod.sellPrice || 0) : 0;
+        })();
     yRevenue += soldQty * price;
   }
   const yExpensesSum = yExpenses.reduce((a, e) => a + (e.amount || 0), 0);
   const yVerifiedDeposits = (yDeposits as any[]).filter((d) => d?.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0)), 0);
-  let outstandingPrev = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+  // Do not clamp here: allow negative values (surplus/excess) so they can be shown
+  // as 'Excess' in the attendant dashboard when appropriate.
+  let outstandingPrev = (yRevenue - yExpensesSum - yVerifiedDeposits);
   // If there is a snapshot for the same date (today), treat that snapshot as the previous trading period when viewing Current.
   // This makes carryover available immediately after the first close.
   const snapVal2: any = (snap2 as any)?.value || null;
@@ -148,10 +159,13 @@ export async function GET(req: Request) {
         const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
         const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
         const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
-        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
-      const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+        // If the snapshot contains its own deposits, use them when computing previous-period totals.
+        const snapDeposits = Array.isArray(prevPeriodSnap.deposits) ? prevPeriodSnap.deposits : [];
+        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits });
+      const verifiedDepositsPrev = (snapDeposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0) || 0), 0);
       const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
-      outstandingPrev = Math.max(0, todayTotalPrev - verifiedDepositsPrev);
+      // Preserve sign here as well: a negative value indicates an excess/surplus to carry forward.
+      outstandingPrev = (todayTotalPrev - verifiedDepositsPrev);
     } catch {}
   }
 
@@ -159,8 +173,14 @@ export async function GET(req: Request) {
   let openingValueGross = 0;
   try {
     for (const row of openRows) {
-      const pbr = pb.get(row.itemKey as any) || pbRows.find((p) => `${p.productKey}` === row.itemKey);
-      const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : (products.find((p) => p.key === row.itemKey)?.active ? (products.find((p) => p.key === row.itemKey)?.sellPrice || 0) : 0);
+      const keyLc = String(row.itemKey).toLowerCase();
+      const pbr = pbLC.get(keyLc);
+      const price = pbr
+        ? (pbr.active ? Number(pbr.sellPrice || 0) : 0)
+        : (() => {
+            const prod = prodLC.get(keyLc);
+            return prod && prod.active ? Number(prod.sellPrice || 0) : 0;
+          })();
       openingValueGross += (Number(row.qty || 0) || 0) * (Number(price || 0) || 0);
     }
   } catch {}
@@ -173,8 +193,9 @@ export async function GET(req: Request) {
         const openingSnapshot = (prevPeriodSnap.openingSnapshot || {}) as Record<string, number>;
         const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
         const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
-        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits });
-        const verifiedDepositsPrev = (deposits || []).filter((d: any) => d.status !== 'INVALID').reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
+        const snapDeposits = Array.isArray(prevPeriodSnap.deposits) ? prevPeriodSnap.deposits : [];
+        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits });
+        const verifiedDepositsPrev = (snapDeposits || []).filter((d: any) => d.status !== 'INVALID').reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
         const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
         // For explicit "previous" view, use the previous calendar day's carryover (yRevenue - yExpenses - yVerifiedDeposits)
         const carryoverPrevFromY = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
@@ -250,9 +271,15 @@ export async function GET(req: Request) {
     const waste = cl?.wasteQty || 0;
     const soldQty = Math.max(0, (row.qty || 0) - closing - waste);
 
-    // price: pricebook active else product active
-    const pbr = pb.get(row.itemKey);
-    const price = pbr ? (pbr.active ? pbr.sellPrice : 0) : prod.get(row.itemKey)?.active ? prod.get(row.itemKey)?.sellPrice || 0 : 0;
+    // price: pricebook active else product active (case-insensitive)
+    const keyLc = String(row.itemKey).toLowerCase();
+    const pbr = pbLC.get(keyLc);
+    const price = pbr
+      ? (pbr.active ? Number(pbr.sellPrice || 0) : 0)
+      : (() => {
+          const prod = prodLC.get(keyLc);
+          return prod && prod.active ? Number(prod.sellPrice || 0) : 0;
+        })();
 
     weightSales += soldQty * price;
   }

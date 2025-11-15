@@ -3,9 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
-// Legacy sendClosingSubmitted replaced by rich notifications
-import { sendDayCloseNotifications } from "@/server/notifications/day_close";
-import { upsertAndNotifySupervisorCommission } from "@/server/commission";
+// Heavy notification/commission modules are dynamically imported inside the handler
+// to avoid import-time side effects during route initialization in dev/test.
 import { APP_TZ, dateISOInTZ, addDaysISO } from "@/server/trading_period";
 
 type ClosingRow = { itemKey: string; closingQty: number; wasteQty: number };
@@ -149,10 +148,16 @@ export async function POST(req: Request) {
     const savedCount = rows.length;
 
     // Send rich day-close notifications to all parties (attendant, supervisor, admin, supplier)
-    try { await sendDayCloseNotifications({ date: day, outletName, attendantCode: null }); } catch {}
+    try {
+      const mod = await import("@/server/notifications/day_close");
+      await (mod as any).sendDayCloseNotifications({ date: day, outletName, attendantCode: null });
+    } catch {}
 
     // Fire-and-forget: compute profit, upsert commission, notify supervisors
-    try { await upsertAndNotifySupervisorCommission(day, outletName); } catch {}
+    try {
+      const mod2 = await import("@/server/commission");
+      await (mod2 as any).upsertAndNotifySupervisorCommission(day, outletName);
+    } catch {}
 
     return NextResponse.json({ ok: true, outlet: outletName, date: day, savedCount, prunedCount, closingMap: closingMapOut, wasteMap: wasteMapOut });
   } catch (e) {

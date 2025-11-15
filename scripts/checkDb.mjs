@@ -1,6 +1,7 @@
 // scripts/checkDb.mjs
 // Purpose: Quick sanity checks to ensure Prisma can connect and see expected tables/rows.
 
+import 'dotenv/config';
 import { PrismaClient, Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient({
@@ -34,7 +35,7 @@ async function main() {
     console.error('Failed to query connection metadata:', err?.message || err);
   }
 
-  const tables = ['PersonCode', 'AttendantAssignment'];
+  const tables = ['PersonCode', 'AttendantAssignment', 'PricebookRow', 'Payment', 'Till'];
   if (codesToCheck.length) {
     try {
       const rows = await prisma.$queryRaw`SELECT code FROM "AttendantAssignment" WHERE code IN (${Prisma.join(codesToCheck)}) ORDER BY code`;

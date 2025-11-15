@@ -4,6 +4,24 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import { prisma } from "@/lib/prisma";
 
+// Runtime flag to detect legacy DB missing lockedAt/lockedBy columns.
+// We attempt a lightweight query selecting lockedAt once; if it fails with a 'does not exist' error
+// we fall back to legacy mode (no lock metadata persisted / returned).
+let SUPPLY_LOCK_COLS_AVAILABLE: boolean | null = null;
+async function ensureSupplyLockCols() {
+  if (SUPPLY_LOCK_COLS_AVAILABLE != null) return SUPPLY_LOCK_COLS_AVAILABLE;
+  try {
+    // Attempt a trivial select with limit 1 including lockedAt
+    await (prisma as any).supplyOpeningRow.findMany({ select: { id: true, lockedAt: true }, take: 1 });
+    SUPPLY_LOCK_COLS_AVAILABLE = true;
+  } catch (e: any) {
+    const msg = String(e?.message || "").toLowerCase();
+    if (msg.includes("lockedat") && msg.includes("does not exist")) SUPPLY_LOCK_COLS_AVAILABLE = false;
+    else SUPPLY_LOCK_COLS_AVAILABLE = true; // treat other errors as transient
+  }
+  return SUPPLY_LOCK_COLS_AVAILABLE;
+}
+
 export async function POST(req: Request) {
   const { date, outlet, rows } = (await req.json()) as {
     date: string;
@@ -13,17 +31,19 @@ export async function POST(req: Request) {
 
   if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
 
+  const hasLockCols = await ensureSupplyLockCols();
   await prisma.$transaction(async (tx) => {
     const payload = Array.isArray(rows) ? rows : [];
     if (!payload.length) return;
 
     const [products, existingRows] = await Promise.all([
       tx.product.findMany({ select: { key: true, unit: true } }),
-      tx.supplyOpeningRow.findMany({ where: { date, outletName: outlet } }),
+      // Legacy DB may not have lockedAt/lockedBy yet; select minimal columns.
+      (tx as any).supplyOpeningRow.findMany({ where: { date, outletName: outlet }, select: hasLockCols ? { id: true, itemKey: true, qty: true, buyPrice: true, unit: true, lockedAt: true, lockedBy: true } : { id: true, itemKey: true, qty: true, buyPrice: true, unit: true } }),
     ]);
 
-    const unitByKey = new Map(products.map((p) => [p.key, p.unit || "kg"]));
-    const existingByKey = new Map(existingRows.map((r) => [r.itemKey, r]));
+  const unitByKey = new Map<string, string>(products.map((p: any) => [p.key, p.unit || "kg"]));
+  const existingByKey = new Map<string, any>((existingRows as any[]).map((r: any) => [r.itemKey, r]));
     const deletableIds: string[] = [];
 
     // Mark existing unlocked rows for deletion if they are absent from the payload.
@@ -49,7 +69,7 @@ export async function POST(req: Request) {
             : (unitByKey.get(itemKey) as "kg" | "pcs") || "kg";
 
       const existing = existingByKey.get(itemKey);
-      if (existing && existing.lockedAt) {
+      if (hasLockCols && existing && (existing as any).lockedAt) {
         // Skip unlocked draft writes for locked rows; they stay intact.
         continue;
       }
@@ -59,7 +79,7 @@ export async function POST(req: Request) {
           where: { id: existing.id },
           data: {
             qty: qtyNum,
-            buyPrice: Number.isFinite(buyPriceNum) ? buyPriceNum : existing.buyPrice,
+            buyPrice: Number.isFinite(buyPriceNum) ? buyPriceNum : (existing as any).buyPrice,
             unit,
           },
         });
@@ -93,23 +113,37 @@ export async function GET(req: Request) {
     const date = (searchParams.get("date") || "").slice(0, 10);
     const outlet = (searchParams.get("outlet") || "").trim();
     if (!date || !outlet) return NextResponse.json({ ok: false, error: "date/outlet required" }, { status: 400 });
-
-    const rows = await (prisma as any).supplyOpeningRow.findMany({
-      where: { date, outletName: outlet },
-      select: { itemKey: true, qty: true, unit: true, buyPrice: true, lockedAt: true, lockedBy: true },
-      orderBy: { itemKey: "asc" },
-    });
+    const hasLockCols = await ensureSupplyLockCols();
+    let rows: any[] = [];
+    try {
+      rows = await (prisma as any).supplyOpeningRow.findMany({
+        where: { date, outletName: outlet },
+        select: hasLockCols ? { itemKey: true, qty: true, unit: true, buyPrice: true, lockedAt: true, lockedBy: true } : { itemKey: true, qty: true, unit: true, buyPrice: true },
+        orderBy: { itemKey: "asc" },
+      });
+    } catch (e: any) {
+      // Legacy fallback if migration missing
+      const msg = String(e?.message || '').toLowerCase();
+      if (msg.includes('lockedat') && msg.includes('does not exist')) {
+        SUPPLY_LOCK_COLS_AVAILABLE = false;
+        rows = await (prisma as any).supplyOpeningRow.findMany({
+          where: { date, outletName: outlet },
+          select: { itemKey: true, qty: true, unit: true, buyPrice: true },
+          orderBy: { itemKey: 'asc' },
+        });
+      } else throw e;
+    }
     const opening = (rows || []).map((r: any) => ({
       itemKey: r.itemKey,
       qty: Number(r.qty || 0),
-      unit: (r.unit === "pcs" ? "pcs" : "kg") as "kg" | "pcs",
+      unit: (r.unit === 'pcs' ? 'pcs' : 'kg') as 'kg' | 'pcs',
       buyPrice: Number(r.buyPrice || 0),
-      locked: Boolean(r.lockedAt),
-      lockedAt: r.lockedAt ? new Date(r.lockedAt).toISOString() : null,
-      lockedBy: r.lockedBy || null,
+      locked: SUPPLY_LOCK_COLS_AVAILABLE ? Boolean(r.lockedAt) : Boolean(false),
+      lockedAt: SUPPLY_LOCK_COLS_AVAILABLE && r.lockedAt ? new Date(r.lockedAt).toISOString() : null,
+      lockedBy: SUPPLY_LOCK_COLS_AVAILABLE ? (r.lockedBy || null) : null,
     }));
-    return NextResponse.json({ ok: true, rows: opening });
+    return NextResponse.json({ ok: true, rows: opening, legacyNoLock: SUPPLY_LOCK_COLS_AVAILABLE === false });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Failed' }, { status: 500 });
   }
 }

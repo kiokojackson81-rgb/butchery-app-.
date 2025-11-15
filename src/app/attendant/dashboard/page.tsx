@@ -101,6 +101,34 @@ export default function AttendantDashboardPage() {
   const [countedTill, setCountedTill] = useState<number | "">("");
 
   const [tab, setTab] = useState<"stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary">("stock");
+  // Keyboard navigation support (Arrow/Home/End) similar to supplier dashboard
+  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const fullTabOrder: ("stock" | "products" | "supply" | "deposits" | "expenses" | "till" | "summary")[] = ["stock", "products", "supply", "deposits", "expenses", "till", "summary"];
+  const effectiveTabOrder = useMemo(() => assistantMode ? fullTabOrder.filter(t => t !== 'till') : fullTabOrder, [assistantMode]);
+  const focusTabAt = (idx: number) => { const el = tabRefs.current[idx]; if (el) el.focus(); };
+  const handleTabKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key;
+    const activeIndex = tabRefs.current.findIndex(el => el === document.activeElement);
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      e.preventDefault();
+      const next = (activeIndex + 1 + effectiveTabOrder.length) % effectiveTabOrder.length;
+      focusTabAt(next);
+      setTab(effectiveTabOrder[next]);
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = (activeIndex - 1 + effectiveTabOrder.length) % effectiveTabOrder.length;
+      focusTabAt(prev);
+      setTab(effectiveTabOrder[prev]);
+    } else if (key === 'Home') {
+      e.preventDefault();
+      focusTabAt(0);
+      setTab(effectiveTabOrder[0]);
+    } else if (key === 'End') {
+      e.preventDefault();
+      focusTabAt(effectiveTabOrder.length - 1);
+      setTab(effectiveTabOrder[effectiveTabOrder.length - 1]);
+    }
+  };
   const [submitted, setSubmitted] = useState(false);
   const [activeFrom, setActiveFrom] = useState<string | null>(null);
   const [summaryMode, setSummaryMode] = useState<"current" | "previous">("current");
@@ -1388,14 +1416,14 @@ export default function AttendantDashboardPage() {
       </header>
 
       {/* Tabs */}
-      <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2">
-        <TabBtn active={tab==="stock"} onClick={()=>setTab("stock")}>Stock</TabBtn>
-        <TabBtn active={tab==="products"} onClick={()=>setTab("products")}>Products</TabBtn>
-        <TabBtn active={tab==="supply"} onClick={()=>setTab("supply")}>Supply</TabBtn>
-        <TabBtn active={tab==="deposits"} onClick={()=>setTab("deposits")}>Deposits</TabBtn>
-        <TabBtn active={tab==="expenses"} onClick={()=>setTab("expenses")}>Expenses</TabBtn>
-        {!assistantMode && <TabBtn active={tab==="till"} onClick={()=>setTab("till")}>Till Payments</TabBtn>}
-        <TabBtn active={tab==="summary"} onClick={()=>setTab("summary")}>Summary</TabBtn>
+      <nav className="mobile-scroll-x mb-4 flex flex-wrap gap-2" onKeyDown={handleTabKeyDown} role="tablist" aria-label="Dashboard sections">
+        <TabBtn ref={el => tabRefs.current[0]=el} active={tab==="stock"} onClick={()=>setTab("stock")} aria-selected={tab==="stock"} role="tab">Stock</TabBtn>
+        <TabBtn ref={el => tabRefs.current[1]=el} active={tab==="products"} onClick={()=>setTab("products")} aria-selected={tab==="products"} role="tab">Products</TabBtn>
+        <TabBtn ref={el => tabRefs.current[2]=el} active={tab==="supply"} onClick={()=>setTab("supply")} aria-selected={tab==="supply"} role="tab">Supply</TabBtn>
+        <TabBtn ref={el => tabRefs.current[3]=el} active={tab==="deposits"} onClick={()=>setTab("deposits")} aria-selected={tab==="deposits"} role="tab">Deposits</TabBtn>
+        <TabBtn ref={el => tabRefs.current[4]=el} active={tab==="expenses"} onClick={()=>setTab("expenses")} aria-selected={tab==="expenses"} role="tab">Expenses</TabBtn>
+        {!assistantMode && <TabBtn ref={el => tabRefs.current[5]=el} active={tab==="till"} onClick={()=>setTab("till")} aria-selected={tab==="till"} role="tab">Till Payments</TabBtn>}
+        <TabBtn ref={el => tabRefs.current[assistantMode ? 5 : 6]=el} active={tab==="summary"} onClick={()=>setTab("summary")} aria-selected={tab==="summary"} role="tab">Summary</TabBtn>
       </nav>
 
       {/* Ensure assistants never land on Till tab */}
@@ -2052,16 +2080,22 @@ function CardKPI({
   );
 }
 
-function TabBtn({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl border text-sm ${active ? "bg-black text-white" : ""}`}
-    >
-      {children}
-    </button>
-  );
-}
+const TabBtn = React.forwardRef<HTMLButtonElement, { children: React.ReactNode; active: boolean; onClick: () => void; role?: string; aria-selected?: boolean }>(
+  ({ children, active, onClick, role, aria-selected }, ref) => {
+    return (
+      <button
+        ref={ref}
+        onClick={onClick}
+        role={role}
+        aria-selected={aria-selected}
+        className={`px-3 py-1.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-black/30 ${active ? "bg-black text-white" : ""}`}
+      >
+        {children}
+      </button>
+    );
+  }
+);
+TabBtn.displayName = 'TabBtn';
 
 function StatusPill({ status }: { status: "VALID"|"PENDING"|"INVALID" }) {
   const m: Record<string, string> = {

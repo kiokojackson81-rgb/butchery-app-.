@@ -40,6 +40,20 @@ function rateLimitCheck(key: string) {
 // - If mode=="add" (default), qty is added to any existing row for the date/outlet/item.
 // - If mode=="replace", qty overwrites the existing value.
 // Returns: { ok, existedQty, totalQty, row }
+// Shared legacy detection (non-exported) to avoid referencing missing columns on older DB.
+let SUPPLY_ITEM_LOCK_COLS: boolean | null = null;
+async function detectLockCols() {
+  if (SUPPLY_ITEM_LOCK_COLS != null) return SUPPLY_ITEM_LOCK_COLS;
+  try {
+    await (prisma as any).supplyOpeningRow.findMany({ select: { id: true, lockedAt: true }, take: 1 });
+    SUPPLY_ITEM_LOCK_COLS = true;
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    if (msg.includes('lockedat') && msg.includes('does not exist')) SUPPLY_ITEM_LOCK_COLS = false; else SUPPLY_ITEM_LOCK_COLS = true;
+  }
+  return SUPPLY_ITEM_LOCK_COLS;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null as any);
@@ -67,45 +81,91 @@ export async function POST(req: Request) {
       }
     } catch {}
 
-    const existing = await (prisma as any).supplyOpeningRow.findUnique({
-      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
-    });
+    const hasLockCols = await detectLockCols();
+    let existing: any = null;
+    try {
+      existing = await (prisma as any).supplyOpeningRow.findUnique({
+        where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+      });
+    } catch (e: any) {
+      const msg = String(e?.message || '').toLowerCase();
+      if (msg.includes('lockedat') && msg.includes('does not exist')) {
+        SUPPLY_ITEM_LOCK_COLS = false;
+        // Fallback raw select without lock columns
+        existing = await (prisma as any).supplyOpeningRow.findUnique({
+          where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+        });
+      } else throw e;
+    }
     const existedQty = Number(existing?.qty || 0);
-    if (existing?.lockedAt) {
+    if (hasLockCols && existing?.lockedAt) {
       return NextResponse.json(
         { ok: false, error: "locked", message: "Supply already submitted and locked for this product." },
         { status: 409 },
       );
     }
-
     const totalQty = mode === "add" ? existedQty + qtyNum : qtyNum;
     const lockedBy = String(body?.supplierCode || body?.supplierName || "supplier_portal").trim() || "supplier_portal";
     const lockTimestamp = new Date();
-
-    const row = await (prisma as any).supplyOpeningRow.upsert({
-      where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
-      update: {
-        qty: totalQty,
-        buyPrice: buyPriceNum || Number(existing?.buyPrice || 0),
-        unit: unit || (existing?.unit || "kg"),
-        lockedAt: existing?.lockedAt ?? lockTimestamp,
-        lockedBy: existing?.lockedBy ?? lockedBy,
-      },
-      create: {
-        date,
-        outletName: outlet,
-        itemKey,
-        qty: totalQty,
-        buyPrice: buyPriceNum,
-        unit,
-        lockedAt: lockTimestamp,
-        lockedBy,
-      },
-    });
-  // Single-item immediate notify (attendant only) for dispute capability
-  try { await notifySupplyItem({ outlet, date, itemKey, supplierCode: body?.supplierCode || null, supplierName: body?.supplierName || null }); } catch {}
-
-    return NextResponse.json({ ok: true, existedQty, totalQty, row });
+    let row: any = null;
+    try {
+      if (hasLockCols) {
+        row = await (prisma as any).supplyOpeningRow.upsert({
+          where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+          update: {
+            qty: totalQty,
+            buyPrice: buyPriceNum || Number(existing?.buyPrice || 0),
+            unit: unit || (existing?.unit || "kg"),
+            lockedAt: existing?.lockedAt ?? lockTimestamp,
+            lockedBy: existing?.lockedBy ?? lockedBy,
+          },
+          create: {
+            date,
+            outletName: outlet,
+            itemKey,
+            qty: totalQty,
+            buyPrice: buyPriceNum,
+            unit,
+            lockedAt: lockTimestamp,
+            lockedBy,
+          },
+        });
+      } else {
+        // Legacy: perform upsert without lock columns.
+        if (existing) {
+          row = await (prisma as any).supplyOpeningRow.update({
+            where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+            data: {
+              qty: totalQty,
+              buyPrice: buyPriceNum || Number(existing?.buyPrice || 0),
+              unit: unit || (existing?.unit || "kg"),
+            },
+          });
+        } else {
+          row = await (prisma as any).supplyOpeningRow.create({
+            data: { date, outletName: outlet, itemKey, qty: totalQty, buyPrice: buyPriceNum, unit },
+          });
+        }
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || '').toLowerCase();
+      if (msg.includes('lockedat') && msg.includes('does not exist')) {
+        SUPPLY_ITEM_LOCK_COLS = false; // retry without lock cols if first attempt included them
+        if (existing) {
+          row = await (prisma as any).supplyOpeningRow.update({
+            where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
+            data: { qty: totalQty, buyPrice: buyPriceNum || Number(existing?.buyPrice || 0), unit: unit || (existing?.unit || 'kg') },
+          });
+        } else {
+          row = await (prisma as any).supplyOpeningRow.create({
+            data: { date, outletName: outlet, itemKey, qty: totalQty, buyPrice: buyPriceNum, unit },
+          });
+        }
+      } else throw e;
+    }
+    // Immediate notify for attendant visibility (allowed to fail silently)
+    try { await notifySupplyItem({ outlet, date, itemKey, supplierCode: body?.supplierCode || null, supplierName: body?.supplierName || null }); } catch {}
+    return NextResponse.json({ ok: true, existedQty, totalQty, row, legacyNoLock: SUPPLY_ITEM_LOCK_COLS === false });
   } catch (e) {
     return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
   }
