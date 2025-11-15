@@ -5,7 +5,6 @@
 // This page is a large client component with dynamic session-dependent content.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
