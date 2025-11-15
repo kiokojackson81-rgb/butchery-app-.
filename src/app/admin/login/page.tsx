@@ -48,7 +48,13 @@ export default function AdminLoginPage() {
         setAdminAuth({ issuedAt: Date.now(), welcome: "Welcome boss 👑 — systems are green and ready!" });
       } catch {
         // fallback to sessionStorage if helper unavailable
-        try { sessionStorage.setItem("admin_auth", "true"); sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!"); } catch {}
+        try {
+          sessionStorage.setItem("admin_auth", "true");
+          sessionStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+          // Mirror to localStorage so other tabs (supplier dashboard) can detect via 'storage' event.
+          localStorage.setItem("admin_auth", "true");
+          localStorage.setItem("admin_welcome", "Welcome boss 👑 — systems are green and ready!");
+        } catch {}
       }
       router.replace("/admin");
     } catch (err: any) {

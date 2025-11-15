@@ -189,22 +189,20 @@ export default function SupplierDashboard(): JSX.Element {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [dayLocked, setDayLocked] = useState<boolean>(false);
   const [dayLockedMeta, setDayLockedMeta] = useState<{ lockedAt?: string|null; by?: string|null }|null>(null);
-  // Update admin flag if login occurs after mount
+  // Admin detection: listen for localStorage changes and poll periodically because sessionStorage changes do NOT fire 'storage' events.
   useEffect(() => {
     function syncAdminFlag() {
-      try { setIsAdmin(sessionStorage.getItem('admin_auth') === 'true'); } catch {}
+      try {
+        const val = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
+        setIsAdmin(val);
+      } catch {}
     }
     syncAdminFlag();
     const handler = (e: StorageEvent) => { if (e.key === 'admin_auth') syncAdminFlag(); };
     window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, []);
-  useEffect(() => {
-    try {
-      const val = sessionStorage.getItem('admin_auth') === 'true';
-      setIsAdmin(val);
-    } catch {}
-  }, []);
+    const id = setInterval(() => { if (!isAdmin) syncAdminFlag(); }, 4000);
+    return () => { window.removeEventListener('storage', handler); clearInterval(id); };
+  }, [isAdmin]);
 
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
