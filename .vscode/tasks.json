@@ -356,6 +356,46 @@
 			"type": "shell",
 			"command": "npm run -s typecheck",
 			"isBackground": false
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck"
+		},
+		{
+			"label": "build (Next.js)",
+			"type": "shell",
+			"command": "npm run -s build"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck"
+		},
+		{
+			"label": "build (Next.js)",
+			"type": "shell",
+			"command": "npm run -s build"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck"
+		},
+		{
+			"label": "build (Next.js)",
+			"type": "shell",
+			"command": "npm run -s build"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck"
+		},
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npm run -s typecheck"
 		}
 	]
 }
