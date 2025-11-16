@@ -131,12 +131,14 @@ export async function GET(req: Request) {
         const paymentsIncluded = await (prisma as any).payment.findMany({
           where: wherePayments,
           // Use fields that exist across environments; `mpesaReceipt` replaces legacy `receipt`.
-          select: { id: true, amount: true, createdAt: true, mpesaReceipt: true, ref: true },
+          select: { id: true, amount: true, createdAt: true, mpesaReceipt: true, checkoutRequestId: true, merchantRequestId: true, accountReference: true },
           orderBy: { createdAt: 'asc' },
           take: 100,
         });
         // Compact log line: count and brief per-payment info (id:amount:receiptOrRef)
-        const brief = paymentsIncluded.map((p: any) => `${p.id}:${p.amount}:${p.mpesaReceipt || p.ref || ''}`).join(',');
+        const brief = paymentsIncluded
+          .map((p: any) => `${p.id}:${p.amount}:${p.mpesaReceipt || p.checkoutRequestId || p.merchantRequestId || p.accountReference || ''}`)
+          .join(',');
         console.debug(`[metrics/header] outlet=${outletEnum} date=${date} from=${fromTime.toISOString()} to=${endOfDay.toISOString()} count=${paymentsIncluded.length} sum=${tillSalesGrossCurrent} payments=${brief}`);
       } catch (e) {
         // Non-fatal logging failure

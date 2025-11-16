@@ -21,12 +21,27 @@ export async function computeDayTotals(args: { date: string; outletName: string 
       try {
         const start = new Date(date + 'T00:00:00.000Z');
         const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+        // Map outletName (human label) to Prisma enum OutletCode used by Payment
+        const allowedCodes = ["BRIGHT", "BARAKA_A", "BARAKA_B", "BARAKA_C", "GENERAL"] as const;
+        const toEnum = (s: string | null | undefined) => {
+          if (!s) return null as any;
+          const c = String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+          return (allowedCodes as readonly string[]).includes(c) ? (c as typeof allowedCodes[number]) : null;
+        };
+        let outletEnum: any = toEnum(outletName);
+        if (!outletEnum) {
+          const aliases: Record<string, string> = { BRIGHT: "BRIGHT", BARAKA: "BARAKA_A", BARAKA_A: "BARAKA_A", BARAKA_B: "BARAKA_B", BARAKA_C: "BARAKA_C", GENERAL: "GENERAL" };
+          const c = String(outletName || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+          if (aliases[c]) outletEnum = aliases[c];
+        }
+        if (!outletEnum) return [];
         return await (prisma as any).payment.findMany({
           where: {
-            outletName,
+            outletCode: outletEnum,
             status: 'SUCCESS',
             createdAt: { gte: start, lt: end }
-          }
+          },
+          select: { amount: true },
         });
       } catch { return []; }
     })(),
