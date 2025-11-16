@@ -189,9 +189,10 @@ export default function SupplierDashboard(): JSX.Element {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [dayLocked, setDayLocked] = useState<boolean>(false);
   const [dayLockedMeta, setDayLockedMeta] = useState<{ lockedAt?: string|null; by?: string|null }|null>(null);
-  // Admin detection: listen for localStorage changes and poll periodically because sessionStorage changes do NOT fire 'storage' events.
+  // Admin detection: BroadcastChannel + storage events + fast (2s) fallback poll.
   useEffect(() => {
     let cancelled = false;
+    let bc: BroadcastChannel | null = null;
     async function syncAdminFlag() {
       try {
         const clientFlag = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
@@ -208,8 +209,20 @@ export default function SupplierDashboard(): JSX.Element {
     syncAdminFlag();
     const handler = (e: StorageEvent) => { if (e.key === 'admin_auth') syncAdminFlag(); };
     window.addEventListener('storage', handler);
-    const id = setInterval(() => { if (!cancelled) void syncAdminFlag(); }, 5000);
-    return () => { cancelled = true; window.removeEventListener('storage', handler); clearInterval(id); };
+    // BroadcastChannel listener for immediate elevation/demotion.
+    try {
+      bc = new BroadcastChannel('auth');
+      bc.onmessage = (ev) => {
+        if (ev?.data?.type === 'AUTH_SYNC') syncAdminFlag();
+      };
+    } catch {}
+    const id = setInterval(() => { if (!cancelled) void syncAdminFlag(); }, 2000); // faster fallback poll
+    return () => {
+      cancelled = true;
+      window.removeEventListener('storage', handler);
+      clearInterval(id);
+      try { bc?.close(); } catch {}
+    };
   }, [isAdmin]);
 
   // Manual admin status refresh (button trigger)
@@ -1341,7 +1354,12 @@ export default function SupplierDashboard(): JSX.Element {
       <header className="mb-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Supplier Dashboard</h1>
+            <h1 className="text-2xl font-semibold flex items-center gap-3">Supplier Dashboard {isAdmin && (
+              <span
+                className="inline-flex items-center rounded-md bg-amber-600/90 text-white text-[10px] font-semibold px-2 py-1 uppercase tracking-wide shadow-sm"
+                title="Elevated admin privileges active"
+              >Admin</span>
+            )}</h1>
             <p className="text-sm text-gray-600">
               {welcomeName ? <>Welcome <span className="font-medium">{welcomeName}</span>. </> : null}
               Enter opening supply, manage transfers, and respond to disputes.
