@@ -94,6 +94,10 @@ export default function SupervisorDashboard() {
   const [payAggRows, setPayAggRows] = useState<PayRow[]>([]);
   const [payStatus, setPayStatus] = useState<'ALL'|'SUCCESS'>('ALL');
   const [paySort, setPaySort] = useState<'createdAt:desc'|'createdAt:asc'|'amount:desc'|'amount:asc'>('createdAt:desc');
+  const [payTake, setPayTake] = useState<number>(50);
+  const [payFilterType, setPayFilterType] = useState<'receipt'|'till'>('receipt');
+  const [payFilterValue, setPayFilterValue] = useState<string>('');
+  const [payTillInclusive, setPayTillInclusive] = useState<boolean>(true);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   // Prices view
@@ -380,7 +384,7 @@ export default function SupervisorDashboard() {
         const status = payStatus;
         if (!date) { setPayRows([]); setPayAggRows([]); return; }
         if (selectedOutlet !== '__ALL__') {
-          const sp = new URLSearchParams({ outlet: selectedOutlet, period: 'previous', date, sort, status, take: '200' });
+          const sp = new URLSearchParams({ outlet: selectedOutlet, period: 'previous', date, sort, status, take: String(payTake) });
           const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
           const j = await r.json().catch(()=>({ ok:false }));
           if (!j?.ok) throw new Error(j?.error || 'Failed');
@@ -391,7 +395,7 @@ export default function SupervisorDashboard() {
           const names = outlets.map(o=>o.name).filter(Boolean);
           const results = await Promise.all(names.map(async (name) => {
             try {
-              const sp = new URLSearchParams({ outlet: name, period: 'previous', date, sort, status, take: '200' });
+              const sp = new URLSearchParams({ outlet: name, period: 'previous', date, sort, status, take: String(payTake) });
               const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
               const j = await r.json().catch(()=>({ ok:false }));
               if (j?.ok) return (j.rows || []).map((x:any)=>({ ...x, outletName: name })) as PayRow[];
@@ -405,7 +409,7 @@ export default function SupervisorDashboard() {
         setPayError(String(e?.message || e)); setPayRows([]); setPayAggRows([]);
       } finally { setPayLoading(false); }
     })();
-  }, [tab, date, selectedOutlet, paySort, payStatus, JSON.stringify(outlets.map(o=>o.name))]);
+  }, [tab, date, selectedOutlet, paySort, payStatus, payTake, JSON.stringify(outlets.map(o=>o.name))]);
 
   // Compute outlet names from selection before using in effects
   const outletNames = useMemo(
@@ -640,6 +644,46 @@ export default function SupervisorDashboard() {
     [kpis]
   );
 
+  // Multi-column sorting for per-outlet breakdown (All Outlets view)
+  type KPIKey = 'outlet' | 'expected' | 'deposits' | 'expenses' | 'cashAtTill' | 'variance' | 'wasteQty';
+  const [kpiSorts, setKpiSorts] = useState<Array<{ key: KPIKey; dir: 'asc' | 'desc' }>>([{ key: 'outlet', dir: 'asc' }]);
+  const toggleOrAddSort = (key: KPIKey, extend: boolean) => {
+    setKpiSorts(prev => {
+      // If not extending, replace with single key (toggle dir if same key first)
+      if (!extend) {
+        const first = prev[0];
+        if (first && first.key === key) {
+          // toggle direction
+          return [{ key, dir: first.dir === 'asc' ? 'desc' : 'asc' }, ...prev.slice(1)];
+        }
+        return [{ key, dir: 'asc' }];
+      }
+      // Extending (shift-click): if key exists, toggle its dir; else append
+      const idx = prev.findIndex(s => s.key === key);
+      if (idx === -1) return [...prev, { key, dir: 'asc' }];
+      const copy = [...prev];
+      copy[idx] = { key, dir: copy[idx].dir === 'asc' ? 'desc' : 'asc' };
+      return copy;
+    });
+  };
+  const clearSorts = () => setKpiSorts([{ key: 'outlet', dir: 'asc' }]);
+  const sortedKpis = useMemo(() => {
+    const rows = [...kpis];
+    rows.sort((a,b) => {
+      for (const s of kpiSorts) {
+        const dir = s.dir === 'asc' ? 1 : -1;
+        const av: any = s.key === 'outlet' ? a.outlet : (a as any)[s.key];
+        const bv: any = s.key === 'outlet' ? b.outlet : (b as any)[s.key];
+        if (av == null && bv != null) return -1 * dir;
+        if (av != null && bv == null) return 1 * dir;
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+      }
+      return 0;
+    });
+    return rows;
+  }, [kpis, kpiSorts]);
+
   /* ========= Actions ========= */
   const downloadPDF = () => window.print();
   const logout = () => {
@@ -719,16 +763,29 @@ export default function SupervisorDashboard() {
         {/* Per-outlet breakdown */}
         {selectedOutlet === "__ALL__" && (
           <div className="table-wrap mt-4">
+            {/* Multi-sort controls */}
+            <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
+              <div className="text-gray-600">Multi-sort: click header; Shift+Click to add/toggle secondary.</div>
+              <div className="flex items-center gap-1">
+                {kpiSorts.map((s,i)=>(
+                  <span key={`${s.key}-${i}`} className="px-2 py-1 rounded-full border bg-white/10 text-white/90 flex items-center gap-1">
+                    <span>{s.key}</span>
+                    <button title="Toggle direction" onClick={()=>toggleOrAddSort(s.key,true)} className="text-[10px] font-mono">{s.dir==='asc'?'↑':'↓'}</button>
+                  </span>
+                ))}
+              </div>
+              <button className="btn-mobile px-2 py-1 rounded-xl border" onClick={clearSorts}>Reset</button>
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
-                  <th className="py-2">Outlet</th>
-                  <th>Expected</th>
-                  <th>Deposits</th>
-                  <th>Expenses</th>
-                  <th>Cash @ Till</th>
-                  <th>Variance</th>
-                  <th>Waste (Qty)</th>
+                  <th className="py-2 cursor-pointer" onClick={(e)=>toggleOrAddSort('outlet', e.shiftKey)}>Outlet</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('expected', e.shiftKey)}>Expected</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('deposits', e.shiftKey)}>Deposits</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('expenses', e.shiftKey)}>Expenses</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('cashAtTill', e.shiftKey)}>Cash @ Till</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('variance', e.shiftKey)}>Variance</th>
+                  <th className="cursor-pointer" onClick={(e)=>toggleOrAddSort('wasteQty', e.shiftKey)}>Waste (Qty)</th>
                   <th>Deposited?</th>
                 </tr>
               </thead>
@@ -740,7 +797,7 @@ export default function SupervisorDashboard() {
                     </td>
                   </tr>
                 ) : (
-                  kpis.map((r) => (
+                  sortedKpis.map((r) => (
                     <tr key={r.outlet} className="border-b">
                       <td className="py-2">{r.outlet}</td>
                       <td>Ksh {fmt(r.expected)}</td>
@@ -1028,6 +1085,23 @@ export default function SupervisorDashboard() {
                 <option value="amount:desc">Amount high → low</option>
                 <option value="amount:asc">Amount low → high</option>
               </select>
+              <label className="text-xs text-gray-600">Take</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={String(payTake)} onChange={(e)=>setPayTake(Math.max(1, Math.min(200, Number(e.target.value)||50)))}>
+                {[50,100,150,200].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+              <button className="btn-mobile px-2 py-1 rounded-xl border text-xs" onClick={()=>setPayTake(t=>Math.min(200, t+50))} disabled={payTake>=200}>Load more</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <select className="input-mobile border rounded-xl p-2 text-xs" value={payFilterType} onChange={(e)=>setPayFilterType(e.target.value as any)}>
+                <option value="receipt">Receipt prefix</option>
+                <option value="till">Till number</option>
+              </select>
+              <input className="input-mobile border rounded-xl p-2 text-xs w-40" placeholder={payFilterType==='receipt' ? 'e.g. QFJ' : 'e.g. 411111'} value={payFilterValue} onChange={(e)=>setPayFilterValue(e.target.value)} />
+              {payFilterType==='till' && (
+                <label className="text-xs text-gray-700 inline-flex items-center gap-1">
+                  <input type="checkbox" checked={payTillInclusive} onChange={(e)=>setPayTillInclusive(e.target.checked)} /> inclusive
+                </label>
+              )}
             </div>
             <button className="btn-mobile px-3 py-2 rounded-xl border text-xs" onClick={()=>{
               const hdr = ['time','outlet','amount','receipt','ref'];
@@ -1038,6 +1112,27 @@ export default function SupervisorDashboard() {
             }}>Export CSV</button>
           </div>
 
+          {(() => {
+            const src = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+            const vis = src.filter(r => {
+              if (!payFilterValue) return true;
+              const v = payFilterValue.trim().toLowerCase();
+              if (payFilterType === 'receipt') {
+                return (r.code || '').toLowerCase().startsWith(v);
+              } else {
+                const till = (r as any).till || '';
+                const store = (r as any).store || '';
+                const ho = (r as any).ho || '';
+                const match = (s:string) => String(s).toLowerCase().startsWith(v);
+                return payTillInclusive ? (match(till) || match(store) || match(ho)) : match(till);
+              }
+            });
+            const sum = vis.reduce((a,r)=>a+Number(r.amount||0),0);
+            return (
+              <div className="text-sm text-gray-700 mb-2">Shown total: <span className="font-semibold">Ksh {fmt(sum)}</span> ({vis.length} rows)</div>
+            );
+          })()}
+
           {payError && <div className="text-red-700 text-sm mb-2">{payError}</div>}
           <div className="table-wrap">
             <table className="w-full text-sm border">
@@ -1046,26 +1141,58 @@ export default function SupervisorDashboard() {
                   <th className="p-2">Time</th>
                   <th className="p-2">Outlet</th>
                   <th className="p-2">Amount</th>
+                  <th className="p-2">Till</th>
                   <th className="p-2">Receipt</th>
                   <th className="p-2">Ref</th>
                 </tr>
               </thead>
               <tbody>
                 {(() => {
-                  const rows = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+                  const base = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+                  const rows = base.filter(r => {
+                    if (!payFilterValue) return true;
+                    const v = payFilterValue.trim().toLowerCase();
+                    if (payFilterType === 'receipt') return (r.code || '').toLowerCase().startsWith(v);
+                    const till = (r as any).till || '';
+                    const store = (r as any).store || '';
+                    const ho = (r as any).ho || '';
+                    const match = (s:string) => String(s).toLowerCase().startsWith(v);
+                    return payTillInclusive ? (match(till) || match(store) || match(ho)) : match(till);
+                  });
                   if (payLoading) return (<tr><td colSpan={5} className="p-2 text-gray-500">Loading…</td></tr>);
-                  if (rows.length === 0) return (<tr><td colSpan={5} className="p-2 text-gray-500">No payments.</td></tr>);
+                  if (rows.length === 0) return (<tr><td colSpan={6} className="p-2 text-gray-500">No payments.</td></tr>);
                   return rows.map((r, i) => (
                     <tr key={`${r.time}-${i}`} className="border-b">
                       <td className="p-2 whitespace-nowrap">{r.time ? new Date(r.time).toLocaleTimeString() : ''}</td>
                       <td className="p-2">{r.outletName || (selectedOutlet==='__ALL__' ? '' : selectedOutlet)}</td>
                       <td className="p-2">Ksh {fmt(Number(r.amount)||0)}</td>
+                      <td className="p-2">{(r as any).till || '—'}</td>
                       <td className="p-2">{r.code || '—'}</td>
                       <td className="p-2">{r.ref || '—'}</td>
                     </tr>
                   ));
                 })()}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td className="p-2 font-semibold" colSpan={2}>Totals</td>
+                  <td className="p-2 font-semibold" colSpan={4}>{(() => {
+                    const base = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+                    const rows = base.filter(r => {
+                      if (!payFilterValue) return true;
+                      const v = payFilterValue.trim().toLowerCase();
+                      if (payFilterType === 'receipt') return (r.code || '').toLowerCase().startsWith(v);
+                      const till = (r as any).till || '';
+                      const store = (r as any).store || '';
+                      const ho = (r as any).ho || '';
+                      const match = (s:string) => String(s).toLowerCase().startsWith(v);
+                      return payTillInclusive ? (match(till) || match(store) || match(ho)) : match(till);
+                    });
+                    const sum = rows.reduce((a,r)=>a+Number(r.amount||0),0);
+                    return `Ksh ${fmt(sum)}`;
+                  })()}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </section>
