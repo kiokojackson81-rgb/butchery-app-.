@@ -511,6 +511,11 @@
 			"label": "build (Next.js)",
 			"type": "shell",
 			"command": "npm run -s build"
+		},
+		{
+			"label": "playwright: period flow (BASE_URL=:3002)",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --reporter=line --workers=1"
 		}
 	]
 }

@@ -213,6 +213,21 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
           // Snapshot before clearing
           try {
             const snapKey = `snapshot:closing:${date}:${outlet}:1`;
+            // Include tillSalesGross for WA flow snapshot parity (aggregate since active period start)
+            let tillSalesGross = 0;
+            try {
+              const active = await (prisma as any).activePeriod.findFirst({ where: { outletName: outlet } }).catch(()=>null);
+              const startBound = active?.periodStartAt ? new Date(active.periodStartAt) : new Date(date + "T00:00:00.000Z");
+              const endBound = new Date();
+              const allowedCodes = ["BRIGHT","BARAKA_A","BARAKA_B","BARAKA_C","GENERAL"] as const;
+              const toEnum = (s: string | null | undefined) => { if (!s) return null as any; const c = String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g,"_"); return (allowedCodes as readonly string[]).includes(c) ? c : null; };
+              let outletEnum: any = toEnum(outlet);
+              if (!outletEnum) { const aliases: Record<string,string> = { BRIGHT:"BRIGHT", BARAKA:"BARAKA_A", BARAKA_A:"BARAKA_A", BARAKA_B:"BARAKA_B", BARAKA_C:"BARAKA_C", GENERAL:"GENERAL" }; const c = String(outlet).trim().toUpperCase().replace(/[^A-Z0-9]+/g,"_"); if (aliases[c]) outletEnum = aliases[c]; }
+              if (outletEnum) {
+                const agg = await (prisma as any).payment.aggregate({ where: { outletCode: outletEnum, status: 'SUCCESS', createdAt: { gte: startBound, lte: endBound } }, _sum: { amount: true } });
+                tillSalesGross = Number(agg?._sum?.amount || 0);
+              }
+            } catch {}
             const snapshot = {
               type: "period_reset_snapshot",
               outlet,
@@ -221,6 +236,7 @@ async function bumpCloseCountAndMaybeSeed(outlet: string, date: string) {
               createdAt: new Date().toISOString(),
               closings: (todaysClosings || []).map((r: any) => ({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty })),
               expenses: (todaysExpenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
+              tillSalesGross,
             } as any;
             await (tx as any).setting.upsert({ where: { key: snapKey }, update: { value: snapshot }, create: { key: snapKey, value: snapshot } });
           } catch {}

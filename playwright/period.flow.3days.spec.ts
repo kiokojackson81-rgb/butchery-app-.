@@ -45,23 +45,32 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
       const r2 = await request.post('/api/deposits', { data: { outlet, entries: [ { code: 'D1A', amount: 1000 } ] } });
       expect(r2.ok()).toBeTruthy();
     }
-    // Closing for D1: closing=6, waste=1 → sold = 10-6-1 = 3 → revenue = 3000
+  // Closing for D1: closing=6, waste=1 → sold (no waste subtraction) = 10-6 = 4 → revenue = 4000
     {
       const body = { outlet, date: D1, closingMap: { beef: 6 }, wasteMap: { beef: 1 } };
       const r = await request.post('/api/attendant/closing', { data: body });
       expect(r.ok()).toBeTruthy();
     }
-    // Header(D1): weightSales=3000, expenses=200, amountToDeposit= (3000-200) - 1000 = 1800, carryoverPrev≈0
+    // Previous view (explicit) for Day 1 should reflect opening phase zeros or initial snapshot state (weightSales >= 0)
+    {
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D1}&period=previous`);
+      expect(r.ok()).toBeTruthy();
+      const j = await r.json();
+      expect(j.ok).toBe(true);
+      // After first closing there may be snapshot with weightSales>0; ensure field is numeric
+      expect(typeof j.totals.weightSales).toBe('number');
+    }
+    // Header(D1): weightSales=4000, expenses=200, amountToDeposit= (4000-200) - 1000 = 2800, carryoverPrev≈0
     let amtToDepositD1 = 0;
     {
       const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D1}&period=current`);
       expect(r.ok()).toBeTruthy();
       const j = await r.json();
       expect(j.ok).toBe(true);
-      expect(Math.round(j.totals.weightSales)).toBe(3000);
+      expect(Math.round(j.totals.weightSales)).toBe(4000);
       expect(Math.round(j.totals.expenses)).toBe(200);
-      const expectedD1 = 3000 - 200 - 1000; // = 1800
-      amtToDepositD1 = 3000 - 200 - 1000; // same
+      const expectedD1 = 4000 - 200 - 1000; // = 2800
+      amtToDepositD1 = 4000 - 200 - 1000; // same
       expect(Math.round(j.totals.amountToDeposit)).toBe(expectedD1);
       expect(Math.round(j.totals.carryoverPrev || 0)).toBe(0);
     }
@@ -79,7 +88,7 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
       const r = await request.post('/api/attendant/closing', { data: body });
       expect(r.ok()).toBeTruthy();
     }
-    // Header(D2): carryoverPrev should equal D1 outstanding (= 1800). amountToDeposit = carryoverPrev + (1000 - 0) = 2800
+    // Header(D2): carryoverPrev should equal D1 outstanding (= 2800). amountToDeposit = carryoverPrev + (1000 - 0) = 3800
     {
       const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D2}&period=current`);
       expect(r.ok()).toBeTruthy();
@@ -88,7 +97,19 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
       expect(Math.round(j.totals.carryoverPrev)).toBe(Math.round(amtToDepositD1));
       expect(Math.round(j.totals.weightSales)).toBe(1000);
       expect(Math.round(j.totals.expenses)).toBe(0);
-      expect(Math.round(j.totals.amountToDeposit)).toBe(Math.round(amtToDepositD1 + (1000 - 0))); // 1800 + 1000 = 2800
+      expect(Math.round(j.totals.amountToDeposit)).toBe(Math.round(amtToDepositD1 + (1000 - 0))); // 2800 + 1000 = 3800
+    }
+    // Previous view for Day 2 should surface full Day 1 totals (weightSales=4000, expenses=200, deposits=1000, carryoverPrev=2800)
+    {
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D2}&period=previous`);
+      expect(r.ok()).toBeTruthy();
+      const j = await r.json();
+      expect(j.ok).toBe(true);
+      // Weight sales from D1 snapshot (no waste subtraction)
+      expect(Math.round(j.totals.weightSales)).toBe(4000);
+      expect(Math.round(j.totals.expenses)).toBe(200);
+      expect(Math.round(j.totals.verifiedDeposits)).toBe(1000);
+      expect(Math.round(j.totals.carryoverPrev)).toBe(2800);
     }
 
     // ===== Day 3 =====
@@ -100,6 +121,18 @@ test.describe('3-day stock flow: supply → closing/waste → carryover/deposit'
       expect(j.ok).toBe(true);
       // carryoverPrev(D3) = outstanding of D2 = 1000 - 0 - 0 = 1000
       expect(Math.round(j.totals.carryoverPrev)).toBe(1000);
+    }
+    // Previous view for Day 3 should reflect Day 2 snapshot (weightSales=1000, expenses=0, deposits=0)
+    {
+      const r = await request.get(`/api/metrics/header?outlet=${encodeURIComponent(outlet)}&date=${D3}&period=previous`);
+      expect(r.ok()).toBeTruthy();
+      const j = await r.json();
+      expect(j.ok).toBe(true);
+      expect(Math.round(j.totals.weightSales)).toBe(1000);
+      expect(Math.round(j.totals.expenses)).toBe(0);
+      expect(Math.round(j.totals.verifiedDeposits)).toBe(0);
+      // carryoverPrev is derived from Day 2's previous day (Day 1) outstanding; ensure numeric
+      expect(typeof j.totals.carryoverPrev).toBe('number');
     }
   });
 });

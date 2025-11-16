@@ -160,8 +160,8 @@ export async function GET(req: Request) {
   for (const row of yOpenRows) {
     const cl = yClosingMap.get(row.itemKey);
     const closing = cl?.closingQty || 0;
-    const waste = cl?.wasteQty || 0;
-    const soldQty = Math.max(0, (row.qty || 0) - closing - waste);
+    // Business rule: do NOT subtract waste when computing soldQty (alignment with computeDayTotals / snapshot)
+    const soldQty = Math.max(0, (row.qty || 0) - closing);
     const keyLc = String(row.itemKey).toLowerCase();
     const pbr = pbLC.get(keyLc);
     const price = pbr
@@ -189,7 +189,7 @@ export async function GET(req: Request) {
         const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
         // If the snapshot contains its own deposits, use them when computing previous-period totals.
         const snapDeposits = Array.isArray(prevPeriodSnap.deposits) ? prevPeriodSnap.deposits : [];
-        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits });
+  const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits, tillSalesGross: Number((prevPeriodSnap as any)?.tillSalesGross || 0) });
       const verifiedDepositsPrev = (snapDeposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount || 0) || 0), 0);
       const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
       // Preserve sign here as well: a negative value indicates an excess/surplus to carry forward.
@@ -222,12 +222,27 @@ export async function GET(req: Request) {
         const clos = Array.isArray(prevPeriodSnap.closings) ? prevPeriodSnap.closings : [];
         const exps = Array.isArray(prevPeriodSnap.expenses) ? prevPeriodSnap.expenses : [];
         const snapDeposits = Array.isArray(prevPeriodSnap.deposits) ? prevPeriodSnap.deposits : [];
-        const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits });
+  const totalsPrev = await computeSnapshotTotals({ outletName: outlet, openingSnapshot, closings: clos, expenses: exps, deposits: snapDeposits, tillSalesGross: Number((prevPeriodSnap as any)?.tillSalesGross || 0) });
         const verifiedDepositsPrev = (snapDeposits || []).filter((d: any) => d.status !== 'INVALID').reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
         const todayTotalPrev = Number(totalsPrev.expectedSales || 0) - Number(totalsPrev.expenses || 0);
-        // For explicit "previous" view, use the previous calendar day's carryover (yRevenue - yExpenses - yVerifiedDeposits)
-        const carryoverPrevFromY = Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits);
+        // For explicit "previous" view, use the previous calendar day's carryover (preserve sign: excess allowed)
+        const carryoverPrevFromY = (yRevenue - yExpensesSum - yVerifiedDeposits);
         const amountToDepositPrev = carryoverPrevFromY + (todayTotalPrev - verifiedDepositsPrev);
+
+        try {
+          console.debug('[metrics/header previous snapshot]', {
+            outlet,
+            date,
+            snapshotDeposits: snapDeposits.length,
+            snapshotClosings: clos.length,
+            snapshotExpenses: exps.length,
+            carryoverPrevFromY,
+            amountToDepositPrev,
+            expectedSalesPrev: totalsPrev.expectedSales,
+            expensesPrev: totalsPrev.expenses,
+            verifiedDepositsPrev,
+          });
+        } catch {}
 
         return NextResponse.json({
           ok: true,
@@ -235,8 +250,8 @@ export async function GET(req: Request) {
             weightSales: Number(totalsPrev.expectedSales || 0),
             expenses: Number(totalsPrev.expenses || 0),
             todayTotalSales: todayTotalPrev,
-            tillSalesGross: 0,
-            todayTillSales: 0,
+            tillSalesGross: Number(totalsPrev.tillSalesGross || 0),
+            todayTillSales: Number(totalsPrev.tillSalesGross || 0),
             verifiedDeposits: verifiedDepositsPrev,
             netTill: 0,
             carryoverPrev: carryoverPrevFromY,
@@ -248,19 +263,33 @@ export async function GET(req: Request) {
       }
     }
 
-    // Fallback behavior: treat "previous" as calendar previous day
+    // Fallback behavior: treat "previous" as calendar previous day with full recomputed totals (no zeros)
+    const todayTotalPrev = yRevenue - yExpensesSum;
+    const carryoverPrevFromY = (yRevenue - yExpensesSum - yVerifiedDeposits);
+    const amountToDepositPrev = carryoverPrevFromY; // Previous period outstanding is itself the amount that should have been deposited
+    try {
+      console.debug('[metrics/header previous fallback]', {
+        outlet,
+        date,
+        yRevenue,
+        yExpensesSum,
+        yVerifiedDeposits,
+        carryoverPrevFromY,
+        amountToDepositPrev,
+      });
+    } catch {}
     return NextResponse.json({
       ok: true,
       totals: {
-        weightSales: 0,
+        weightSales: yRevenue,
         expenses: yExpensesSum,
-        todayTotalSales: Math.max(0, yRevenue - yExpensesSum),
+        todayTotalSales: todayTotalPrev,
         tillSalesGross: 0,
         todayTillSales: 0,
         verifiedDeposits: yVerifiedDeposits,
         netTill: 0,
-        carryoverPrev: 0,
-        amountToDeposit: Math.max(0, yRevenue - yExpensesSum - yVerifiedDeposits),
+        carryoverPrev: carryoverPrevFromY,
+        amountToDeposit: amountToDepositPrev,
       },
     });
   }
@@ -296,8 +325,8 @@ export async function GET(req: Request) {
   for (const row of openRows) {
     const cl = closingMap.get(row.itemKey);
     const closing = cl?.closingQty || 0;
-    const waste = cl?.wasteQty || 0;
-    const soldQty = Math.max(0, (row.qty || 0) - closing - waste);
+    // Business rule: do NOT subtract waste when computing soldQty
+    const soldQty = Math.max(0, (row.qty || 0) - closing);
 
     // price: pricebook active else product active (case-insensitive)
     const keyLc = String(row.itemKey).toLowerCase();
@@ -309,7 +338,7 @@ export async function GET(req: Request) {
           return prod && prod.active ? Number(prod.sellPrice || 0) : 0;
         })();
 
-    weightSales += soldQty * price;
+  weightSales += soldQty * price;
   }
 
   const expensesSum = expenses.reduce((a, e) => a + (e.amount || 0), 0);

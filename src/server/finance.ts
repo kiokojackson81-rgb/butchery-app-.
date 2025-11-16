@@ -132,8 +132,9 @@ export async function computeSnapshotTotals(args: {
   closings: Array<{ itemKey: string; closingQty: number; wasteQty: number }>;
   expenses?: Array<{ amount: number }>;
   deposits?: Array<{ amount: number; status?: string }>;
+  tillSalesGross?: number; // optional gross till payments stored in snapshot
 }) {
-  const { outletName, openingSnapshot, closings, expenses = [], deposits = [] } = args;
+  const { outletName, openingSnapshot, closings, expenses = [], deposits = [], tillSalesGross = 0 } = args;
 
   const [pbRows, products] = await Promise.all([
     (prisma as any).pricebookRow.findMany({ where: { outletName } }),
@@ -186,7 +187,7 @@ export async function computeSnapshotTotals(args: {
   } catch {}
 
   const expensesSum = (expenses || []).reduce((a: number, e: any) => a + (Number(e?.amount) || 0), 0);
-  const tillSalesGross = 0; // Not available in snapshot context (period aggregate); supply via extended args if needed.
+  // Use provided tillSalesGross if snapshot captured it; else leave as 0.
   const verifiedDeposits = (deposits || []).filter((d: any) => d.status !== "INVALID").reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0);
   const todayTotalSales = weightSales - expensesSum;
   const netTill = tillSalesGross - verifiedDeposits;

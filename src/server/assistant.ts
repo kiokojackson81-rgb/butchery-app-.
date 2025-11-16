@@ -354,9 +354,11 @@ export async function computeAssistantExpectedDeposit(args: ComputeArgs): Promis
   const depositedSoFar = sumDeposits(depositRows as any[]);
   const prevDeposited = sumDeposits(prevDepositRows as any[]);
 
-  const carryoverPrev = Math.max(0, prevSalesValue - prevExpensesValue - prevDeposited);
+  // Preserve negative carryover to represent excess (over-deposit) scenarios
+  const carryoverPrev = (prevSalesValue - prevExpensesValue - prevDeposited);
   const expected = salesValue - expensesValue;
-  const recommendedNow = Math.max(carryoverPrev + expected - depositedSoFar, 0);
+  // Allow recommendedNow to be negative (excess) for transparency; UI can label appropriately
+  const recommendedNow = (carryoverPrev + expected - depositedSoFar);
 
   const breakdown: BreakdownRow[] = [];
   const warnings: string[] = [];
