@@ -299,9 +299,13 @@ export default function AdminPage() {
         }
 
         // 3) Read from localStorage into state
-        const o = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
-        const p = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
-        const e = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
+  const rawO = parseLS<Outlet[]>(K_OUTLETS) ?? seedDefaultOutlets();
+  const rawP = parseLS<Product[]>(K_PRODUCTS) ?? seedDefaultProducts();
+  const rawE = parseLS<FixedExpense[]>(K_EXPENSES) ?? seedDefaultExpenses();
+  // Defensive: ensure arrays in case localStorage was polluted with an object
+  const o = Array.isArray(rawO) ? rawO : seedDefaultOutlets();
+  const p = Array.isArray(rawP) ? rawP : seedDefaultProducts();
+  const e = Array.isArray(rawE) ? rawE : seedDefaultExpenses();
         const rawCodes = parseLS<PersonCode[]>(K_CODES) ?? [];
         let codesMutated = false;
         const c = rawCodes.map((row) => {
@@ -316,7 +320,7 @@ export default function AdminPage() {
         }
         const s = parseLS<ScopeMap>(K_SCOPE) ?? {};
         const pb = parseLS<PriceBook>(K_PRICEBOOK) ?? {};
-        setOutlets(o); setProducts(p); setExpenses(e);
+  setOutlets(o); setProducts(Array.isArray(p) ? p : []); setExpenses(e);
         setCodes(c); setScope(s); setPricebook(pb);
   // seed roles map uniquely
   const seed: Record<string, PersonCode["role"]> = {};
