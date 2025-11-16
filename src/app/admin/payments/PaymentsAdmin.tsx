@@ -150,12 +150,31 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
       </div>
 
       <table className="w-full mb-6">
-        <thead><tr><th>Date</th><th>Outlet</th><th>Shortcode Used</th><th>Amount</th><th>Phone</th><th>Receipt</th><th>Status</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Date</th><th>Outlet</th><th>Shortcode Used</th><th>Amount</th><th>Phone</th><th>Receipt</th><th>Status</th><th>Actions</th>
+          </tr>
+        </thead>
         <tbody>
           {filtered.map((p:any) => {
             const shortcode = p.businessShortCode || p.tillNumber || p.storeNumber || p.headOfficeNumber || '';
+            // Local state for inline outlet move input
+            const [value, setValue] = [undefined, undefined] as any;
             return (
-              <tr key={p.id}><td>{new Date(p.createdAt).toLocaleString()}</td><td>{p.outletCode}</td><td>{shortcode}</td><td>{p.amount}</td><td>{p.msisdn}</td><td>{p.mpesaReceipt}</td><td>{p.status}</td></tr>
+              <tr key={p.id}>
+                <td>{new Date(p.createdAt).toLocaleString()}</td>
+                <td>{p.outletCode}</td>
+                <td>{shortcode}</td>
+                <td>{p.amount}</td>
+                <td>{p.msisdn}</td>
+                <td>{p.mpesaReceipt}</td>
+                <td>{p.status}</td>
+                <td>
+                  <RowActions p={p} onUpdated={(np)=>{
+                    setPaymentsState(prev=> prev.map(x=> x.id===np.id ? { ...x, ...np } : x));
+                  }} />
+                </td>
+              </tr>
             );
           })}
         </tbody>
@@ -185,6 +204,60 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
       )}
 
       {/* Toasts are rendered by ToastProvider */}
+    </div>
+  );
+}
+
+function useAdminHeaders() {
+  const headers: any = { 'content-type': 'application/json' };
+  return (async () => {
+    try {
+      try {
+        const { getAdminAuth } = await import('@/lib/auth/clientState');
+        const val = getAdminAuth();
+        if (val) headers['x-admin-auth'] = 'true';
+      } catch {
+        const isAdmin = typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'true';
+        if (isAdmin) headers['x-admin-auth'] = 'true';
+      }
+    } catch {}
+    return headers;
+  })();
+}
+
+function RowActions({ p, onUpdated }: { p: any; onUpdated: (np:any)=>void }) {
+  const { showToast } = useToast();
+  const [moveOutlet, setMoveOutlet] = useState<string>('');
+
+  useEffect(()=>{ setMoveOutlet(p?.outletCode || ''); }, [p?.outletCode]);
+
+  async function doMoveOutlet() {
+    try {
+      const headers = await useAdminHeaders();
+      const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: p.id, outlet: moveOutlet }) });
+      const j = await res.json();
+      if (j.ok) { onUpdated(j.data); showToast({ type: 'success', message: 'Outlet moved' }); }
+      else showToast({ type: 'error', message: 'Move failed: ' + (j.error || 'unknown') });
+    } catch (e:any) { showToast({ type: 'error', message: String(e) }); }
+  }
+
+  async function assignPeriod(to: 'current'|'previous') {
+    try {
+      const headers = await useAdminHeaders();
+      const res = await fetch('/api/admin/payments/assign-period', { method: 'POST', headers, body: JSON.stringify({ id: p.id, to }) });
+      const j = await res.json();
+      if (j.ok) { onUpdated(j.payment); showToast({ type: 'success', message: `Assigned to ${to}` }); }
+      else showToast({ type: 'error', message: 'Assign failed: ' + (j.error || 'unknown') });
+    } catch (e:any) { showToast({ type: 'error', message: String(e) }); }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input list="outlet-codes" className="border p-1 w-28" value={moveOutlet} onChange={e=>setMoveOutlet(e.target.value)} />
+      <button className="text-blue-600 underline text-sm" onClick={doMoveOutlet}>Move</button>
+      <span className="text-gray-400">|</span>
+      <button className="text-sm px-2 py-1 border rounded" onClick={()=>assignPeriod('current')}>To Current</button>
+      <button className="text-sm px-2 py-1 border rounded" onClick={()=>assignPeriod('previous')}>To Prev</button>
     </div>
   );
 }
