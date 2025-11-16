@@ -90,22 +90,23 @@ export async function computeDayTotals(args: { date: string; outletName: string 
   const expectedDeposit = todayTotalSales - netTill;
 
   const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits };
-  try {
-    // Expanded logging for diagnostics
-    console.error('[computeDayTotals debug inputs]', {
-      outletName,
-      date,
-      supplyCount: supplyRows.length,
-      closingCount: closingRows.length,
-      expenseCount: expenses.length,
-      depositCount: deposits.length,
-      paymentCount: (payments||[]).length,
-      pricebookActive: pbRows.filter((r:any)=>r.active).length,
-      productActive: products.filter((p:any)=>p.active).length,
-      sampleClosing: closingRows.slice(0,3).map((r:any)=>({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty }))
-    });
-    console.error('[computeDayTotals debug result]', JSON.stringify(result));
-  } catch {}
+  if (process.env.SUPERVISOR_DIAG) {
+    try {
+      console.error('[computeDayTotals debug inputs]', {
+        outletName,
+        date,
+        supplyCount: supplyRows.length,
+        closingCount: closingRows.length,
+        expenseCount: expenses.length,
+        depositCount: deposits.length,
+        paymentCount: (payments||[]).length,
+        pricebookActive: pbRows.filter((r:any)=>r.active).length,
+        productActive: products.filter((p:any)=>p.active).length,
+        sampleClosing: closingRows.slice(0,3).map((r:any)=>({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty }))
+      });
+      console.error('[computeDayTotals debug result]', JSON.stringify(result));
+    } catch {}
+  }
   return result;
 }
 
@@ -139,7 +140,7 @@ export async function computeSnapshotTotals(args: {
       const base = Number(c.closingQty || 0) + Number(c.wasteQty || 0);
       if (base > 0) (effectiveOpening as any)[c.itemKey] = base;
     }
-    try { console.error('[computeSnapshotTotals debug] applied synthetic opening from closings'); } catch {}
+  if (process.env.SUPERVISOR_DIAG) { try { console.error('[computeSnapshotTotals debug] applied synthetic opening from closings'); } catch {} }
   }
 
   for (const [itemKey, openingQtyRaw] of Object.entries(effectiveOpening || {})) {
@@ -177,18 +178,20 @@ export async function computeSnapshotTotals(args: {
   const expectedDeposit = todayTotalSales - netTill;
 
     const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits };
-    try {
-      console.error('[computeSnapshotTotals debug inputs]', {
-        outletName,
-        openingKeys: Object.keys(effectiveOpening || {}).length,
-        closingCount: closings.length,
-        expenseCount: expenses.length,
-        depositCount: deposits.length,
-        pricebookActive: pbRows.filter((r:any)=>r.active).length,
-        productActive: products.filter((p:any)=>p.active).length,
-        sampleClosing: closings.slice(0,3).map(r=>({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty }))
-      });
-      console.error('[computeSnapshotTotals debug result]', JSON.stringify(result));
-    } catch {}
+    if (process.env.SUPERVISOR_DIAG) {
+      try {
+        console.error('[computeSnapshotTotals debug inputs]', {
+          outletName,
+          openingKeys: Object.keys(effectiveOpening || {}).length,
+          closingCount: closings.length,
+          expenseCount: expenses.length,
+          depositCount: deposits.length,
+          pricebookActive: pbRows.filter((r:any)=>r.active).length,
+          productActive: products.filter((p:any)=>p.active).length,
+          sampleClosing: closings.slice(0,3).map(r=>({ itemKey: r.itemKey, closingQty: r.closingQty, wasteQty: r.wasteQty }))
+        });
+        console.error('[computeSnapshotTotals debug result]', JSON.stringify(result));
+      } catch {}
+    }
     return result;
 }

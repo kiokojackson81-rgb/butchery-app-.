@@ -166,13 +166,17 @@ export async function GET(req: Request) {
       raw = [];
     }
 
-    // Map to UI-friendly shape expected by AttendantDashboard Till table
+    // Map to UI-friendly shape expected by Till tables (attendant/supervisor)
     const rows = (raw || []).map((r: any) => ({
       time: r.createdAt,
       amount: Number(r.amount || 0),
       code: r.mpesaReceipt || null,
       customer: r.msisdn || null,
       ref: r.accountReference || r.businessShortCode || null,
+      till: r.businessShortCode || null,
+      store: r.storeNumber || null,
+      ho: r.headOfficeNumber || null,
+      status: r.status || null,
     }));
 
     // Compute total of SUCCESS amounts for this outlet (simple reflection metric)

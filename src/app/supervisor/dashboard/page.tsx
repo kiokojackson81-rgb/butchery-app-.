@@ -1,7 +1,8 @@
 // src/app/supervisor/dashboard/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import HealthWidget from "./HealthWidget";
 import { hydrateLocalStorageFromDB, pushAllToDB } from "@/lib/settingsBridge";
 import { readJSON as safeReadJSON, writeJSON as safeWriteJSON } from "@/utils/safeStorage";
 
@@ -70,6 +71,18 @@ export default function SupervisorDashboard() {
   const [tab, setTab] = useState<
     "waste" | "expenses" | "excess" | "deficit" | "deposits" | "payments" | "supply" | "prices" | "commissions"
   >("waste");
+  const TAB_ORDER: Array<typeof tab> = ["waste","expenses","excess","deficit","deposits","payments","supply","prices","commissions"];
+  function handleTabKey(e: React.KeyboardEvent<HTMLElement>) {
+    const idx = TAB_ORDER.indexOf(tab);
+    if (e.key === 'ArrowRight') {
+      const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+      setTab(next); e.preventDefault();
+    } else if (e.key === 'ArrowLeft') {
+      const prev = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+      setTab(prev); e.preventDefault();
+    } else if (e.key === 'Home') { setTab(TAB_ORDER[0]); e.preventDefault(); }
+    else if (e.key === 'End') { setTab(TAB_ORDER[TAB_ORDER.length-1]); e.preventDefault(); }
+  }
 
   /* ========= Review lists (existing) ========= */
   const [waste, setWaste] = useState<ReviewItem[]>([]);
@@ -77,6 +90,12 @@ export default function SupervisorDashboard() {
   const [excess, setExcess] = useState<ReviewItem[]>([]);
   const [deficit, setDeficit] = useState<ReviewItem[]>([]);
   const [deposits, setDeposits] = useState<ReviewItem[]>([]); // legacy supervisor review list (kept for compatibility)
+  // Pagination cursors for review lists (server returns nextCursor per type)
+  const [wasteCursor, setWasteCursor] = useState<string|null>(null);
+  const [expensesCursor, setExpensesCursor] = useState<string|null>(null);
+  const [excessCursor, setExcessCursor] = useState<string|null>(null);
+  const [deficitCursor, setDeficitCursor] = useState<string|null>(null);
+  const [depositsCursor, setDepositsCursor] = useState<string|null>(null);
   // New: per-day/outlet deposit monitor data (linked to Admin Recon)
   type DepRow = { id: string; date: string; outletName: string; amount: number; code: string | null; note: string | null; status: "VALID"|"PENDING"|"INVALID"; createdAt?: string };
   const [depRows, setDepRows] = useState<DepRow[]>([]);
@@ -93,6 +112,8 @@ export default function SupervisorDashboard() {
   const [payRows, setPayRows] = useState<PayRow[]>([]);
   const [payAggRows, setPayAggRows] = useState<PayRow[]>([]);
   const [payStatus, setPayStatus] = useState<'ALL'|'SUCCESS'>('ALL');
+  // Supervisor selectable period for payments view: "previous" completed day vs "current" in-progress day
+  const [payPeriod, setPayPeriod] = useState<'previous'|'current'>('previous');
   const [paySort, setPaySort] = useState<'createdAt:desc'|'createdAt:asc'|'amount:desc'|'amount:asc'>('createdAt:desc');
   const [payTake, setPayTake] = useState<number>(50);
   const [payFilterType, setPayFilterType] = useState<'receipt'|'till'>('receipt');
@@ -130,175 +151,172 @@ export default function SupervisorDashboard() {
     const y = d.getUTCFullYear();
     const m = d.getUTCMonth(); // 0-based
     const day = d.getUTCDate();
-    let start = new Date(Date.UTC(y, m, 24));
-    let end = new Date(Date.UTC(y, m + 1, 23));
-    if (day < 24) {
-      start = new Date(Date.UTC(y, m - 1, 24));
-      end = new Date(Date.UTC(y, m, 23));
-    }
-    return { start: toYMD(start), end: toYMD(end) };
+    // Start is 24th of current month if today >=24 else 24th of previous month
+    let start: Date;
+    if (day >= 24) start = new Date(Date.UTC(y, m, 24));
+    else start = new Date(Date.UTC(y, m - 1, 24));
+    // End is 23rd of next month if today >=24 else 23rd of current month
+    let end: Date;
+    if (day >= 24) end = new Date(Date.UTC(y, m + 1, 23));
+    else end = new Date(Date.UTC(y, m, 23));
+    return { start: start.toISOString().slice(0,10), end: end.toISOString().slice(0,10) };
   }
-
-  // Helpers for navigating between periods (history retained across months)
-  function periodLabel(pr: { start: string; end: string }) {
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    const s = ymdToDate(pr.start); const e = ymdToDate(pr.end);
-    return `${s.getUTCDate()} ${months[s.getUTCMonth()]} ${s.getUTCFullYear()} → ${e.getUTCDate()} ${months[e.getUTCMonth()]} ${e.getUTCFullYear()}`;
-  }
-  function prevPeriodStart(dstr: string): string {
-    // Pick the day before current period start, then resolve that period's start
-    const pr = commissionPeriodRange(ymdToDate(dstr));
-    const dayBefore = ymdToDate(pr.start); dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
-    return commissionPeriodRange(dayBefore).start;
-  }
-  function nextPeriodStart(dstr: string): string {
-    // Pick the day after current period end, then resolve that period's start
-    const pr = commissionPeriodRange(ymdToDate(dstr));
-    const dayAfter = ymdToDate(pr.end); dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
-    return commissionPeriodRange(dayAfter).start;
-  }
-
-  async function refreshCommissions() {
-    try {
-      setCommLoading(true); setCommError(null);
-      const code = (typeof window !== 'undefined' ? (sessionStorage.getItem('supervisor_code') || "").trim() : "");
-      const qs = new URLSearchParams();
-      if (date) qs.set('date', date);
-      if (selectedOutlet !== "__ALL__") qs.set('outlet', selectedOutlet);
-      if (commStatus) qs.set('status', commStatus);
-      if (code) qs.set('supervisor', code);
-      const r = await fetch(`/api/commission?${qs.toString()}`, { cache: 'no-store' });
-      const j = await r.json().catch(()=>({ ok: false }));
-      if (!j?.ok) throw new Error(j?.error || 'Failed');
-      setCommRows(Array.isArray(j.rows) ? j.rows : []);
-    } catch (e: any) {
-      setCommError(String(e?.message || e)); setCommRows([]);
-    } finally { setCommLoading(false); }
-  }
-  useEffect(() => {
-    if (tab !== "commissions") return;
-    refreshCommissions();
-  }, [tab, date, selectedOutlet, commStatus]);
-
-  // Day status loader
-  async function refreshDayStatus() {
-    try {
-      setDayErr(null);
-      if (!date || selectedOutlet === "__ALL__") { setDayStatus(null); return; }
-      const qs = new URLSearchParams({ date, outlet: selectedOutlet });
-      const r = await fetch(`/api/day/status?${qs.toString()}`, { cache: "no-store" });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || "Failed");
-      setDayStatus(j.row || null);
-    } catch (e: any) {
-      setDayErr(String(e?.message || e)); setDayStatus(null);
+  // Load review lists + outlets (paginated per type)
+  function prevPeriodStart(dateStr: string): string {
+    const d = ymdToDate(dateStr);
+    const y = d.getUTCFullYear(); const m = d.getUTCMonth(); const day = d.getUTCDate();
+    // If current date >=24 then previous period starts 24th of previous month else 24th of two months ago
+    if (day >= 24) {
+      const prev = new Date(Date.UTC(y, m - 1, 24));
+      return prev.toISOString().slice(0,10);
+    } else {
+      const prev2 = new Date(Date.UTC(y, m - 2, 24));
+      return prev2.toISOString().slice(0,10);
     }
   }
-  useEffect(() => { refreshDayStatus(); }, [date, selectedOutlet]);
-
-  async function submitCurrentDay() {
-    if (!date || selectedOutlet === "__ALL__") return;
-    try {
-      setDayBusy(true); setDayErr(null);
-      const r = await fetch(`/api/day/submit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet: selectedOutlet, businessDate: date }) });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || "Submit failed");
-      await refreshDayStatus();
-    } catch (e: any) {
-      setDayErr(String(e?.message || e));
-    } finally { setDayBusy(false); }
+  function nextPeriodStart(dateStr: string): string {
+    const d = ymdToDate(dateStr);
+    const y = d.getUTCFullYear(); const m = d.getUTCMonth(); const day = d.getUTCDate();
+    if (day >= 24) {
+      const next = new Date(Date.UTC(y, m + 1, 24));
+      return next.toISOString().slice(0,10);
+    } else {
+      const nextCurr = new Date(Date.UTC(y, m, 24));
+      return nextCurr.toISOString().slice(0,10);
+    }
   }
-
-  async function lockCurrentDay() {
-    if (!date || selectedOutlet === "__ALL__") return;
-    if (!confirm(`Lock ${selectedOutlet} — ${date}? This finalizes the day.`)) return;
-    try {
-      setDayBusy(true); setDayErr(null);
-      const lockedBy = (typeof window !== 'undefined' ? (sessionStorage.getItem('supervisor_code') || sessionStorage.getItem('supervisor_name') || 'supervisor') : 'supervisor');
-      const r = await fetch(`/api/day/lock`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outlet: selectedOutlet, businessDate: date, lockedBy }) });
-      const j = await r.json().catch(()=>({ ok:false }));
-      if (!j?.ok) throw new Error(j?.error || "Lock failed");
-      await refreshDayStatus();
-    } catch (e: any) {
-      setDayErr(String(e?.message || e));
-    } finally { setDayBusy(false); }
-  }
-
-  // Load review lists + outlets
-  useEffect(() => {
-    // Ensure admin settings are hydrated from DB first (thin persistence)
-    (async () => { try { await hydrateLocalStorageFromDB(); } catch {} })();
+  function periodLabel(r: { start: string; end: string }): string { return `${r.start} → ${r.end}`; }
+  function refreshCommissions() {
+    setCommLoading(true); setCommError(null);
     (async () => {
       try {
-        // 1) Sync any local pending items to server (best-effort)
-        const allLocal = [
-          ...read(WASTE_KEY).map(r => ({ type: "waste",    outlet: r.outlet, date: r.date, payload: r })),
-          ...read(EXPENSES_KEY).map(r => ({ type: "expense",  outlet: r.outlet, date: r.date, payload: r })),
-          ...read(EXCESS_KEY).map(r => ({ type: "excess",   outlet: r.outlet, date: r.date, payload: r })),
-          ...read(DEFICIT_KEY).map(r => ({ type: "deficit",  outlet: r.outlet, date: r.date, payload: r })),
-          ...read(DEPOSITS_KEY).map(r => ({ type: "deposit", outlet: r.outlet, date: r.date, payload: r })),
-        ].filter(x => (x?.payload?.state || "pending") === "pending");
-        if (allLocal.length) {
-          try {
-            await fetch("/api/supervisor/reviews", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              cache: "no-store",
-              body: JSON.stringify({ items: allLocal })
-            });
-          } catch {}
-        }
-
-        // 2) Fetch server lists (all, keep UI behavior unchanged)
-        const res = await fetch("/api/supervisor/reviews", { cache: "no-store" });
-        if (res.ok) {
-          const j = await res.json().catch(()=>null as any);
-          const items: any[] = j?.items || [];
-          // Partition by type; keep shape compatible with existing UI
-          const toView = (t: string) => items.filter(i => i.type === t).map(i => ({
+        const sp = new URLSearchParams({ date, range: commRange });
+        if (selectedOutlet !== '__ALL__') sp.set('outlet', selectedOutlet);
+        const r = await fetch(`/api/supervisor/commissions?${sp.toString()}`, { cache: 'no-store' });
+        const j = await r.json().catch(()=>({ ok:false }));
+        if (!j?.ok) throw new Error(j?.error || 'Failed');
+        const list = (j.rows || []) as CommissionRow[];
+        setCommRows(list);
+      } catch (e:any) {
+        setCommError(String(e?.message||e));
+        setCommRows([]);
+      } finally { setCommLoading(false); }
+    })();
+  }
+  function exportCommissionsCSV() {
+    try {
+      const dateObj = ymdToDate(date);
+      const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
+      const w0 = toYMD(ws); const w1 = toYMD(we);
+      const pr = commissionPeriodRange(dateObj);
+      const inRange = (dstr: string) => {
+        if (commRange === 'period') return dstr >= pr.start && dstr <= pr.end;
+        if (commRange === 'day') return dstr === toYMD(dateObj);
+        if (commRange === 'week') return dstr >= w0 && dstr <= w1;
+        return true;
+      };
+      const visible = commRows.filter((r: CommissionRow) => inRange(r.date));
+      const headers = ['date','outlet','salesKsh','expensesKsh','wasteKsh','profitKsh','commissionRate','commissionKsh','status','note'];
+  const num = (n:number)=>Number(n||0).toFixed(2);
+  const lines = [headers.join(',')].concat(visible.map(r => [r.date,r.outletName,num(r.salesKsh),num(r.expensesKsh),num(r.wasteKsh),num(r.profitKsh),num(r.commissionRate),num(r.commissionKsh),r.status||'', (r.note||'').replace(/,/g,';')].join(',')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `commissions_${toYMD(dateObj)}_${commRange}.csv`; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    } catch {}
+  }
+    useEffect(() => {
+      (async () => { try { await hydrateLocalStorageFromDB(); } catch {} })();
+      (async () => {
+        try {
+          // Sync pending local items first
+          const allLocal = [
+            ...read(WASTE_KEY).map(r => ({ type: "waste",    outlet: r.outlet, date: r.date, payload: r })),
+            ...read(EXPENSES_KEY).map(r => ({ type: "expense",  outlet: r.outlet, date: r.date, payload: r })),
+            ...read(EXCESS_KEY).map(r => ({ type: "excess",   outlet: r.outlet, date: r.date, payload: r })),
+            ...read(DEFICIT_KEY).map(r => ({ type: "deficit",  outlet: r.outlet, date: r.date, payload: r })),
+            ...read(DEPOSITS_KEY).map(r => ({ type: "deposit", outlet: r.outlet, date: r.date, payload: r })),
+          ].filter(x => (x?.payload?.state || "pending") === "pending");
+          if (allLocal.length) {
+            try { await fetch('/api/supervisor/reviews', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: allLocal }) }); } catch {}
+          }
+          // helper
+          const mapItems = (items:any[]) => items.map(i => ({
             id: i.id,
             date: new Date(i.date).toISOString().slice(0,10),
-            outlet: i.outlet,
-            item: i.payload?.item || i.payload?.itemKey || i.payload?.item_name,
-            amount: Number(i.payload?.amount ?? i.payload?.qty ?? 0),
-            note: i.payload?.note || i.payload?.description || "",
-            state: (i.status || "pending") as "pending"|"approved"|"rejected",
-          }));
-          const w = toView("waste");
-          const exps = toView("expense");
-          const exs = toView("excess");
-          const defs = toView("deficit");
-          const deps = toView("deposit");
-          // write-through to local so Approve/Reject local mirror stays in sync
-          save(WASTE_KEY, w);
-          save(EXPENSES_KEY, exps);
-          save(EXCESS_KEY, exs);
-          save(DEFICIT_KEY, defs);
-          save(DEPOSITS_KEY, deps);
-          setWaste(w);
-          setExpenses(exps);
-          setExcess(exs);
-          setDeficit(defs);
-          setDeposits(deps);
-        } else {
-          // Fallback to local if server fails
+              outlet: i.outlet,
+              item: i.payload?.item || i.payload?.itemKey || i.payload?.item_name,
+              amount: Number(i.payload?.amount ?? i.payload?.qty ?? 0),
+              note: i.payload?.note || i.payload?.description || "",
+              state: (i.status || "pending") as "pending"|"approved"|"rejected",
+          })) as ReviewItem[];
+          // initial page per type
+          async function loadType(t:string, setList:(v:ReviewItem[])=>void, setCursor:(c:string|null)=>void, storageKey:string) {
+            try {
+              const res = await fetch(`/api/supervisor/reviews?type=${t}&limit=50`, { cache:'no-store' });
+              if (!res.ok) throw new Error('fail');
+              const j = await res.json();
+              const items = mapItems(j.items||[]);
+              setList(items); save(storageKey, items);
+              setCursor(j.nextCursor||null);
+            } catch {
+              setList(read(storageKey)); setCursor(null);
+            }
+          }
+          await Promise.all([
+            loadType('waste', setWaste, setWasteCursor, WASTE_KEY),
+            loadType('expense', setExpenses, setExpensesCursor, EXPENSES_KEY),
+            loadType('excess', setExcess, setExcessCursor, EXCESS_KEY),
+            loadType('deficit', setDeficit, setDeficitCursor, DEFICIT_KEY),
+            loadType('deposit', setDeposits, setDepositsCursor, DEPOSITS_KEY),
+          ]);
+        } catch {
+          // fallback local
           setWaste(read(WASTE_KEY));
           setExpenses(read(EXPENSES_KEY));
           setExcess(read(EXCESS_KEY));
           setDeficit(read(DEFICIT_KEY));
           setDeposits(read(DEPOSITS_KEY));
+          setWasteCursor(null); setExpensesCursor(null); setExcessCursor(null); setDeficitCursor(null); setDepositsCursor(null);
         }
-      } catch {
-        setWaste(read(WASTE_KEY));
-        setExpenses(read(EXPENSES_KEY));
-        setExcess(read(EXCESS_KEY));
-        setDeficit(read(DEFICIT_KEY));
-        setDeposits(read(DEPOSITS_KEY));
-      }
+      })();
+    }, [date]);
 
-      const outs = readJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
-      setOutlets((outs || []).filter(o => o?.name));
-    })();
+    // Load-more handlers
+    async function loadMoreReviews(t: 'waste'|'expense'|'excess'|'deficit'|'deposit') {
+      const cursorMap: Record<string, [string|null, (c:string|null)=>void, ReviewItem[], (v:ReviewItem[])=>void, string]> = {
+        waste: [wasteCursor, setWasteCursor, waste, setWaste, WASTE_KEY],
+        expense: [expensesCursor, setExpensesCursor, expenses, setExpenses, EXPENSES_KEY],
+        excess: [excessCursor, setExcessCursor, excess, setExcess, EXCESS_KEY],
+        deficit: [deficitCursor, setDeficitCursor, deficit, setDeficit, DEFICIT_KEY],
+        deposit: [depositsCursor, setDepositsCursor, deposits, setDeposits, DEPOSITS_KEY],
+      };
+      const [cur, setCur, list, setList, storageKey] = cursorMap[t];
+      if (!cur) return; // nothing to load
+      try {
+        const res = await fetch(`/api/supervisor/reviews?type=${t}&limit=50&cursor=${encodeURIComponent(cur)}`, { cache:'no-store' });
+        if (!res.ok) return;
+        const j = await res.json();
+        const items = (j.items||[]).map((i:any)=>({
+          id: i.id,
+          date: new Date(i.date).toISOString().slice(0,10),
+          outlet: i.outlet,
+          item: i.payload?.item || i.payload?.itemKey || i.payload?.item_name,
+          amount: Number(i.payload?.amount ?? i.payload?.qty ?? 0),
+          note: i.payload?.note || i.payload?.description || '',
+          state: (i.status || 'pending') as 'pending'|'approved'|'rejected'
+        })) as ReviewItem[];
+        const merged = list.concat(items);
+        setList(merged); save(storageKey, merged);
+        setCur(j.nextCursor||null);
+      } catch {}
+    }
+
+  // Admin outlets hydration (once)
+  useEffect(() => {
+    const outs = readJSON<AdminOutlet[]>(ADMIN_OUTLETS_KEY, []);
+    setOutlets((outs || []).filter(o => o?.name));
   }, []);
 
   // Load supervisor Deposits Monitor details when viewing deposits tab and a single outlet is selected
@@ -384,7 +402,7 @@ export default function SupervisorDashboard() {
         const status = payStatus;
         if (!date) { setPayRows([]); setPayAggRows([]); return; }
         if (selectedOutlet !== '__ALL__') {
-          const sp = new URLSearchParams({ outlet: selectedOutlet, period: 'previous', date, sort, status, take: String(payTake) });
+          const sp = new URLSearchParams({ outlet: selectedOutlet, period: payPeriod, date, sort, status, take: String(payTake) });
           const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
           const j = await r.json().catch(()=>({ ok:false }));
           if (!j?.ok) throw new Error(j?.error || 'Failed');
@@ -395,7 +413,7 @@ export default function SupervisorDashboard() {
           const names = outlets.map(o=>o.name).filter(Boolean);
           const results = await Promise.all(names.map(async (name) => {
             try {
-              const sp = new URLSearchParams({ outlet: name, period: 'previous', date, sort, status, take: String(payTake) });
+              const sp = new URLSearchParams({ outlet: name, period: payPeriod, date, sort, status, take: String(payTake) });
               const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
               const j = await r.json().catch(()=>({ ok:false }));
               if (j?.ok) return (j.rows || []).map((x:any)=>({ ...x, outletName: name })) as PayRow[];
@@ -409,7 +427,7 @@ export default function SupervisorDashboard() {
         setPayError(String(e?.message || e)); setPayRows([]); setPayAggRows([]);
       } finally { setPayLoading(false); }
     })();
-  }, [tab, date, selectedOutlet, paySort, payStatus, payTake, JSON.stringify(outlets.map(o=>o.name))]);
+  }, [tab, date, selectedOutlet, paySort, payStatus, payPeriod, payTake, JSON.stringify(outlets.map(o=>o.name))]);
 
   // Compute outlet names from selection before using in effects
   const outletNames = useMemo(
@@ -426,75 +444,39 @@ export default function SupervisorDashboard() {
       try {
         const targets = outletNames.filter(Boolean);
         if (targets.length === 0 || !date) return;
-
-        // Fetch and hydrate per outlet in parallel (lightweight; each endpoint is scoped)
-        await Promise.all(
-          targets.map(async (outletName) => {
-            const query = new URLSearchParams({ date, outlet: outletName }).toString();
+        // Consolidated overview fetch per outlet (reduces network round trips)
+        await Promise.all(targets.map(async (outletName) => {
+          try {
+            const q = new URLSearchParams({ date, outlet: outletName }).toString();
+            const r = await fetch(`/api/supervisor/overview?${q}`, { cache:'no-store' });
+            if (!r.ok) return;
+            const j = await r.json().catch(()=>null as any);
+            if (!j?.ok) return;
+            // Summary
+            const s = j.summary || {};
+            const summary = {
+              expectedKsh: Number(s.expectedSales||0),
+              depositedKsh: Number(s.deposits||0),
+              expensesKsh: Number(s.expenses||0),
+              cashAtTill: Math.max(0, Number(s.expectedSales||0) - Number(s.deposits||0) - Number(s.expenses||0)),
+              varianceKsh: Number(s.variance||0),
+            } as any;
+            safeWriteJSON(summaryKey(date, outletName), summary);
             // Deposits
-            try {
-              const r = await fetch(`/api/deposits?${query}`, { cache: "no-store" });
-              if (r.ok) {
-                const j = await r.json();
-                const rows: Array<{ amount: number }> = (j?.rows || []).map((x: any) => ({ amount: Number(x?.amount || 0) }));
-                safeWriteJSON(depositsKey(date, outletName), rows);
-              }
-            } catch {}
+            const depRows = (j.deposits||[]).map((d:any)=>({ amount: Number(d.amount||0) }));
+            safeWriteJSON(depositsKey(date, outletName), depRows);
             // Expenses
-            try {
-              const r = await fetch(`/api/expenses?${query}`, { cache: "no-store" });
-              if (r.ok) {
-                const j = await r.json();
-                const rows: Array<{ amount: number }> = (j?.rows || []).map((x: any) => ({ amount: Number(x?.amount || 0) }));
-                safeWriteJSON(expensesDailyKey(date, outletName), rows);
-              }
-            } catch {}
-            // Closing/Waste
-            try {
-              const r = await fetch(`/api/attendant/closing?${query}`, { cache: "no-store" });
-              if (r.ok) {
-                const j = await r.json();
-                const wasteMap = (j?.wasteMap || {}) as Record<string, number>;
-                safeWriteJSON(WASTE_MAP(date, outletName), wasteMap);
-              }
-            } catch {}
-            // Supply Opening (for Supply View)
-            try {
-              const r = await fetch(`/api/supply/opening?${query}`, { cache: "no-store" });
-              if (r.ok) {
-                const j = await r.json();
-                const rows: Array<{ itemKey: string; qty: number }> = (j?.rows || []).map((x: any) => ({ itemKey: String(x?.itemKey || ""), qty: Number(x?.qty || 0) }));
-                safeWriteJSON(supplierOpeningKey(date, outletName), rows);
-              }
-            } catch {}
-            // Server-computed summary (expected, deposits, expenses, till, variance)
-            try {
-              const r = await fetch(`/api/supervisor/summary?${new URLSearchParams({ date, outlet: outletName }).toString()}`, { cache: "no-store" });
-              if (r.ok) {
-                const j = await r.json();
-                const data = j?.data || {};
-                const summary = {
-                  expectedKsh: Number(data?.totals?.expectedSales ?? 0),
-                  depositedKsh: Number(
-                    Array.isArray(data?.deposits)
-                      ? data.deposits.reduce((a: number, d: any) => a + (Number(d?.amount) || 0), 0)
-                      : 0
-                  ),
-                  expensesKsh: Number(
-                    Array.isArray(data?.expenses)
-                      ? data.expenses.reduce((a: number, e: any) => a + (Number(e?.amount) || 0), 0)
-                      : 0
-                  ),
-                  cashAtTill: 0, // computed below
-                  varianceKsh: Number(data?.totals?.expectedDeposit ?? 0), // keep name for legacy UI
-                  potatoesExpectedDeposit: Number(data?.totals?.potatoesExpectedDeposit ?? 0),
-                } as any;
-                summary.cashAtTill = Math.max(0, (summary.expectedKsh || 0) - (summary.depositedKsh || 0) - (summary.expensesKsh || 0));
-                safeWriteJSON(summaryKey(date, outletName), summary);
-              }
-            } catch {}
-          })
-        );
+            const expRows = (j.expenses||[]).map((e:any)=>({ amount: Number(e.amount||0) }));
+            safeWriteJSON(expensesDailyKey(date, outletName), expRows);
+            // Waste map (closings)
+            const wasteMap: Record<string, number> = {};
+            for (const c of (j.closings||[])) wasteMap[c.itemKey] = Number(c.wasteQty||0);
+            safeWriteJSON(WASTE_MAP(date, outletName), wasteMap);
+            // Supply opening
+            const supplyRows = (j.supply||[]).map((s:any)=>({ itemKey: String(s.itemKey||''), qty: Number(s.qty||0) }));
+            safeWriteJSON(supplierOpeningKey(date, outletName), supplyRows);
+          } catch {}
+        }));
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -744,7 +726,7 @@ export default function SupervisorDashboard() {
       </header>
 
       {/* Primary navigation moved directly below header */}
-      <nav className="flex gap-2 mb-6 mobile-scroll-x border-b pb-2">
+  <nav className="flex gap-2 mb-6 mobile-scroll-x border-b pb-2 sticky top-0 bg-black/40 backdrop-blur z-20" role="tablist" aria-label="Supervisor sections" onKeyDown={handleTabKey}>
         <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>Waste Review</TabBtn>
         <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>Expenses Review</TabBtn>
         <TabBtn active={tab === "excess"} onClick={() => setTab("excess")}>Excess Approvals</TabBtn>
@@ -772,6 +754,7 @@ export default function SupervisorDashboard() {
         <div className="grid md:grid-cols-3 gap-3 mt-3">
           <KPI label="Waste (Qty)" value={fmt(agg.wasteQty)} />
         </div>
+        <HealthWidget date={date} outlet={selectedOutlet === '__ALL__' ? (outlets[0]?.name || '') : selectedOutlet} />
 
         {/* Per-outlet breakdown */}
         {selectedOutlet === "__ALL__" && (
@@ -850,31 +833,48 @@ export default function SupervisorDashboard() {
     </div>
 
       {tab === "waste" && (
-        <ReviewTable
-          title="Waste Requests"
-          data={waste}
-        />
+        <TabErrorBoundary>
+          <div>
+            <ReviewTable title="Waste Requests" data={waste} />
+            {wasteCursor && (
+              <button className="mt-3 btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>loadMoreReviews('waste')}>Load more</button>
+            )}
+          </div>
+        </TabErrorBoundary>
       )}
       {tab === "expenses" && (
-        <ReviewTable
-          title="Expense Requests"
-          data={expenses}
-        />
+        <TabErrorBoundary>
+          <div>
+            <ReviewTable title="Expense Requests" data={expenses} />
+            {expensesCursor && (
+              <button className="mt-3 btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>loadMoreReviews('expense')}>Load more</button>
+            )}
+          </div>
+        </TabErrorBoundary>
       )}
       {tab === "excess" && (
-        <ReviewTable
-          title="Excess Approvals"
-          data={excess}
-        />
+        <TabErrorBoundary>
+          <div>
+            <ReviewTable title="Excess Approvals" data={excess} />
+            {excessCursor && (
+              <button className="mt-3 btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>loadMoreReviews('excess')}>Load more</button>
+            )}
+          </div>
+        </TabErrorBoundary>
       )}
       {tab === "deficit" && (
-        <ReviewTable
-          title="Deficit Disputes"
-          data={deficit}
-        />
+        <TabErrorBoundary>
+          <div>
+            <ReviewTable title="Deficit Disputes" data={deficit} />
+            {deficitCursor && (
+              <button className="mt-3 btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>loadMoreReviews('deficit')}>Load more</button>
+            )}
+          </div>
+        </TabErrorBoundary>
       )}
 
       {tab === "deposits" && (
+        <TabErrorBoundary>
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">Deposits Monitor</h2>
           {selectedOutlet === "__ALL__" ? (
@@ -1048,11 +1048,15 @@ export default function SupervisorDashboard() {
               </div>
             </div>
           </div>
+          {depositsCursor && (
+            <button className="mt-3 btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>loadMoreReviews('deposit')}>Load more</button>
+          )}
         </section>
+        </TabErrorBoundary>
       )}
 
       {tab === "payments" && (
-        <section className="rounded-2xl border p-4">
+        <section className="rounded-2xl border p-4" aria-labelledby="payments-heading">
           <h2 className="font-semibold mb-3">Till Payments</h2>
           <div className="flex items-center justify-between mb-2 mobile-scroll-x gap-2">
             <div className="flex items-center gap-2">
@@ -1060,6 +1064,11 @@ export default function SupervisorDashboard() {
               <select className="input-mobile border rounded-xl p-2 text-sm" value={payStatus} onChange={(e)=>setPayStatus(e.target.value as any)}>
                 <option value="ALL">ALL</option>
                 <option value="SUCCESS">SUCCESS</option>
+              </select>
+              <label className="text-xs text-gray-600">Period</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={payPeriod} onChange={(e)=>setPayPeriod(e.target.value as any)}>
+                <option value="previous">Previous</option>
+                <option value="current">Current</option>
               </select>
               <label className="text-xs text-gray-600">Sort</label>
               <select className="input-mobile border rounded-xl p-2 text-sm" value={paySort} onChange={(e)=>setPaySort(e.target.value as any)}>
@@ -1183,6 +1192,7 @@ export default function SupervisorDashboard() {
 
       {/* ===== Supply View (new tab) ===== */}
       {tab === "supply" && (
+        <TabErrorBoundary>
         <section className="rounded-2xl border p-4">
           <h2 className="font-semibold mb-3">
             Supply View — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})
@@ -1206,10 +1216,12 @@ export default function SupervisorDashboard() {
 
           {/* View-only: Quick Closing Update removed */}
         </section>
+        </TabErrorBoundary>
       )}
 
       {/* ===== Prices (per outlet) ===== */}
       {tab === "prices" && (
+        <TabErrorBoundary>
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2 mobile-scroll-x gap-2">
             <h2 className="font-semibold">Outlet Prices — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet}</h2>
@@ -1290,9 +1302,11 @@ export default function SupervisorDashboard() {
           )}
           <p className="text-xs text-gray-500 mt-2">Auto-refreshes every 5s.</p>
         </section>
+        </TabErrorBoundary>
       )}
 
       {tab === "commissions" && (
+        <TabErrorBoundary>
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-3 mobile-scroll-x gap-2">
             <h2 className="font-semibold">My Commissions — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet} ({date})</h2>
@@ -1347,6 +1361,7 @@ export default function SupervisorDashboard() {
                 ))}
               </div>
               <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={refreshCommissions} disabled={commLoading}>{commLoading ? 'Loading…' : 'Refresh'}</button>
+              <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={exportCommissionsCSV}>Export CSV</button>
             </div>
           </div>
           {commError && <div className="text-red-600 text-sm mb-2">{commError}</div>}
@@ -1438,6 +1453,7 @@ export default function SupervisorDashboard() {
             </table>
           </div>
         </section>
+        </TabErrorBoundary>
       )}
     </main>
   );
@@ -1590,25 +1606,28 @@ function ReviewTable({
 function read(key: string): ReviewItem[] { return safeReadJSON<ReviewItem[]>(key, []); }
 function save(key: string, value: any) { try { safeWriteJSON(key, value); } catch {} }
 
-function TabBtn({
-  children,
-  active,
-  onClick,
-}: {
-  children: React.ReactNode;
-  active: boolean;
-  onClick: () => void;
-}) {
+function TabBtn({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
   return (
     <button
+      role="tab"
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl border text-sm ${
-        active ? "bg-black text-white" : "" /* no white background */
-      }`}
+      className={`px-3 py-1.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${active ? 'bg-black text-white' : ''}`}
     >
       {children}
     </button>
   );
+}
+
+class TabErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: any }> {
+  constructor(props: any) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error: any) { return { hasError: true, error }; }
+  componentDidCatch(error: any, info: any) { if (process.env.NEXT_PUBLIC_SUPERVISOR_DIAG) { console.error('TabErrorBoundary', error, info); } }
+  render() {
+    if (this.state.hasError) return <div className="rounded-2xl border p-4 text-red-600 text-sm">Failed to load section. <button onClick={()=>this.setState({ hasError:false, error:null })} className="underline">Retry</button></div>;
+    return this.props.children as any;
+  }
 }
 
 function KPI({ label, value }: { label: string; value: string }) {
