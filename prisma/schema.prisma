@@ -389,12 +389,15 @@ model SupervisorCommission {
   commissionKsh   Int      @default(0)
 
   periodKey       String   // e.g., 2025-09-24_to_2025-10-23
-  status          String   @default("calculated") // calculated|adjusted|approved|paid
+  status          String   @default("calculated") // calculated|adjusted|approved|paid (uppercase variants tolerated)
+  approvedAt      DateTime?
+  paidAt          DateTime?
   note            String?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@unique([date, outletName])
   @@index([date, outletName])
   @@index([periodKey, supervisorCode])
   @@index([outletName, date])
@@ -536,27 +539,6 @@ model AttendantKPI {
   @@index([attendantId, date])
 }
 
-/// Supervisor-level commission status per day/outlet (approval + payment lifecycle)
-model SupervisorCommission {
-  id         String           @id @default(cuid())
-  date       String           // YYYY-MM-DD
-  outletName String
-  status     CommissionStatus @default(CALCULATED)
-  approvedAt DateTime?
-  paidAt     DateTime?
-  note       String?
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
-
-  @@unique([date, outletName])
-  @@index([outletName, date])
-}
-
-enum CommissionStatus {
-  CALCULATED
-  APPROVED
-  PAID
-}
 
 /// Daily supply snapshot per product for reorder logic
 model ProductSupplyStat {
