@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
+// GET /api/admin/day/closings?date=YYYY-MM-DD&outlet=Outlet%20Name
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -16,3 +17,4 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
   }
 }
+ 

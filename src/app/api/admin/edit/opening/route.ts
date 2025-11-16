@@ -3,6 +3,35 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
 
+// POST { id, qty?, unit?, buyPrice?, reason? }
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(()=>({}));
+    const id = String(body?.id || "").trim();
+    if (!id) return NextResponse.json({ ok: false, error: "missing id" }, { status: 400 });
+
+    const data: any = {};
+    if (typeof body?.qty === 'number' && Number.isFinite(body.qty)) data.qty = body.qty;
+    if (typeof body?.unit === 'string') data.unit = body.unit;
+    if (typeof body?.buyPrice === 'number' && Number.isFinite(body.buyPrice)) data.buyPrice = body.buyPrice;
+
+    // Optional: record reason as note via separate audit table in future
+    const row = await (prisma as any).supplyOpeningRow.update({ where: { id }, data }).catch(async (e: any) => {
+      // fallback: if update fails, try select to confirm existence
+      const exists = await (prisma as any).supplyOpeningRow.findUnique({ where: { id } }).catch(()=>null);
+      if (!exists) throw e;
+      throw e;
+    });
+    return NextResponse.json({ ok: true, row });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
+  }
+}
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const revalidate = 0;
+
 type Body = { id: string; qty?: number; unit?: string; buyPrice?: number; reason?: string; force?: boolean };
 
 export async function POST(req: Request) {
