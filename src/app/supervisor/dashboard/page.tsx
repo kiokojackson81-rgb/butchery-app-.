@@ -205,6 +205,16 @@ export default function SupervisorDashboard() {
   }
   function exportCommissionsCSV() {
     try {
+      // If large dataset, delegate to streaming server export
+      if (commRows.length > 5000) {
+        const sp = new URLSearchParams({ date, range: commRange });
+        if (selectedOutlet !== '__ALL__') sp.set('outlet', selectedOutlet);
+        const a = document.createElement('a');
+        a.href = `/api/supervisor/commissions/export?${sp.toString()}`;
+        a.download = `commissions_${date}_${commRange}.csv`;
+        a.click();
+        return;
+      }
       const dateObj = ymdToDate(date);
       const ws = startOfISOWeek(dateObj); const we = endOfISOWeek(dateObj);
       const w0 = toYMD(ws); const w1 = toYMD(we);
@@ -217,8 +227,8 @@ export default function SupervisorDashboard() {
       };
       const visible = commRows.filter((r: CommissionRow) => inRange(r.date));
       const headers = ['date','outlet','salesKsh','expensesKsh','wasteKsh','profitKsh','commissionRate','commissionKsh','status','note'];
-  const num = (n:number)=>Number(n||0).toFixed(2);
-  const lines = [headers.join(',')].concat(visible.map(r => [r.date,r.outletName,num(r.salesKsh),num(r.expensesKsh),num(r.wasteKsh),num(r.profitKsh),num(r.commissionRate),num(r.commissionKsh),r.status||'', (r.note||'').replace(/,/g,';')].join(',')));
+      const num = (n:number)=>Number(n||0).toFixed(2);
+      const lines = [headers.join(',')].concat(visible.map(r => [r.date,r.outletName,num(r.salesKsh),num(r.expensesKsh),num(r.wasteKsh),num(r.profitKsh),num(r.commissionRate),num(r.commissionKsh),r.status||'', (r.note||'').replace(/,/g,';')].join(',')));
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1223,6 +1233,8 @@ export default function SupervisorDashboard() {
       {tab === "prices" && (
         <TabErrorBoundary>
         <section className="rounded-2xl border p-4">
+          {/* Dev/test hook to simulate an error for boundary validation */}
+          {typeof window !== 'undefined' && (() => { try { if (localStorage.getItem('simulate_tab_error') === 'prices') { localStorage.removeItem('simulate_tab_error'); throw new Error('Simulated prices tab error'); } } catch (e) { throw e; } return null; })()}
           <div className="flex items-center justify-between mb-2 mobile-scroll-x gap-2">
             <h2 className="font-semibold">Outlet Prices — {selectedOutlet === "__ALL__" ? "All Outlets" : selectedOutlet}</h2>
             <div className="flex items-center gap-2">
@@ -1345,23 +1357,24 @@ export default function SupervisorDashboard() {
               <label className="text-xs text-gray-700">Status</label>
               <select className="input-mobile border rounded-xl p-2 text-sm" value={commStatus} onChange={(e)=>setCommStatus(e.target.value)}>
                 <option value="">(any)</option>
-                <option value="calculated">calculated</option>
-                <option value="approved">approved</option>
-                <option value="paid">paid</option>
+                <option value="CALCULATED">CALCULATED</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="PAID">PAID</option>
               </select>
               {/* Quick status chips */}
               <div className="hidden sm:flex items-center gap-1 ml-1">
                 {[
                   {k:"", label:"All"},
-                  {k:"calculated", label:"Calculated"},
-                  {k:"approved", label:"Approved"},
-                  {k:"paid", label:"Paid"},
+                  {k:"CALCULATED", label:"Calculated"},
+                  {k:"APPROVED", label:"Approved"},
+                  {k:"PAID", label:"Paid"},
                 ].map(c => (
                   <button key={c.k} onClick={()=>setCommStatus(c.k)} className={`text-[11px] px-2 py-0.5 rounded-full border ${commStatus===c.k? 'bg-black text-white':'bg-transparent'}`}>{c.label}</button>
                 ))}
               </div>
               <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={refreshCommissions} disabled={commLoading}>{commLoading ? 'Loading…' : 'Refresh'}</button>
               <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={exportCommissionsCSV}>Export CSV</button>
+              <button className="btn-mobile px-3 py-2 rounded-xl border text-sm" onClick={()=>setCommRows([])}>Clear</button>
             </div>
           </div>
           {commError && <div className="text-red-600 text-sm mb-2">{commError}</div>}
@@ -1425,10 +1438,14 @@ export default function SupervisorDashboard() {
                     if (ka != null && kb == null) return 1*dir;
                     if (ka < kb) return -1*dir; if (ka > kb) return 1*dir; return 0;
                   });
-                  const chip = (s?: string | null) => {
-                    const st = String(s || 'calculated');
-                    const cls = st === 'paid' ? 'bg-green-600 text-white' : st === 'approved' ? 'bg-emerald-600 text-white' : st === 'adjusted' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-white';
-                    return <span className={`text-[11px] px-2 py-0.5 rounded-full ${cls}`}>{st}</span>;
+                  const chip = (row: any) => {
+                    const st = String(row.status || 'CALCULATED');
+                    const cls = st === 'PAID' ? 'bg-green-600 text-white' : st === 'APPROVED' ? 'bg-emerald-600 text-white' : st === 'CALCULATED' ? 'bg-slate-600 text-white' : 'bg-zinc-600 text-white';
+                    const tipParts: string[] = [];
+                    if (row.approvedAt) tipParts.push(`Approved: ${new Date(row.approvedAt).toLocaleString()}`);
+                    if (row.paidAt) tipParts.push(`Paid: ${new Date(row.paidAt).toLocaleString()}`);
+                    const title = tipParts.join(' | ') || st;
+                    return <span title={title} className={`text-[11px] px-2 py-0.5 rounded-full cursor-help ${cls}`}>{st}</span>;
                   };
                   return (
                     <>
@@ -1442,8 +1459,14 @@ export default function SupervisorDashboard() {
                           <td className="p-2">Ksh {fmt(r.profitKsh)}</td>
                           <td className="p-2">{(r.commissionRate*100).toFixed(1)}%</td>
                           <td className="p-2">Ksh {fmt(r.commissionKsh)}</td>
-                          <td className="p-2">{chip(r.status)}</td>
-                          <td className="p-2">{r.note || '—'}</td>
+                          <td className="p-2">{chip(r)}</td>
+                          <td className="p-2 space-y-1">
+                            <div>{r.note || '—'}</div>
+                            <div className="flex flex-wrap gap-1 text-[10px]">
+                              {r.status === 'CALCULATED' && <button onClick={async()=>{try{await fetch('/api/supervisor/commissions/update-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ date:r.date,outletName:r.outletName,status:'APPROVED'})}); refreshCommissions();}catch{}}} className="px-2 py-0.5 border rounded">Approve</button>}
+                              {r.status === 'APPROVED' && <button onClick={async()=>{try{await fetch('/api/supervisor/commissions/update-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ date:r.date,outletName:r.outletName,status:'PAID'})}); refreshCommissions();}catch{}}} className="px-2 py-0.5 border rounded">Mark Paid</button>}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </>

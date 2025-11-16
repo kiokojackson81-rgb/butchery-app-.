@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     else if (range === 'week') days = enumerateDays(toYMD(startOfISOWeek(anchor)), toYMD(endOfISOWeek(anchor)));
     else { const pr = commissionPeriodRange(anchor); days = enumerateDays(pr.start, pr.end); }
 
-    type CommissionRow = { id: string; date: string; outletName: string; salesKsh: number; expensesKsh: number; wasteKsh: number; profitKsh: number; commissionRate: number; commissionKsh: number; status?: string | null; note?: string | null };
+  type CommissionRow = { id: string; date: string; outletName: string; salesKsh: number; expensesKsh: number; wasteKsh: number; profitKsh: number; commissionRate: number; commissionKsh: number; status?: string | null; note?: string | null; approvedAt?: string | null; paidAt?: string | null };
     const rows: CommissionRow[] = [];
 
     // Parallel per-day/per-outlet queries (limit concurrency implicitly by Promise.all outer loops size)
@@ -59,6 +59,8 @@ export async function GET(req: NextRequest) {
         try {
           // Attendant KPIs for the outlet/day (weight + commission specifics)
           const kpis = await (prisma as any).attendantKPI.findMany({ where: { date: day, outletName: out } });
+          // Supervisor-level commission status record (may be absent)
+          const sup = await (prisma as any).supervisorCommission.findUnique({ where: { date_outletName: { date: day, outletName: out } } }).catch(()=>null);
           const salesKsh = kpis.reduce((a: number, k: any) => a + Number(k.sales || 0), 0);
           const expensesKsh = kpis.reduce((a: number, k: any) => a + Number(k.expenses || 0), 0);
           const wasteKsh = kpis.reduce((a: number, k: any) => a + Number(k.wasteCost || 0), 0);
@@ -67,9 +69,11 @@ export async function GET(req: NextRequest) {
           // Average rate among attendants with commission activity, else among all
           const rateSource = kpis.filter((k: any) => Number(k.commissionKg || 0) > 0);
           const commissionRate = rateSource.length ? rateSource.reduce((a: number, k: any) => a + Number(k.commissionRate || 0), 0) / rateSource.length : (kpis.length ? kpis.reduce((a: number, k: any) => a + Number(k.commissionRate || 0), 0) / kpis.length : 0);
-          const status = commissionKsh > 0 ? 'COMMISSION' : 'NONE';
-          const note = '';
-          return { id: `${day}_${out}`, date: day, outletName: out, salesKsh, expensesKsh, wasteKsh, profitKsh, commissionRate, commissionKsh, status, note } as CommissionRow;
+          const status = sup?.status || (commissionKsh > 0 ? 'CALCULATED' : 'NONE');
+          const note = sup?.note || '';
+          const approvedAt = sup?.approvedAt ? new Date(sup.approvedAt).toISOString() : null;
+          const paidAt = sup?.paidAt ? new Date(sup.paidAt).toISOString() : null;
+          return { id: `${day}_${out}`, date: day, outletName: out, salesKsh, expensesKsh, wasteKsh, profitKsh, commissionRate, commissionKsh, status, note, approvedAt, paidAt } as CommissionRow;
         } catch {
           return { id: `${day}_${out}`, date: day, outletName: out, salesKsh: 0, expensesKsh: 0, wasteKsh: 0, profitKsh: 0, commissionRate: 0, commissionKsh: 0, status: 'NONE', note: 'error' } as CommissionRow;
         }

@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Prisma generate (if schema changed)
+        run: npx prisma generate || echo 'prisma generate skipped'
+      - name: Typecheck
+        run: npm run -s typecheck
+      - name: Build
+        run: npm run -s build
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+      - name: Run Vitest (unit)
+        run: npx vitest run --coverage
+      - name: Run Playwright (supervisor subset)
+        env:
+          BASE_URL: http://localhost:3000
+        run: |
+          npx playwright test --reporter=line,html --workers=2 || exit 1
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: playwright-report
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: playwright-report

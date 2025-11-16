@@ -1,5 +1,6 @@
 // playwright/supervisor.commissions.export.spec.ts
 import { test, expect } from '@playwright/test';
+import * as fs from 'fs';
 
 // Assumes BASE_URL env set by task; fallback to localhost:3002
 const BASE = process.env.BASE_URL || 'http://localhost:3002';
@@ -12,7 +13,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('commissions Export CSV triggers a download', async ({ page }) => {
+test('commissions Export CSV triggers a download and contains numeric formatting', async ({ page }) => {
   await page.goto(`${BASE}/supervisor/dashboard`);
   // Navigate to commissions tab if not default
   const commissionsTab = page.getByRole('tab', { name: /commissions/i });
@@ -28,6 +29,13 @@ test('commissions Export CSV triggers a download', async ({ page }) => {
   ]);
   const suggested = await download.suggestedFilename();
   expect(suggested).toMatch(/commissions_.*_.*\.csv/);
+  const filePath = await download.path();
+  if (filePath) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    expect(content.split('\n')[0]).toMatch(/salesKsh,expensesKsh,wasteKsh/);
+    // Ensure fixed decimals present in at least one numeric cell line (e.g., ".00")
+    expect(content).toMatch(/\.00,/);
+  }
   const failure = await download.failure();
   expect(failure).toBeNull();
   // Optionally inspect content header
