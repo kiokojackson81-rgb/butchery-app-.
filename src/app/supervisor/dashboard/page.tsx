@@ -68,7 +68,7 @@ export default function SupervisorDashboard() {
 
   /* ========= Tabs (added "supply") ========= */
   const [tab, setTab] = useState<
-    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "supply" | "prices" | "commissions"
+    "waste" | "expenses" | "excess" | "deficit" | "deposits" | "payments" | "supply" | "prices" | "commissions"
   >("waste");
 
   /* ========= Review lists (existing) ========= */
@@ -88,6 +88,14 @@ export default function SupervisorDashboard() {
   // Aggregated (All Outlets) deposits + recon
   const [aggDepRows, setAggDepRows] = useState<DepRow[]>([]);
   const [aggRecon, setAggRecon] = useState<null | { expectedSales: number; expenses: number; depositedValid: number; depositedPending: number; depositedInvalid: number; depositedNonInvalid: number; projectedTill: number; variance: number }>(null);
+  // Till payments view (supervisor)
+  type PayRow = { time: string; amount: number; code?: string | null; ref?: string | null; customer?: string | null; outletName?: string };
+  const [payRows, setPayRows] = useState<PayRow[]>([]);
+  const [payAggRows, setPayAggRows] = useState<PayRow[]>([]);
+  const [payStatus, setPayStatus] = useState<'ALL'|'SUCCESS'>('ALL');
+  const [paySort, setPaySort] = useState<'createdAt:desc'|'createdAt:asc'|'amount:desc'|'amount:asc'>('createdAt:desc');
+  const [payLoading, setPayLoading] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
   // Prices view
   const [pricesByOutlet, setPricesByOutlet] = useState<Record<string, Array<{ key: string; name: string; price: number; active: boolean }>>>({});
   const [pricesLoading, setPricesLoading] = useState(false);
@@ -361,6 +369,43 @@ export default function SupervisorDashboard() {
     const id = setInterval(() => setDepTick((t) => t + 1), 12000);
     return () => clearInterval(id);
   }, [tab, date, selectedOutlet]);
+
+  // Load Till Payments when Payments tab is active
+  useEffect(() => {
+    (async () => {
+      try {
+        setPayError(null); setPayLoading(true);
+        if (tab !== 'payments') return;
+        const sort = paySort;
+        const status = payStatus;
+        if (!date) { setPayRows([]); setPayAggRows([]); return; }
+        if (selectedOutlet !== '__ALL__') {
+          const sp = new URLSearchParams({ outlet: selectedOutlet, period: 'previous', date, sort, status, take: '200' });
+          const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
+          const j = await r.json().catch(()=>({ ok:false }));
+          if (!j?.ok) throw new Error(j?.error || 'Failed');
+          const rows: PayRow[] = (j.rows || []).map((x:any) => ({ ...x, outletName: selectedOutlet }));
+          setPayRows(rows); setPayAggRows([]);
+        } else {
+          // all outlets
+          const names = outlets.map(o=>o.name).filter(Boolean);
+          const results = await Promise.all(names.map(async (name) => {
+            try {
+              const sp = new URLSearchParams({ outlet: name, period: 'previous', date, sort, status, take: '200' });
+              const r = await fetch(`/api/payments/till?${sp.toString()}`, { cache: 'no-store' });
+              const j = await r.json().catch(()=>({ ok:false }));
+              if (j?.ok) return (j.rows || []).map((x:any)=>({ ...x, outletName: name })) as PayRow[];
+            } catch {}
+            return [] as PayRow[];
+          }));
+          const merged = ([] as PayRow[]).concat(...results);
+          setPayAggRows(merged); setPayRows([]);
+        }
+      } catch (e:any) {
+        setPayError(String(e?.message || e)); setPayRows([]); setPayAggRows([]);
+      } finally { setPayLoading(false); }
+    })();
+  }, [tab, date, selectedOutlet, paySort, payStatus, JSON.stringify(outlets.map(o=>o.name))]);
 
   // Compute outlet names from selection before using in effects
   const outletNames = useMemo(
@@ -731,6 +776,9 @@ export default function SupervisorDashboard() {
         <TabBtn active={tab === "deposits"} onClick={() => setTab("deposits")}>
           Deposits Monitor
         </TabBtn>
+          <TabBtn active={tab === "payments"} onClick={() => setTab("payments")}>
+            Payments
+          </TabBtn>
         <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>
           Supply View
         </TabBtn>
@@ -959,6 +1007,66 @@ export default function SupervisorDashboard() {
                 <button className="px-3 py-2 rounded-lg bg-white/10 text-white ring-1 ring-white/20 text-sm" onClick={()=>setTab("supply")}>Supply</button>
               </div>
             </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "payments" && (
+        <section className="rounded-2xl border p-4">
+          <h2 className="font-semibold mb-3">Till Payments</h2>
+          <div className="flex items-center justify-between mb-2 mobile-scroll-x gap-2">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600">Status</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={payStatus} onChange={(e)=>setPayStatus(e.target.value as any)}>
+                <option value="ALL">ALL</option>
+                <option value="SUCCESS">SUCCESS</option>
+              </select>
+              <label className="text-xs text-gray-600">Sort</label>
+              <select className="input-mobile border rounded-xl p-2 text-sm" value={paySort} onChange={(e)=>setPaySort(e.target.value as any)}>
+                <option value="createdAt:desc">Newest first</option>
+                <option value="createdAt:asc">Oldest first</option>
+                <option value="amount:desc">Amount high → low</option>
+                <option value="amount:asc">Amount low → high</option>
+              </select>
+            </div>
+            <button className="btn-mobile px-3 py-2 rounded-xl border text-xs" onClick={()=>{
+              const hdr = ['time','outlet','amount','receipt','ref'];
+              const rows = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+              const dat = rows.map(r => [r.time ? new Date(r.time).toISOString() : '', r.outletName || selectedOutlet, r.amount, r.code||'', r.ref||'']);
+              const csv = [hdr.join(','), ...dat.map(a=>a.map(v=>String(v).replaceAll('"','""')).map(v=>/[,\n]/.test(v)?`"${v}"`:v).join(','))].join('\n');
+              const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv); a.download = `payments-${selectedOutlet==='__ALL__'?'ALL':selectedOutlet}-${date}.csv`; a.click();
+            }}>Export CSV</button>
+          </div>
+
+          {payError && <div className="text-red-700 text-sm mb-2">{payError}</div>}
+          <div className="table-wrap">
+            <table className="w-full text-sm border">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="p-2">Time</th>
+                  <th className="p-2">Outlet</th>
+                  <th className="p-2">Amount</th>
+                  <th className="p-2">Receipt</th>
+                  <th className="p-2">Ref</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const rows = (selectedOutlet==='__ALL__' ? payAggRows : payRows);
+                  if (payLoading) return (<tr><td colSpan={5} className="p-2 text-gray-500">Loading…</td></tr>);
+                  if (rows.length === 0) return (<tr><td colSpan={5} className="p-2 text-gray-500">No payments.</td></tr>);
+                  return rows.map((r, i) => (
+                    <tr key={`${r.time}-${i}`} className="border-b">
+                      <td className="p-2 whitespace-nowrap">{r.time ? new Date(r.time).toLocaleTimeString() : ''}</td>
+                      <td className="p-2">{r.outletName || (selectedOutlet==='__ALL__' ? '' : selectedOutlet)}</td>
+                      <td className="p-2">Ksh {fmt(Number(r.amount)||0)}</td>
+                      <td className="p-2">{r.code || '—'}</td>
+                      <td className="p-2">{r.ref || '—'}</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
           </div>
         </section>
       )}
