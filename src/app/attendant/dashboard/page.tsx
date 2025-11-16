@@ -211,7 +211,14 @@ export default function AttendantDashboardPage() {
   const [tillRows, setTillRows] = useState<TillPaymentRow[]>([]);
   const [tillTotal, setTillTotal] = useState(0);
   const [tillSort, setTillSort] = useState<'createdAt:asc' | 'createdAt:desc' | 'amount:asc' | 'amount:desc'>('createdAt:desc');
-  const [tillPeriod, setTillPeriod] = useState<'current' | 'previous' | 'all'>('current');
+  const [tillPeriod, setTillPeriod] = useState<'current' | 'previous' | 'all' | 'range'>('current');
+  const [tillStatus, setTillStatus] = useState<'ALL' | 'SUCCESS'>('ALL');
+  const [tillTake, setTillTake] = useState<number>(50); // used for 'all' and 'range'
+  const [tillFrom, setTillFrom] = useState<string>(() => {
+    // default last 7 days: from = dateStr - 6 days
+    try { const d = new Date(`${today()}T00:00:00+03:00`); d.setUTCDate(d.getUTCDate() - 6); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d).replace(/\//g,'-'); } catch { return today(); }
+  });
+  const [tillTo, setTillTo] = useState<string>(() => today());
   const [attendantName, setAttendantName] = useState<string | null>(null);
   const [attendantCode, setAttendantCode] = useState<string | null>(null);
   const [isAssistantRole, setIsAssistantRole] = useState<boolean>(() => readAssistantFlag());
@@ -624,7 +631,7 @@ export default function AttendantDashboardPage() {
     // Faster refresh so payments appear promptly after C2B/STK confirmations
     const id = setInterval(tick, 3000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [tab, outlet, tillPeriod, tillSort]);
+  }, [tab, outlet, tillPeriod, tillSort, tillStatus, tillTake, tillFrom, tillTo]);
 
   // Auto-refresh Summary KPIs when Summary tab is active
   useEffect(() => {
@@ -1300,11 +1307,18 @@ export default function AttendantDashboardPage() {
 
   async function refreshTill(outletName: string) {
     try {
-      const periodQs = tillPeriod === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` : (tillPeriod === 'all' ? `&period=all` : '');
+      const periodQs = (
+        tillPeriod === 'previous' ? `&period=previous&date=${encodeURIComponent(dateStr)}` :
+        tillPeriod === 'all' ? `&period=all` :
+        tillPeriod === 'range' ? `&period=range&from=${encodeURIComponent(tillFrom)}&to=${encodeURIComponent(tillTo)}` :
+        ''
+      );
       // Always scope Till Payments to the logged-in outlet
   const base = `/api/payments/till?outlet=${encodeURIComponent(outletName)}`;
   const sortQs = `&sort=${encodeURIComponent(tillSort)}`;
-  const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}${sortQs}`);
+      const statusQs = `&status=${encodeURIComponent(tillStatus)}`;
+      const takeQs = (tillPeriod === 'all' || tillPeriod === 'range') ? `&take=${encodeURIComponent(String(tillTake))}` : '';
+      const res = await getJSON<{ ok: boolean; total: number; rows: TillPaymentRow[] }>(`${base}${periodQs}${sortQs}${statusQs}${takeQs}`);
       setTillRows(res.rows || []);
       setTillTotal(res.total || 0);
     } catch {
@@ -1864,7 +1878,7 @@ export default function AttendantDashboardPage() {
         <section className="rounded-2xl border p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
-              <h3 className="font-semibold">Till Payments ({tillPeriod === 'previous' ? 'Previous' : tillPeriod === 'all' ? 'All days' : 'Active'} Period)</h3>
+              <h3 className="font-semibold">Till Payments ({tillPeriod === 'previous' ? 'Previous' : tillPeriod === 'all' ? 'All days' : tillPeriod === 'range' ? 'Custom range' : 'Active'} Period)</h3>
               {tillNumber && (
                 <span className="inline-flex items-center rounded-xl border px-2 py-0.5 text-xs bg-white/5">
                   Till: <span className="ml-1 font-semibold">{tillNumber}</span>
@@ -1873,16 +1887,20 @@ export default function AttendantDashboardPage() {
               <div className="inline-flex items-center gap-1 text-xs">
                 <button
                   className={`px-2 py-1 rounded-lg border ${tillPeriod==='current' ? 'bg-black text-white' : ''}`}
-                  onClick={async()=>{ if(!outlet) return; setTillPeriod('current'); await refreshTill(outlet); }}
+                  onClick={async()=>{ if(!outlet) return; setTillPeriod('current'); setTillTake(50); await refreshTill(outlet); }}
                 >Current</button>
                 <button
                   className={`px-2 py-1 rounded-lg border ${tillPeriod==='previous' ? 'bg-black text-white' : ''}`}
-                  onClick={async()=>{ if(!outlet) return; setTillPeriod('previous'); await refreshTill(outlet); }}
+                  onClick={async()=>{ if(!outlet) return; setTillPeriod('previous'); setTillTake(50); await refreshTill(outlet); }}
                 >Previous</button>
                 <button
                   className={`px-2 py-1 rounded-lg border ${tillPeriod==='all' ? 'bg-black text-white' : ''}`}
-                  onClick={async()=>{ if(!outlet) return; setTillPeriod('all'); await refreshTill(outlet); }}
+                  onClick={async()=>{ if(!outlet) return; setTillPeriod('all'); setTillTake(50); await refreshTill(outlet); }}
                 >All</button>
+                <button
+                  className={`px-2 py-1 rounded-lg border ${tillPeriod==='range' ? 'bg-black text-white' : ''}`}
+                  onClick={async()=>{ if(!outlet) return; setTillPeriod('range'); setTillTake(50); await refreshTill(outlet); }}
+                >Range</button>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -1906,8 +1924,15 @@ export default function AttendantDashboardPage() {
               <button className="btn-mobile text-xs border rounded-xl px-3 py-1" onClick={()=>outlet && refreshTill(outlet)}>↻ Refresh</button>
             </div>
           </div>
-          <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-            Total Till Payments ({tillPeriod === 'previous' ? dateStr : tillPeriod === 'all' ? 'all days' : 'current period'}): <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
+          <div className="flex items-center justify-between text-sm text-gray-600 mb-2 flex-wrap gap-2">
+            <div>
+              Total Till Payments ({
+                tillPeriod === 'previous' ? dateStr :
+                tillPeriod === 'all' ? 'all days' :
+                tillPeriod === 'range' ? `${tillFrom} → ${tillTo}` :
+                'current period'
+              }): <span className="font-semibold">Ksh {fmt(tillTotal)}</span>
+            </div>
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-500">Sort</label>
               <select
@@ -1920,8 +1945,33 @@ export default function AttendantDashboardPage() {
                 <option value="amount:desc">Amount high → low</option>
                 <option value="amount:asc">Amount low → high</option>
               </select>
+              <label className="ml-2 inline-flex items-center gap-1 text-xs">
+                <input type="checkbox" className="accent-black" checked={tillStatus==='SUCCESS'} onChange={async (e)=>{ setTillStatus(e.target.checked ? 'SUCCESS' : 'ALL'); if (outlet) await refreshTill(outlet); }} />
+                Only SUCCESS
+              </label>
             </div>
           </div>
+          {tillPeriod === 'range' && (
+            <div className="flex items-center gap-2 mb-2 text-xs flex-wrap">
+              <label>From <input type="date" className="border rounded px-2 py-1" value={tillFrom} onChange={(e)=>setTillFrom(e.target.value)} /></label>
+              <label>To <input type="date" className="border rounded px-2 py-1" value={tillTo} onChange={(e)=>setTillTo(e.target.value)} /></label>
+              <button className="btn-mobile border rounded px-3 py-1" onClick={async()=>{ if (!outlet) return; setTillTake(50); await refreshTill(outlet); }}>Apply</button>
+              <button className="text-xs underline" onClick={async()=>{
+                // quick Last 7 days
+                try {
+                  const now = new Date(`${today()}T00:00:00+03:00`);
+                  const from = new Date(now);
+                  from.setUTCDate(from.getUTCDate() - 6);
+                  const fmt = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d).replace(/\//g,'-');
+                  const f = fmt(from);
+                  const t = fmt(now);
+                  setTillFrom(f); setTillTo(t);
+                  setTillPeriod('range'); setTillTake(50);
+                  if (outlet) await refreshTill(outlet);
+                } catch {}
+              }}>Last 7 days</button>
+            </div>
+          )}
           <div className="table-wrap">
             <table className="w-full text-xs">
               <thead>
@@ -1947,6 +1997,13 @@ export default function AttendantDashboardPage() {
               </tbody>
             </table>
           </div>
+          {(tillPeriod === 'all' || tillPeriod === 'range') && tillTake < 200 && (
+            <div className="mt-3 text-center">
+              <button className="btn-mobile text-xs border rounded-xl px-3 py-1"
+                onClick={async()=>{ if (!outlet) return; const next = Math.min(tillTake + 50, 200); setTillTake(next); await refreshTill(outlet); }}
+              >Load more</button>
+            </div>
+          )}
         </section>
       )}
 

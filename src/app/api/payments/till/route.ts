@@ -17,9 +17,10 @@ export async function GET(req: Request) {
     if (!sess && !allowAnon) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const outletParam = url.searchParams.get("outlet");
-    const byParam = (url.searchParams.get("by") || "outlet").toLowerCase(); // 'outlet' | 'till'
-    const codeParam = (url.searchParams.get("code") || "").trim();           // till number when by=till
-    const inclusive = (url.searchParams.get("inclusive") || "false").toLowerCase() === "true";
+  const byParam = (url.searchParams.get("by") || "outlet").toLowerCase(); // 'outlet' | 'till'
+  const codeParam = (url.searchParams.get("code") || "").trim();           // till number when by=till
+  const inclusive = (url.searchParams.get("inclusive") || "false").toLowerCase() === "true";
+  const statusFilter = (url.searchParams.get("status") || "all").toUpperCase() === "SUCCESS" ? "SUCCESS" : "ALL";
     // Prefer explicit session.outletCode unless a valid-looking outlet query param is provided.
   const rawOutlet = outletParam || (sess as any)?.outletCode || (sess as any)?.attendant?.outletRef?.code || (sess as any)?.attendant?.outletRef?.name;
   // For outlet mode, require an outlet binding; for till mode, allow missing outlet
@@ -51,19 +52,22 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: `unknown_outlet_code: ${String(rawOutlet)}` }, { status: 400 });
     }
 
-  const take = Math.min(Number(url.searchParams.get("take") || 50), 100);
+  const take = Math.min(Math.max(Number(url.searchParams.get("take") || 50), 1), 200);
   const sortRaw = url.searchParams.get("sort") || "createdAt:desc"; // pattern field:dir
   const [sortFieldRaw, sortDirRaw] = sortRaw.split(":");
   const allowedSortFields = new Set(["createdAt", "amount"]);
   const sortField = allowedSortFields.has(sortFieldRaw) ? sortFieldRaw : "createdAt";
   const sortDir = sortDirRaw === "asc" ? "asc" : "desc";
-  const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous|all
+  const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous|all|range
     const dateParam = url.searchParams.get("date") || undefined; // YYYY-MM-DD (optional when period=previous)
+    const fromParam = url.searchParams.get("from") || undefined; // YYYY-MM-DD (when period=range)
+    const toParam = url.searchParams.get("to") || undefined;     // YYYY-MM-DD (when period=range)
 
   // Determine time window by trading period
   // - current: from ActivePeriod.periodStartAt → now
   // - previous: if date is provided, use that calendar day window in APP_TZ; else use (today - 1)
   // - all: no createdAt window (limited by `take` only)
+  // - range: inclusive daily window from `from` → `to` in APP_TZ
     let fromTime: Date | null = null;
     let toTime: Date | null = null;
     if (periodParam === "current") {
@@ -89,6 +93,15 @@ export async function GET(req: Request) {
       // No time window; rely on `take` and outlet/till filters.
       fromTime = null;
       toTime = null;
+    } else if (periodParam === "range") {
+      const tz = APP_TZ;
+      const dayFrom = fromParam || dateISOInTZ(new Date(), tz);
+      const dayTo = toParam || dayFrom;
+      const fixedOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00";
+      const a = new Date(`${dayFrom}T00:00:00${fixedOffset}`);
+      const b = new Date(`${dayTo}T23:59:59.999${fixedOffset}`);
+      fromTime = a <= b ? a : b;
+      toTime = a <= b ? b : a;
     }
 
     // Base window filter
@@ -102,8 +115,10 @@ export async function GET(req: Request) {
         // nothing to show
         return NextResponse.json({ ok: true, mode: "till", rows: [], total: 0 });
       }
-      // Show only successful payments for till view to avoid noise
-      whereWindow.status = "SUCCESS" as any;
+      // Default to SUCCESS-only for till view unless explicitly overridden
+      if (statusFilter === "SUCCESS") {
+        whereWindow.status = "SUCCESS" as any;
+      }
       if (!inclusive) {
         // strict: paid directly to the specified shortcode
         whereWindow.businessShortCode = codeParam;
@@ -119,6 +134,9 @@ export async function GET(req: Request) {
     } else {
       // existing outlet behavior
       whereWindow.outletCode = outletEnum;
+      if (statusFilter === "SUCCESS") {
+        whereWindow.status = "SUCCESS" as any;
+      }
     }
 
     // Fetch recent payments for this outlet within the window
