@@ -202,6 +202,10 @@ export default function AdminPage() {
   const [editBy, setEditBy] = useState<'outlet'|'person'>('outlet');
   const [editRole, setEditRole] = useState<'attendant'|'assistant'|'supervisor'|'supplier'>('attendant');
   const [editCode, setEditCode] = useState<string>("");
+  // Edit Entries local filters (date/outlet) + inline status message
+  const [date, setDate] = useState<string>(new Date().toISOString().slice(0,10));
+  const [outlet, setOutlet] = useState<string>("");
+  const [msg, setMsg] = useState<string>("");
 
   const normalizeOutletList = useCallback((list: any[]): Outlet[] => {
     const rows = Array.isArray(list) ? list : [];
