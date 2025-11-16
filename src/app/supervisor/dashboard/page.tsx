@@ -742,6 +742,19 @@ export default function SupervisorDashboard() {
           )}
         </div>
       </header>
+
+      {/* Primary navigation moved directly below header */}
+      <nav className="flex gap-2 mb-6 mobile-scroll-x border-b pb-2">
+        <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>Waste Review</TabBtn>
+        <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>Expenses Review</TabBtn>
+        <TabBtn active={tab === "excess"} onClick={() => setTab("excess")}>Excess Approvals</TabBtn>
+        <TabBtn active={tab === "deficit"} onClick={() => setTab("deficit")}>Deficit Disputes</TabBtn>
+        <TabBtn active={tab === "deposits"} onClick={() => setTab("deposits")}>Deposits Monitor</TabBtn>
+        <TabBtn active={tab === "payments"} onClick={() => setTab("payments")}>Payments</TabBtn>
+        <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>Supply View</TabBtn>
+        <TabBtn active={tab === "prices"} onClick={() => setTab("prices")}>Prices</TabBtn>
+        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")}>Commissions</TabBtn>
+      </nav>
       {dayErr && <div className="text-red-600 text-sm mb-3">{dayErr}</div>}
 
       {/* KPI Summary */}
@@ -816,36 +829,6 @@ export default function SupervisorDashboard() {
         )}
       </section>
 
-      {/* Menu (added Supply View) */}
-      <nav className="flex gap-2 mb-4 mobile-scroll-x">
-        <TabBtn active={tab === "waste"} onClick={() => setTab("waste")}>
-          Waste Review
-        </TabBtn>
-        <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>
-          Expenses Review
-        </TabBtn>
-        <TabBtn active={tab === "excess"} onClick={() => setTab("excess")}>
-          Excess Approvals
-        </TabBtn>
-        <TabBtn active={tab === "deficit"} onClick={() => setTab("deficit")}>
-          Deficit Disputes
-        </TabBtn>
-        <TabBtn active={tab === "deposits"} onClick={() => setTab("deposits")}>
-          Deposits Monitor
-        </TabBtn>
-          <TabBtn active={tab === "payments"} onClick={() => setTab("payments")}>
-            Payments
-          </TabBtn>
-        <TabBtn active={tab === "supply"} onClick={() => setTab("supply")}>
-          Supply View
-        </TabBtn>
-        <TabBtn active={tab === "prices"} onClick={() => setTab("prices")}>
-          Prices
-        </TabBtn>
-        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")}>
-          Commissions
-        </TabBtn>
-      </nav>
 
     {/* Inserted menu below review tabs */}
     <div className="rounded-2xl border p-4 mb-6">
