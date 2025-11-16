@@ -57,12 +57,13 @@ export async function GET(req: Request) {
   const allowedSortFields = new Set(["createdAt", "amount"]);
   const sortField = allowedSortFields.has(sortFieldRaw) ? sortFieldRaw : "createdAt";
   const sortDir = sortDirRaw === "asc" ? "asc" : "desc";
-    const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous
+  const periodParam = (url.searchParams.get("period") || "current").toLowerCase(); // current|previous|all
     const dateParam = url.searchParams.get("date") || undefined; // YYYY-MM-DD (optional when period=previous)
 
-    // Determine time window by trading period
-    // - current: from ActivePeriod.periodStartAt → now
-    // - previous: if date is provided, use that calendar day window in APP_TZ; else use (today - 1)
+  // Determine time window by trading period
+  // - current: from ActivePeriod.periodStartAt → now
+  // - previous: if date is provided, use that calendar day window in APP_TZ; else use (today - 1)
+  // - all: no createdAt window (limited by `take` only)
     let fromTime: Date | null = null;
     let toTime: Date | null = null;
     if (periodParam === "current") {
@@ -84,6 +85,10 @@ export async function GET(req: Request) {
       const fixedOffset = tz === "Africa/Nairobi" ? "+03:00" : "+00:00";
       fromTime = new Date(`${day}T00:00:00${fixedOffset}`);
       toTime = new Date(`${day}T23:59:59.999${fixedOffset}`);
+    } else if (periodParam === "all") {
+      // No time window; rely on `take` and outlet/till filters.
+      fromTime = null;
+      toTime = null;
     }
 
     // Base window filter
