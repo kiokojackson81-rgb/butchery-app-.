@@ -177,7 +177,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
       <table className="w-full mb-6">
         <thead>
           <tr>
-            <th>Date</th><th>Outlet</th><th>Shortcode Used</th><th>Amount</th><th>Phone</th><th>Receipt</th><th>Status</th><th>Actions</th>
+            <th>Date</th><th>Outlet</th><th>Shortcode Used</th><th>Amount</th><th>Receipt</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -196,7 +196,6 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
                 <td>{p.outletCode}</td>
                 <td>{shortcode}</td>
                 <td>{p.amount}</td>
-                <td>{p.msisdn}</td>
                 <td>{p.mpesaReceipt}</td>
                 <td>{p.status}</td>
                 <td>
@@ -215,10 +214,10 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
         {Object.keys(outletTotalsState).map(o=> <option key={o} value={o} />)}
       </datalist>
       <table className="w-full">
-        <thead><tr><th>Date</th><th>Amount</th><th>Phone</th><th>Attach</th></tr></thead>
+        <thead><tr><th>Date</th><th>Amount</th><th>Attach</th></tr></thead>
         <tbody>
           {orphansState.map((o:any) => (
-            <tr key={o.id}><td>{new Date(o.createdAt).toLocaleString()}</td><td>{o.amount}</td><td>{o.msisdn}</td><td><button className="btn" onClick={()=>{ setSelectedOrphan(o); setShowAttach(true); }}>Attach</button></td></tr>
+            <tr key={o.id}><td>{new Date(o.createdAt).toLocaleString()}</td><td>{o.amount}</td><td><button className="btn" onClick={()=>{ setSelectedOrphan(o); setShowAttach(true); }}>Attach</button></td></tr>
           ))}
         </tbody>
       </table>
