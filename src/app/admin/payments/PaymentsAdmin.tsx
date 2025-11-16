@@ -21,6 +21,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
   // Track rows that were reassigned (outlet or period) for audit badges; persist in session to survive refresh
   const [reassignedIds, setReassignedIds] = useState<Set<string>>(new Set());
   const { showToast } = useToast();
+  const FILTERS_KEY = 'admin_payments_filters';
 
   // Sync filters from URL on mount/param change
   useEffect(() => {
@@ -38,6 +39,31 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
   useEffect(() => {
     setOutletTotalsState({ ...outletTotals });
   }, [outletTotals]);
+
+  // On first mount, hydrate filters from session if URL has no overrides
+  useEffect(() => {
+    try {
+      const hasUrl = !!(searchParams.get('outlet') || searchParams.get('status') || searchParams.get('period') || searchParams.get('sort'));
+      if (hasUrl) return;
+      const raw = sessionStorage.getItem(FILTERS_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw || '{}');
+      if (!saved || typeof saved !== 'object') return;
+      if (saved.period) setPeriod(String(saved.period));
+      if (saved.sort) setSort(String(saved.sort));
+      if (saved.outlet !== undefined) setFilterOutlet(String(saved.outlet));
+      if (saved.status !== undefined) setFilterStatus(String(saved.status));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist current selections to session so they survive reloads
+  useEffect(() => {
+    try {
+      const payload = { period, sort, outlet: filterOutlet, status: filterStatus };
+      sessionStorage.setItem(FILTERS_KEY, JSON.stringify(payload));
+    } catch {}
+  }, [period, sort, filterOutlet, filterStatus]);
 
   // Load reassigned IDs from session on mount
   useEffect(() => {
@@ -85,6 +111,18 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
     pushParams({ period: 'today', sort: 'createdAt:desc', outlet: '', status: '' });
     try { router.refresh(); } catch {}
   }
+
+  // Compute pending cue when local selections differ from applied URL
+  const urlPeriod = searchParams.get('period') || 'today';
+  const urlSort = searchParams.get('sort') || 'createdAt:desc';
+  const urlOutlet = searchParams.get('outlet') || '';
+  const urlStatus = searchParams.get('status') || '';
+  const filtersPending = (
+    String(period) !== String(urlPeriod) ||
+    String(sort) !== String(urlSort) ||
+    String(filterOutlet || '') !== String(urlOutlet || '') ||
+    String(filterStatus || '') !== String(urlStatus || '')
+  );
 
   const filtered = paymentsState.filter(p => (filterOutlet ? p.outletCode === filterOutlet : true) && (filterStatus ? p.status === filterStatus : true));
 
@@ -157,6 +195,9 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
         </select>
 
         <button className="px-3 py-2 border rounded bg-black text-white" onClick={applyFilters}>Apply</button>
+        {filtersPending && (
+          <span className="ml-2 text-xs px-2 py-1 rounded bg-amber-100 text-amber-800" aria-live="polite">Filters pending</span>
+        )}
         <button className="px-3 py-2 border rounded" onClick={resetFilters}>Reset</button>
       </div>
 
