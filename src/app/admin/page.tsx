@@ -191,6 +191,11 @@ export default function AdminPage() {
   const [savingOutlets, setSavingOutlets] = useState(false);
   const [toast, setToast] = useToast(null);
 
+  // Build marker to help verify deployed bundle freshness in console
+  useEffect(() => {
+    try { console.info('[admin:data] bundle ready – guard states patch active'); } catch {}
+  }, []);
+
   // WhatsApp phones mapping state (code -> phone E.164)
   const [phones, setPhones] = useState<Record<string, string>>({});
   // Admin WhatsApp phone
