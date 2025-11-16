@@ -2765,92 +2765,7 @@ function QuickAdminTools() {
       )}
 
       {/* Edit Entries */}
-      <div className="rounded-2xl border p-3 mt-3">
-        <h4 className="font-semibold mb-3">Edit Entries (Admin)</h4>
-        <div className="grid sm:grid-cols-5 gap-3 mb-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">By</label>
-            <select className="input-mobile border rounded-xl p-2 w-full" value={editBy} onChange={e=>setEditBy(e.target.value as any)}>
-              <option value="outlet">Outlet</option>
-              <option value="person">Person</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Date</label>
-            <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
-          </div>
-          {editBy === 'outlet' ? (
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Outlet</label>
-              <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
-                <option value="">Pick outlet…</option>
-                {outlets.map(o => (
-                  <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Role</label>
-                <select className="input-mobile border rounded-xl p-2 w-full" value={editRole} onChange={e=>setEditRole(e.target.value as any)}>
-                  <option value="attendant">attendant</option>
-                  <option value="assistant">assistant</option>
-                  <option value="supervisor">supervisor</option>
-                  <option value="supplier">supplier</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Person</label>
-                <select className="input-mobile border rounded-xl p-2 w-full" value={editCode} onChange={e=>setEditCode(e.target.value)}>
-                  <option value="">Pick person…</option>
-                  {codes.filter(c=>c.role===editRole).map(p=> (
-                    <option key={p.id} value={p.code}>{p.code}{p.name?` — ${p.name}`:''}</option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
-          <div className="flex items-end">
-            <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full" onClick={async()=>{
-              if (!date) { setMsg('Pick date'); return; }
-              try {
-                const qsTx = new URLSearchParams({ date });
-                if (editBy === 'outlet' && outlet) qsTx.set('outlet', outlet);
-                if (editBy === 'person' && editCode) qsTx.set('code', editCode);
-                const [rt, rc, ro] = await Promise.all([
-                  fetch(`/api/admin/day/txns?${qsTx.toString()}`, { cache: 'no-store' }),
-                  (editBy === 'outlet' && outlet) ? fetch(`/api/admin/day/closings?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }) : Promise.resolve(new Response(JSON.stringify({ ok:true, closings: [] }))),
-                  (editBy === 'outlet' && outlet) ? fetch(`/api/admin/day/opening?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }) : Promise.resolve(new Response(JSON.stringify({ ok:true, openings: [] }))),
-                ]);
-                const jt = await rt.json().catch(()=>({ ok:false }));
-                const jc = await rc.json().catch(()=>({ ok:false }));
-                const jo = await ro.json().catch(()=>({ ok:false }));
-                ;(window as any).__ADMIN_EDIT_CTX__ = { deposits: jt?.deposits||[], expenses: jt?.expenses||[], closings: jc?.closings||[], openings: jo?.openings||[] };
-                setMsg('Loaded entries. Scroll below to edit.');
-              } catch (e:any) { setMsg(e?.message || 'Failed'); }
-            }}>Load</button>
-          </div>
-        </div>
-        <div className="grid sm:grid-cols-4 gap-3">
-          <div className="rounded-xl border p-2">
-            <h5 className="font-medium mb-2">Supply (Opening)</h5>
-            <AdminEditOpeningList />
-          </div>
-          <div className="rounded-xl border p-2">
-            <h5 className="font-medium mb-2">Deposits</h5>
-            <AdminEditList kind="deposit" />
-          </div>
-          <div className="rounded-xl border p-2">
-            <h5 className="font-medium mb-2">Expenses</h5>
-            <AdminEditList kind="expense" />
-          </div>
-          <div className="rounded-xl border p-2">
-            <h5 className="font-medium mb-2">Closings</h5>
-            <AdminEditList kind="closing" />
-          </div>
-        </div>
-      </div>
+      <AdminEditEntriesPanel outlets={outlets} codes={codes} />
     </div>
   );
 }
@@ -2982,6 +2897,106 @@ function AdminEditOpeningList() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function AdminEditEntriesPanel(props: { outlets: Outlet[]; codes: PersonCode[] }) {
+  const { outlets, codes } = props;
+  const [editBy, setEditBy] = React.useState<'outlet'|'person'>('outlet');
+  const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
+  const [outlet, setOutlet] = React.useState<string>("");
+  const [editRole, setEditRole] = React.useState<'attendant'|'assistant'|'supervisor'|'supplier'>('attendant');
+  const [editCode, setEditCode] = React.useState<string>("");
+  const [msg, setMsg] = React.useState<string>("");
+
+  return (
+    <div className="rounded-2xl border p-3 mt-3">
+      <h4 className="font-semibold mb-3">Edit Entries (Admin) <span className="text-[10px] text-gray-400 align-middle">v2</span></h4>
+      <div className="grid sm:grid-cols-5 gap-3 mb-3">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">By</label>
+          <select className="input-mobile border rounded-xl p-2 w-full" value={editBy} onChange={e=>setEditBy(e.target.value as any)}>
+            <option value="outlet">Outlet</option>
+            <option value="person">Person</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Date</label>
+          <input className="input-mobile border rounded-xl p-2 w-full" type="date" value={date} onChange={e=>setDate(e.target.value)} />
+        </div>
+        {editBy === 'outlet' ? (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Outlet</label>
+            <select className="input-mobile border rounded-xl p-2 w-full" value={outlet} onChange={e=>setOutlet(e.target.value)}>
+              <option value="">Pick outlet…</option>
+              {outlets.map(o => (
+                <option key={o.id} value={o.name}>{o.name}{o.active ? '' : ' (inactive)'}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Role</label>
+              <select className="input-mobile border rounded-xl p-2 w-full" value={editRole} onChange={e=>setEditRole(e.target.value as any)}>
+                <option value="attendant">attendant</option>
+                <option value="assistant">assistant</option>
+                <option value="supervisor">supervisor</option>
+                <option value="supplier">supplier</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Person</label>
+              <select className="input-mobile border rounded-xl p-2 w-full" value={editCode} onChange={e=>setEditCode(e.target.value)}>
+                <option value="">Pick person…</option>
+                {codes.filter(c=>c.role===editRole).map(p=> (
+                  <option key={p.id} value={p.code}>{p.code}{p.name?` — ${p.name}`:''}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+        <div className="flex items-end">
+          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm w-full" onClick={async()=>{
+            if (!date) { setMsg('Pick date'); return; }
+            try {
+              const qsTx = new URLSearchParams({ date });
+              if (editBy === 'outlet' && outlet) qsTx.set('outlet', outlet);
+              if (editBy === 'person' && editCode) qsTx.set('code', editCode);
+              const [rt, rc, ro] = await Promise.all([
+                fetch(`/api/admin/day/txns?${qsTx.toString()}`, { cache: 'no-store' }),
+                (editBy === 'outlet' && outlet) ? fetch(`/api/admin/day/closings?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }) : Promise.resolve(new Response(JSON.stringify({ ok:true, closings: [] }))),
+                (editBy === 'outlet' && outlet) ? fetch(`/api/admin/day/opening?date=${encodeURIComponent(date)}&outlet=${encodeURIComponent(outlet)}`, { cache: 'no-store' }) : Promise.resolve(new Response(JSON.stringify({ ok:true, openings: [] }))),
+              ]);
+              const jt = await rt.json().catch(()=>({ ok:false }));
+              const jc = await rc.json().catch(()=>({ ok:false }));
+              const jo = await ro.json().catch(()=>({ ok:false }));
+              ;(window as any).__ADMIN_EDIT_CTX__ = { deposits: jt?.deposits||[], expenses: jt?.expenses||[], closings: jc?.closings||[], openings: jo?.openings||[] };
+              setMsg('Loaded entries. Scroll below to edit.');
+            } catch (e:any) { setMsg(e?.message || 'Failed'); }
+          }}>Load</button>
+        </div>
+      </div>
+      {msg && <div className="text-xs text-gray-600 mb-2">{msg}</div>}
+      <div className="grid sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border p-2">
+          <h5 className="font-medium mb-2">Supply (Opening)</h5>
+          <AdminEditOpeningList />
+        </div>
+        <div className="rounded-xl border p-2">
+          <h5 className="font-medium mb-2">Deposits</h5>
+          <AdminEditList kind="deposit" />
+        </div>
+        <div className="rounded-xl border p-2">
+          <h5 className="font-medium mb-2">Expenses</h5>
+          <AdminEditList kind="expense" />
+        </div>
+        <div className="rounded-xl border p-2">
+          <h5 className="font-medium mb-2">Closings</h5>
+          <AdminEditList kind="closing" />
+        </div>
+      </div>
     </div>
   );
 }
