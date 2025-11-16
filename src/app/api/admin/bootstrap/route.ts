@@ -7,11 +7,40 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
+    // Outlets / assignments / codes can be loaded in parallel immediately
+    const outletsPromise = (prisma as any).outlet.findMany({ orderBy: { code: "asc" } });
+    const assignmentsPromise = (prisma as any).attendantAssignment.findMany({ orderBy: { code: "asc" } });
+    const codesPromise = (prisma as any).personCode.findMany({ orderBy: { code: "asc" } });
+
+    // Attendants: environment may have drifted (missing salaryAmount column). Attempt structured select then gracefully degrade.
+    const attendantsPromise: Promise<any[]> = (async () => {
+      try {
+        return await (prisma as any).attendant.findMany({
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, loginCode: true, outletId: true, createdAt: true, updatedAt: true, salaryAmount: true, salaryFrequency: true }
+        });
+      } catch (e: any) {
+        const msg = String(e?.message || e || "");
+        if (msg.includes("salaryAmount")) {
+          // Fallback: raw query without salaryAmount; synthesize defaults
+          try {
+            const rows: any[] = await (prisma as any).$queryRawUnsafe(
+              `SELECT id, name, loginCode, "outletId" as outletId, "createdAt" as createdAt, "updatedAt" as updatedAt FROM "Attendant" ORDER BY name ASC`
+            );
+            return rows.map(r => ({ ...r, salaryAmount: 0, salaryFrequency: 'daily' }));
+          } catch {
+            return [];
+          }
+        }
+        return [];
+      }
+    })();
+
     const [outlets, attendants, assignments, personCodes] = await Promise.all([
-      (prisma as any).outlet.findMany({ orderBy: { code: "asc" } }),
-      (prisma as any).attendant.findMany({ orderBy: { name: "asc" } }),
-      (prisma as any).attendantAssignment.findMany({ orderBy: { code: "asc" } }),
-      (prisma as any).personCode.findMany({ orderBy: { code: "asc" } }),
+      outletsPromise,
+      attendantsPromise,
+      assignmentsPromise,
+      codesPromise,
     ]);
 
     // Compose a DB-first attendant scope map to hydrate Admin Assignments UI
