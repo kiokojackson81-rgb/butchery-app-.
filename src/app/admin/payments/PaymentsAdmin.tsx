@@ -18,6 +18,8 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
   const [paymentsState, setPaymentsState] = useState<Payment[]>(payments || []);
   const [orphansState, setOrphansState] = useState<Payment[]>(orphans || []);
   const [outletTotalsState, setOutletTotalsState] = useState<any>({ ...outletTotals });
+  // Track rows that were reassigned (outlet or period) for audit badges; persist in session to survive refresh
+  const [reassignedIds, setReassignedIds] = useState<Set<string>>(new Set());
   const { showToast } = useToast();
 
   // Sync filters from URL on mount/param change
@@ -31,6 +33,29 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
     setPeriod(p);
     setSort(so);
   }, [searchParams]);
+
+  // Keep tiles in sync when server props refresh after actions
+  useEffect(() => {
+    setOutletTotalsState({ ...outletTotals });
+  }, [outletTotals]);
+
+  // Load reassigned IDs from session on mount
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('admin_payments_reassigned') || '[]';
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) setReassignedIds(new Set(arr.map(String)));
+    } catch {}
+  }, []);
+
+  function markReassigned(id: string) {
+    setReassignedIds(prev => {
+      const next = new Set(prev);
+      next.add(String(id));
+      try { sessionStorage.setItem('admin_payments_reassigned', JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  }
 
   function pushParams(next: Partial<Record<string, string>>) {
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
@@ -162,7 +187,12 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
             const [value, setValue] = [undefined, undefined] as any;
             return (
               <tr key={p.id}>
-                <td>{new Date(p.createdAt).toLocaleString()}</td>
+                <td>
+                  {new Date(p.createdAt).toLocaleString()}
+                  {reassignedIds.has(String(p.id)) && (
+                    <span className="ml-2 text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 align-middle">Reassigned</span>
+                  )}
+                </td>
                 <td>{p.outletCode}</td>
                 <td>{shortcode}</td>
                 <td>{p.amount}</td>
@@ -172,7 +202,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
                 <td>
                   <RowActions p={p} onUpdated={(np)=>{
                     setPaymentsState(prev=> prev.map(x=> x.id===np.id ? { ...x, ...np } : x));
-                  }} />
+                  }} onMarkChanged={() => { markReassigned(String(p.id)); }} />
                 </td>
               </tr>
             );
@@ -225,9 +255,10 @@ function useAdminHeaders() {
   })();
 }
 
-function RowActions({ p, onUpdated }: { p: any; onUpdated: (np:any)=>void }) {
+function RowActions({ p, onUpdated, onMarkChanged }: { p: any; onUpdated: (np:any)=>void; onMarkChanged: ()=>void }) {
   const { showToast } = useToast();
   const [moveOutlet, setMoveOutlet] = useState<string>('');
+  const router = useRouter();
 
   useEffect(()=>{ setMoveOutlet(p?.outletCode || ''); }, [p?.outletCode]);
 
@@ -236,7 +267,7 @@ function RowActions({ p, onUpdated }: { p: any; onUpdated: (np:any)=>void }) {
       const headers = await useAdminHeaders();
       const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: p.id, outlet: moveOutlet }) });
       const j = await res.json();
-      if (j.ok) { onUpdated(j.data); showToast({ type: 'success', message: 'Outlet moved' }); }
+      if (j.ok) { onUpdated(j.data); onMarkChanged(); showToast({ type: 'success', message: 'Outlet moved' }); router.refresh(); }
       else showToast({ type: 'error', message: 'Move failed: ' + (j.error || 'unknown') });
     } catch (e:any) { showToast({ type: 'error', message: String(e) }); }
   }
@@ -246,7 +277,7 @@ function RowActions({ p, onUpdated }: { p: any; onUpdated: (np:any)=>void }) {
       const headers = await useAdminHeaders();
       const res = await fetch('/api/admin/payments/assign-period', { method: 'POST', headers, body: JSON.stringify({ id: p.id, to }) });
       const j = await res.json();
-      if (j.ok) { onUpdated(j.payment); showToast({ type: 'success', message: `Assigned to ${to}` }); }
+      if (j.ok) { onUpdated(j.payment); onMarkChanged(); showToast({ type: 'success', message: `Assigned to ${to}` }); router.refresh(); }
       else showToast({ type: 'error', message: 'Assign failed: ' + (j.error || 'unknown') });
     } catch (e:any) { showToast({ type: 'error', message: String(e) }); }
   }
