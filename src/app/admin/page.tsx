@@ -2040,7 +2040,7 @@ export default function AdminPage() {
           {/* Quick Admin Tools */}
           <div className="rounded-xl border p-3 mt-4">
             <h3 className="font-medium mb-2">Quick Admin Tools</h3>
-            <QuickAdminTools />
+            <QuickAdminTools outlets={outlets} codes={codes} />
           </div>
 
           {/* Low Stock Thresholds */}
@@ -2280,7 +2280,7 @@ function ClearOutletData() {
   );
 }
 
-function QuickAdminTools() {
+function QuickAdminTools({ outlets, codes }: { outlets: Outlet[]; codes: PersonCode[] }) {
   const [outlet, setOutlet] = React.useState<string>("");
   const [date, setDate] = React.useState<string>(new Date().toISOString().slice(0,10));
   const [statusKey, setStatusKey] = React.useState<string>("");
