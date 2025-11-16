@@ -67,24 +67,23 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
     router.push(qs ? `?${qs}` : '?');
   }
 
-  function onChangePeriod(val: string) {
-    setPeriod(val);
-    pushParams({ period: val });
+  function onChangePeriod(val: string) { setPeriod(val); }
+  function onChangeSort(val: string) { setSort(val); }
+  function onChangeOutlet(val: string) { setFilterOutlet(val); }
+  function onChangeStatus(val: string) { setFilterStatus(val); }
+
+  function applyFilters() {
+    pushParams({ period, sort, outlet: filterOutlet || '', status: filterStatus || '' });
+    try { router.refresh(); } catch {}
   }
 
-  function onChangeSort(val: string) {
-    setSort(val);
-    pushParams({ sort: val });
-  }
-
-  function onChangeOutlet(val: string) {
-    setFilterOutlet(val);
-    pushParams({ outlet: val || '' });
-  }
-
-  function onChangeStatus(val: string) {
-    setFilterStatus(val);
-    pushParams({ status: val || '' });
+  function resetFilters() {
+    setPeriod('today');
+    setSort('createdAt:desc');
+    setFilterOutlet('');
+    setFilterStatus('');
+    pushParams({ period: 'today', sort: 'createdAt:desc', outlet: '', status: '' });
+    try { router.refresh(); } catch {}
   }
 
   const filtered = paymentsState.filter(p => (filterOutlet ? p.outletCode === filterOutlet : true) && (filterStatus ? p.status === filterStatus : true));
@@ -156,6 +155,9 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
           <option value="SUCCESS">SUCCESS</option>
           <option value="FAILED">FAILED</option>
         </select>
+
+        <button className="px-3 py-2 border rounded bg-black text-white" onClick={applyFilters}>Apply</button>
+        <button className="px-3 py-2 border rounded" onClick={resetFilters}>Reset</button>
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
