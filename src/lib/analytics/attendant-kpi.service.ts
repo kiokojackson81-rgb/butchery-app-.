@@ -9,10 +9,25 @@ export async function getShiftsForDate(outletName: string, date: DayKey) {
 
 export async function computeAttendantKPI(date: DayKey, outletName: string, attendantId: string) {
   // Gather basic info
-  const [attendant, assignments] = await Promise.all([
-    (prisma as any).attendant.findUnique({ where: { id: attendantId } }),
-    (prisma as any).productAssignment.findMany({ where: { attendantId, outletName } }),
-  ]);
+  // Attendant may lack salaryAmount column in drifted prod DB; tolerate gracefully.
+  const attendantPromise: Promise<any> = (async () => {
+    try {
+      return await (prisma as any).attendant.findUnique({ where: { id: attendantId } });
+    } catch (e: any) {
+      const msg = String(e?.message || e || "");
+      if (msg.includes('salaryAmount')) {
+        // Fallback raw select without salary columns; synthesize defaults
+        try {
+          const rows: any[] = await (prisma as any).$queryRawUnsafe(`SELECT id, name, loginCode, "outletId" as outletId, "createdAt" as createdAt, "updatedAt" as updatedAt FROM "Attendant" WHERE id = '${attendantId.replace(/'/g, "''")}' LIMIT 1`);
+          const r = rows[0];
+          if (r) return { ...r, salaryAmount: 0, salaryFrequency: 'daily' };
+        } catch {}
+      }
+      return null;
+    }
+  })();
+  const assignmentsPromise = (prisma as any).productAssignment.findMany({ where: { attendantId, outletName } });
+  const [attendant, assignments] = await Promise.all([attendantPromise, assignmentsPromise]);
 
   // Reuse outlet performance then split by share rules as a first iteration
   const perf = await (prisma as any).outletPerformance.findUnique({ where: { date_outletName: { date, outletName } } });
