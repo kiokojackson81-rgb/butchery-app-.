@@ -185,59 +185,8 @@ export default function SupplierDashboard(): JSX.Element {
   const [priceDraftById, setPriceDraftById] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [submittingDay, setSubmittingDay] = useState<boolean>(false); // loading state for 'Submit & Lock'
-  /* Admin session */
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [dayLocked, setDayLocked] = useState<boolean>(false);
   const [dayLockedMeta, setDayLockedMeta] = useState<{ lockedAt?: string|null; by?: string|null }|null>(null);
-  // Admin detection: BroadcastChannel + storage events + fast (2s) fallback poll.
-  useEffect(() => {
-    let cancelled = false;
-    let bc: BroadcastChannel | null = null;
-    async function syncAdminFlag() {
-      try {
-        const clientFlag = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
-        if (clientFlag !== isAdmin) setIsAdmin(clientFlag);
-        if (!clientFlag) {
-          // Attempt server cookie validation to elevate status if admin session cookie exists.
-          try {
-            const r = await fetch('/api/admin/session', { cache: 'no-store' });
-            if (!cancelled && r.ok) setIsAdmin(true);
-          } catch {}
-        }
-      } catch {}
-    }
-    syncAdminFlag();
-    const handler = (e: StorageEvent) => { if (e.key === 'admin_auth') syncAdminFlag(); };
-    window.addEventListener('storage', handler);
-    // BroadcastChannel listener for immediate elevation/demotion.
-    try {
-      bc = new BroadcastChannel('auth');
-      bc.onmessage = (ev) => {
-        if (ev?.data?.type === 'AUTH_SYNC') syncAdminFlag();
-      };
-    } catch {}
-    const id = setInterval(() => { if (!cancelled) void syncAdminFlag(); }, 2000); // faster fallback poll
-    return () => {
-      cancelled = true;
-      window.removeEventListener('storage', handler);
-      clearInterval(id);
-      try { bc?.close(); } catch {}
-    };
-  }, [isAdmin]);
-
-  // Manual admin status refresh (button trigger)
-  const refreshAdminStatus = useCallback(async () => {
-    try {
-      const flag = (sessionStorage.getItem('admin_auth') === 'true') || (localStorage.getItem('admin_auth') === 'true');
-      setIsAdmin(flag);
-      notifyToast(flag ? 'Admin status active.' : 'Admin not detected.');
-      // Try server confirmation for robustness
-      try {
-        const r = await fetch('/api/admin/session', { cache: 'no-store' });
-        if (r.ok) { setIsAdmin(true); }
-      } catch {}
-    } catch {}
-  }, []);
 
   useEffect(() => {
     const ids = new Set(rows.map((r) => r.id));
@@ -489,7 +438,8 @@ export default function SupplierDashboard(): JSX.Element {
     },
     [dateStr, selectedOutletName, productByKey]
   );
-  const hasLockedRows = useMemo(() => rows.some(r => r.locked), [rows]);
+  // Determine if any rows are locked (used internally for UX if needed)
+  // const hasLockedRows = useMemo(() => rows.some(r => r.locked), [rows]);
 
   useEffect(() => {
     if (!selectedOutletName) {
@@ -697,8 +647,7 @@ export default function SupplierDashboard(): JSX.Element {
     setRows((prev) =>
       prev.map((r) => {
         if (r.id !== id) return r;
-        // Allow admin override edits even when locked
-        if (r.locked && !isAdmin) return r;
+        if (r.locked) return r;
         return { ...r, ...patch };
       }),
     );
@@ -707,114 +656,13 @@ export default function SupplierDashboard(): JSX.Element {
   const removeRow = (id: string): void => {
     setRows((prev) => {
       const target = prev.find((r) => r.id === id);
-      if (target?.locked && !isAdmin) {
+      if (target?.locked) {
         notifyToast("Item already locked; contact supervisor for changes.");
         return prev;
       }
       return prev.filter((r) => r.id !== id);
     });
   };
-
-  // Admin override: call admin endpoint to unlock / delete / persist edits
-  async function adminEditRow(r: SupplyRow): Promise<void> {
-    if (!isAdmin || !selectedOutletName) return;
-    try {
-      const res = await fetch('/api/admin/supply/edit-item', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' },
-        body: JSON.stringify({
-          date: dateStr,
-          outlet: selectedOutletName,
-          itemKey: r.itemKey,
-          qty: r.qty,
-          buyPrice: r.buyPrice,
-          unit: r.unit,
-          unlock: true, // treat any edit as implicit unlock
-        }),
-      });
-      if (res.ok) {
-        notifyToast('Admin edit saved.');
-        await refreshSupplyState({ skipTransfers: true });
-      } else {
-        notifyToast('Failed to save admin edit.');
-      }
-    } catch (e) {
-      console.error('Admin edit failed', e);
-      notifyToast('Error saving admin edit.');
-    }
-  }
-
-  async function adminDeleteRow(r: SupplyRow): Promise<void> {
-    if (!isAdmin || !selectedOutletName) return;
-    const confirm = confirmSync(`Delete ${r.itemKey}? This cannot be undone.`);
-    if (!confirm) return;
-    try {
-      const res = await fetch('/api/admin/supply/edit-item', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' },
-        body: JSON.stringify({
-          date: dateStr,
-          outlet: selectedOutletName,
-          itemKey: r.itemKey,
-          delete: true,
-        }),
-      });
-      if (res.ok) {
-        notifyToast('Row deleted.');
-        await refreshSupplyState({ skipTransfers: true });
-      } else {
-        notifyToast('Failed to delete row.');
-      }
-    } catch (e) {
-      console.error('Admin delete failed', e);
-      notifyToast('Error deleting row.');
-    }
-  }
-
-  async function unlockDay(): Promise<void> {
-    if (!isAdmin || !selectedOutletName) return;
-    try {
-      const res = await fetch('/api/admin/supply/unlock-day', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' },
-        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName }),
-      });
-      if (res.ok) {
-        notifyToast('Day unlocked.');
-        setDayLocked(false);
-        setDayLockedMeta(null);
-        await refreshSupplyState({ skipTransfers: true });
-      } else {
-        notifyToast('Failed to unlock day.');
-      }
-    } catch (e) {
-      console.error('Unlock day failed', e);
-      notifyToast('Error unlocking day.');
-    }
-  }
-
-  // Bulk unlock all item-level locks (does not affect soft day lock)
-  async function bulkUnlockRows(): Promise<void> {
-    if (!isAdmin || !selectedOutletName) return;
-    const confirm = confirmSync('Unlock all item locks for this day? Quantities will remain.');
-    if (!confirm) return;
-    try {
-      const res = await fetch('/api/admin/supply/unlock-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' },
-        body: JSON.stringify({ date: dateStr, outlet: selectedOutletName }),
-      });
-      if (res.ok) {
-        notifyToast('All item locks cleared.');
-        await refreshSupplyState({ skipTransfers: true });
-      } else {
-        notifyToast('Failed to clear item locks.');
-      }
-    } catch (e) {
-      console.error('Bulk unlock failed', e);
-      notifyToast('Error clearing item locks.');
-    }
-  }
 
   /* ===== Save (draft) ===== */
   // Save current draft rows. Optionally sync to server and auto-lock newly entered rows.
@@ -1354,12 +1202,7 @@ export default function SupplierDashboard(): JSX.Element {
       <header className="mb-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-semibold flex items-center gap-3">Supplier Dashboard {isAdmin && (
-              <span
-                className="inline-flex items-center rounded-md bg-amber-600/90 text-white text-[10px] font-semibold px-2 py-1 uppercase tracking-wide shadow-sm"
-                title="Elevated admin privileges active"
-              >Admin</span>
-            )}</h1>
+            <h1 className="text-2xl font-semibold flex items-center gap-3">Supplier Dashboard</h1>
             <p className="text-sm text-gray-600">
               {welcomeName ? <>Welcome <span className="font-medium">{welcomeName}</span>. </> : null}
               Enter opening supply, manage transfers, and respond to disputes.
@@ -1461,9 +1304,6 @@ export default function SupplierDashboard(): JSX.Element {
           <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={logout}>
             Logout
           </button>
-          <button className="btn-mobile border rounded-xl px-3 py-2 text-sm" onClick={() => void refreshAdminStatus()} title="Force re-check of admin session flags">
-            Refresh Admin Status
-          </button>
         </div>
       </header>
 
@@ -1491,31 +1331,8 @@ export default function SupplierDashboard(): JSX.Element {
               >
                 {submittingDay ? 'Locking…' : 'Submit & Lock'}
               </button>
-              {isAdmin && dayLocked && (
-                <button
-                  className="border rounded-xl px-3 py-1 text-xs bg-red-600 text-white disabled:opacity-50"
-                  onClick={() => void unlockDay()}
-                  title={dayLockedMeta?.lockedAt ? `Locked at ${dayLockedMeta.lockedAt} by ${dayLockedMeta.by || 'system'}` : 'Unlock supply day'}
-                >
-                  Unlock Day
-                </button>
-              )}
-              {isAdmin && hasLockedRows && !dayLocked && (
-                <button
-                  className="border rounded-xl px-3 py-1 text-xs bg-orange-600 text-white disabled:opacity-50"
-                  onClick={() => void bulkUnlockRows()}
-                  title="Clear per-item locks (keeps quantities)."
-                >
-                  Unlock All Rows
-                </button>
-              )}
             </div>
         </div>
-        {isAdmin && (
-          <div className="mt-2 text-xs rounded-lg bg-white/5 p-2 border border-white/10">
-            <strong>Admin Override:</strong> {dayLocked ? 'Day is soft locked — use Unlock Day to reopen.' : 'Day not soft locked.'} {hasLockedRows ? 'Some rows have item locks; you can edit using Unlock & Save or click Unlock All Rows.' : 'No item locks present.'}
-          </div>
-        )}
 
         <div className="flex flex-wrap items-center gap-2 mt-3 mobile-scroll-x">
           <label className="text-sm text-gray-600">Add Item:</label>
@@ -1572,7 +1389,7 @@ export default function SupplierDashboard(): JSX.Element {
                   <tr key={r.id} className="border-b">
                     <td className="py-2">
                       {name}
-                      {r.locked && !isAdmin ? (
+                      {r.locked ? (
                         <span className="ml-2 inline-block rounded bg-gray-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-600" title="Locked - admin can override">
                           Locked
                         </span>
@@ -1585,7 +1402,7 @@ export default function SupplierDashboard(): JSX.Element {
                         inputMode={unit === "kg" ? "decimal" : "numeric"}
                         placeholder={unit === "kg" ? "e.g. 4.5 kg" : "e.g. 4 pcs"}
                         value={qtyDraftById[r.id] ?? normalizeQtyForInput(r.qty ?? 0, unit, r.itemKey)}
-                        disabled={(submitted || r.locked) && !isAdmin}
+                        disabled={(submitted || r.locked)}
                         onChange={(e) => {
                           if (submitted || r.locked) return;
                           const raw = e.target.value;
@@ -1627,7 +1444,7 @@ export default function SupplierDashboard(): JSX.Element {
                         inputMode="decimal"
                         placeholder="e.g. 300"
                         value={priceDraftById[r.id] ?? (Number.isFinite(r.buyPrice) ? String(r.buyPrice) : "")}
-                        disabled={(submitted || r.locked) && !isAdmin}
+                        disabled={(submitted || r.locked)}
                         onChange={(e) => {
                           if (submitted || r.locked) return;
                           const raw = e.target.value;
@@ -1665,7 +1482,7 @@ export default function SupplierDashboard(): JSX.Element {
                       )}
                     </td>
                     <td>
-                      {r.locked && !isAdmin ? (
+                      {r.locked ? (
                         <div className="flex gap-2 items-center">
                           <span className="text-xs text-gray-500">Locked. Request supervisor change if needed.</span>
                           <button
@@ -1689,29 +1506,9 @@ export default function SupplierDashboard(): JSX.Element {
                             className="btn-mobile text-xs border rounded-lg px-2 py-1"
                             onClick={() => requestRowModification(r)}
                           >
-                            {isAdmin ? 'Supervisor req.' : 'Request change'}
+                            Request change
                           </button>
-                          {isAdmin && (
-                            <>
-                              {r.locked && (
-                                <button
-                                  className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                                  title="Unlock & Save"
-                                  onClick={() => void adminEditRow(r)}
-                                >
-                                  Unlock & Save
-                                </button>
-                              )}
-                              <button
-                                className="btn-mobile text-xs border rounded-lg px-2 py-1"
-                                title="Delete row"
-                                onClick={() => void adminDeleteRow(r)}
-                              >
-                                Delete
-                              </button>
-                            </>
-                          )}
-                          {!submitted && (!r.locked || isAdmin) && (
+                          {!submitted && (!r.locked) && (
                             <button
                               className="btn-mobile text-xs border rounded-lg px-2 py-1"
                               onClick={() => removeRow(r.id)}

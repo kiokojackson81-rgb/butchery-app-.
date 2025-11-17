@@ -3032,6 +3032,9 @@ function OpsCombined(props: {
 }) {
   const { outlets, products, supply, reports, initialOpsTab } = props;
   const [opsTab, setOpsTab] = React.useState<"supply" | "reports" | "history" | "deposits">(initialOpsTab || "supply");
+  const [newItemKey, setNewItemKey] = React.useState<string>("");
+  const [newQty, setNewQty] = React.useState<string>("");
+  const [newPrice, setNewPrice] = React.useState<string>("");
 
   return (
     <div>
@@ -3117,7 +3120,83 @@ function OpsCombined(props: {
                 }}
                 title="Unlock opening for this outlet/date"
               >Unlock opening</button>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    const r = await fetch('/api/admin/supply/unlock-day', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' }, body: JSON.stringify({ date: supply.supDate, outlet }) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert(`Day unlocked for ${outlet} (${supply.supDate})`);
+                  } catch (e:any) { alert(e?.message || 'Failed to unlock day'); }
+                }}
+                title="Soft-unlock day for Supplier entries (affects supplier UI)"
+              >Unlock Day</button>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    const r = await fetch('/api/admin/supply/unlock-all', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': 'true' }, body: JSON.stringify({ date: supply.supDate, outlet }) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert(`Cleared item locks (${j?.unlockedCount ?? 0}) for ${outlet} (${supply.supDate})`);
+                  } catch (e:any) { alert(e?.message || 'Failed to unlock rows'); }
+                }}
+                title="Clear per-item locks (keeps quantities)"
+              >Unlock All Rows</button>
             </div>
+          </div>
+          {/* Admin submit form (mirrors Supplier submit) */}
+          <div className="rounded-xl border p-3 mb-3">
+            <div className="flex items-end gap-2 flex-wrap">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Product</label>
+                <select className="input-mobile border rounded-xl p-2 text-sm min-w-[12rem]" value={newItemKey} onChange={(e)=>setNewItemKey(e.target.value)}>
+                  <option value="">— select product —</option>
+                  {products.filter(p=>p.active).map(p=> (
+                    <option key={p.id} value={p.key}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Qty</label>
+                <input className="input-mobile border rounded-xl p-2 w-36" placeholder="e.g. 4.5" value={newQty} onChange={(e)=>setNewQty(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Buy Price</label>
+                <input className="input-mobile border rounded-xl p-2 w-36" placeholder="e.g. 300" value={newPrice} onChange={(e)=>setNewPrice(e.target.value)} />
+              </div>
+              <button
+                className="btn-mobile border rounded-xl px-3 py-2 text-sm"
+                onClick={async () => {
+                  try {
+                    const outlet = supply.supOutletName === supply.ALL ? (outlets[0]?.name || '') : supply.supOutletName;
+                    if (!outlet) { alert('Pick an outlet first'); return; }
+                    if (!newItemKey) { alert('Pick a product'); return; }
+                    const qty = parseFloat(String(newQty).replace(/,/g,'.'));
+                    const price = parseFloat(String(newPrice).replace(/,/g,'.'));
+                    if (!(qty > 0) || !(price >= 0)) { alert('Enter valid qty and price'); return; }
+                    const prod = products.find(p=>p.key===newItemKey);
+                    const unit = (prod?.unit === 'pcs' ? 'pcs' : 'kg') as Unit;
+                    const payload = { rows: [{ date: supply.supDate, outletName: outlet, itemKey: newItemKey, qty, buyPrice: price, unit }] };
+                    const r = await fetch('/api/admin/supply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const j = await r.json().catch(()=>({ ok:false }));
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Failed');
+                    alert('Supply row submitted & locked.');
+                    setNewItemKey(""); setNewQty(""); setNewPrice("");
+                    window.location.reload();
+                  } catch (e:any) {
+                    alert(e?.message || 'Failed to submit');
+                  }
+                }}
+                title="Submit & lock one row"
+              >Submit row</button>
+            </div>
+            <p className="text-xs text-gray-600 mt-2">Admins can submit opening rows directly here without using the Supplier dashboard.</p>
           </div>
           <div className="table-wrap">
             <table className="w-full text-sm">

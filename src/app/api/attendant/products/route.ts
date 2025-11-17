@@ -79,36 +79,59 @@ export async function GET() {
       return NextResponse.json({ ok: true, outlet: outletName, attendantCode: code, products: [] as ProductOut[] });
     }
 
-    // Fetch product names for the assigned keys
-    const products = await (prisma as any).product.findMany({
-      where: { key: { in: productKeys } },
+    // Case-insensitive normalization: dedupe assigned keys by lowercase
+    const lcAssigned = Array.from(new Set(productKeys.map((k) => String(k).trim()).filter((k) => k.length > 0).map((k) => k.toLowerCase())));
+
+    // Fetch products for both original and lowercased keys; map by lowercase for consistent lookup
+    const prodQueryKeys = Array.from(new Set([...productKeys, ...lcAssigned]));
+    const productRows = await (prisma as any).product.findMany({
+      where: { key: { in: prodQueryKeys } },
       select: { key: true, name: true },
     });
-    const nameByKey = new Map<string, string>(products.map((p: any) => [String(p.key), String(p.name || p.key)] as const));
-
-    // Fetch outlet pricebook rows, filter to active only
-    const pbRows = await (prisma as any).pricebookRow.findMany({
-      where: { outletName, productKey: { in: productKeys } },
-      select: { productKey: true, sellPrice: true, active: true },
-    });
-    const priceByKey = new Map<string, { price: number; active: boolean; updatedAt: Date | null }>();
-    for (const r of pbRows as any[]) {
-      priceByKey.set(String(r.productKey), { price: Number(r.sellPrice || 0), active: !!r.active, updatedAt: null });
+    const canonicalKeyByLc = new Map<string, string>();
+    const nameByLc = new Map<string, string>();
+    for (const p of (productRows as any[])) {
+      const key = String(p?.key || "");
+      if (!key) continue;
+      const lc = key.toLowerCase();
+      // Prefer the first seen canonical key; Product.key is our source of truth
+      if (!canonicalKeyByLc.has(lc)) canonicalKeyByLc.set(lc, key);
+      if (!nameByLc.has(lc)) nameByLc.set(lc, String(p?.name || key));
     }
 
-    const rows: ProductOut[] = productKeys.map((key) => {
-      const pb = priceByKey.get(key);
-      const active = !!pb?.active;
-      return {
-        key,
-        name: nameByKey.get(key) || key,
-        price: active ? pb!.price : null,
-        updatedAt: pb?.updatedAt ? pb.updatedAt.toISOString() : null,
-        active,
-      };
+    // Fetch all pricebook rows for this outlet and filter locally by lowercase match
+    const pbAll = await (prisma as any).pricebookRow.findMany({
+      where: { outletName },
+      select: { productKey: true, sellPrice: true, active: true },
     });
+    const priceByLc = new Map<string, { price: number; active: boolean }>();
+    for (const r of (pbAll as any[])) {
+      const lc = String(r?.productKey || "").toLowerCase();
+      if (!lcAssigned.includes(lc)) continue;
+      priceByLc.set(lc, { price: Number(r?.sellPrice || 0), active: !!r?.active });
+    }
 
-  return NextResponse.json({ ok: true, outlet: outletName, attendantCode: code, products: rows });
+    // Build response rows in the order of the original assignment, deduped by lowercase
+    const seen = new Set<string>();
+    const rows: ProductOut[] = [];
+    for (const raw of productKeys) {
+      const lc = String(raw).toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      const canonicalKey = canonicalKeyByLc.get(lc) || lc;
+      const name = nameByLc.get(lc) || canonicalKey;
+      const pb = priceByLc.get(lc);
+      const active = !!pb?.active;
+      rows.push({
+        key: canonicalKey,
+        name,
+        price: active ? Number(pb!.price) : null,
+        updatedAt: null,
+        active,
+      });
+    }
+
+    return NextResponse.json({ ok: true, outlet: outletName, attendantCode: code, products: rows });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "server" }, { status: 500 });
   }

@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test';
 // Restrict to chromium to avoid requiring other browser downloads for this check.
 test.use({ browserName: 'chromium' });
 
-// Verifies that manual admin elevation via storage + BroadcastChannel reflects immediately on Supplier Dashboard across tabs.
-test('supplier dashboard shows Admin badge after storage elevation across tabs', async ({ browser, baseURL }) => {
+// Verifies that admin elevation no longer surfaces an Admin badge in Supplier dashboard.
+// Admins should operate via the Admin panel, not the Supplier UI.
+test('supplier dashboard does NOT show Admin badge after storage elevation', async ({ browser, baseURL }) => {
   const context = await browser.newContext();
   const pageA = await context.newPage();
 
@@ -25,7 +26,7 @@ test('supplier dashboard shows Admin badge after storage elevation across tabs',
   }
   await expect(pageA.locator(badgeSelector)).toHaveCount(0);
 
-  // 2) Elevate admin state via direct storage + broadcast
+  // 2) Elevate admin state via direct storage + broadcast (legacy)
   await pageA.evaluate(() => {
     localStorage.setItem('admin_auth', 'true');
     localStorage.setItem('admin_welcome', 'Test Admin');
@@ -38,11 +39,11 @@ test('supplier dashboard shows Admin badge after storage elevation across tabs',
     } catch {}
   });
 
-  // 3) Wait for badge to appear in current tab (immediate via BroadcastChannel or 2s poll)
-  await expect(pageA.locator(badgeSelector)).toBeVisible({ timeout: 8000 });
+  // 3) Badge should remain absent in current tab
+  await expect(pageA.locator(badgeSelector)).toHaveCount(0);
 
-  // 4) Open second tab; badge should appear without manual refresh due to shared storage & fast poll
+  // 4) Second tab should also not show badge
   const pageB = await context.newPage();
   await pageB.goto(`${baseURL}/supplier/dashboard`);
-  await expect(pageB.locator(badgeSelector)).toBeVisible({ timeout: 8000 });
+  await expect(pageB.locator(badgeSelector)).toHaveCount(0);
 });
