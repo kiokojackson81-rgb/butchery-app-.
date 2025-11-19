@@ -82,6 +82,32 @@ export async function POST(req: Request) {
     } catch {}
 
     const hasLockCols = await detectLockCols();
+
+    // Idempotency guard (30s) by signature; prevents rapid duplicates (double taps/retries)
+    try {
+      const sig = `${date}|${outlet}|${itemKey}|${qtyNum}|${buyPriceNum}|${unit}`;
+      const key = `api:supply_idem:${sig}`;
+      const existingIdem = await (prisma as any).setting.findUnique({ where: { key } }).catch(() => null);
+      if (existingIdem) {
+        const updatedAt = new Date(existingIdem.updatedAt).getTime();
+        if (Date.now() - updatedAt < 30_000) {
+          const current = await (prisma as any).supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } } }).catch(()=>null);
+          const existedQtyNow = Number(current?.qty || 0);
+          // If the current row is locked, prefer lock semantics and return a conflict
+          if (hasLockCols && current?.lockedAt) {
+            return NextResponse.json(
+              { ok: false, error: "locked", message: "Supply already submitted and locked for this product." },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ ok: true, existedQty: existedQtyNow, totalQty: existedQtyNow, row: current }, { status: 200 });
+        } else {
+          await (prisma as any).setting.update({ where: { key }, data: { value: { sig, at: new Date().toISOString() } } }).catch(()=>{});
+        }
+      } else {
+        await (prisma as any).setting.create({ data: { key, value: { sig, at: new Date().toISOString(), by: String(body?.supplierCode || body?.supplierName || 'supplier_portal') } } }).catch(()=>{});
+      }
+    } catch {}
     let existing: any = null;
     try {
       existing = await (prisma as any).supplyOpeningRow.findUnique({

@@ -516,6 +516,17 @@
 			"label": "playwright: period flow (BASE_URL=:3002)",
 			"type": "shell",
 			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/period.flow.3days.spec.ts --reporter=line --workers=1"
+		},
+		{
+			"label": "Typecheck (tsc) — quick",
+			"type": "shell",
+			"command": "npm run -s typecheck",
+			"group": "build"
+		},
+		{
+			"label": "playwright: opening-effective spec",
+			"type": "shell",
+			"command": "$env:BASE_URL=\"http://localhost:3002\"; npx playwright test -c playwright.config.ts playwright/attendant.opening-effective.locked.spec.ts --reporter=line --workers=1"
 		}
 	]
 }

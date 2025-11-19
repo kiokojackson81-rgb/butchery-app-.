@@ -172,6 +172,29 @@ async function saveLockedSupplyRow(opts: {
   const lockTimestamp = new Date();
   const hasLockCols = await ensureWaLockCols();
   return prisma.$transaction(async (tx: any) => {
+    // Soft idempotency guard (30s window) to avoid accidental double-adds from rapid retries
+    try {
+      const sig = `${date}|${outlet}|${itemKey}|${qty}|${buyPrice}|${unit}`;
+      const key = `wa:supply_idem:${sig}`;
+      const existingIdem = await tx.setting.findUnique({ where: { key } }).catch(() => null);
+      if (existingIdem) {
+        const updatedAt = new Date(existingIdem.updatedAt).getTime();
+        if (Date.now() - updatedAt < 30_000) {
+          // Treat as duplicate: do not modify qty again
+          const existingRow = await tx.supplyOpeningRow.findUnique({ where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } } });
+          const existedQtyDup = Number(existingRow?.qty || 0);
+          // If the existing row is locked, respect lock semantics and report locked
+          if (hasLockCols && existingRow?.lockedAt) {
+            return { status: "locked" as const, existedQty: existedQtyDup };
+          }
+          return { status: "saved" as const, existedQty: existedQtyDup, totalQty: existedQtyDup, row: existingRow };
+        } else {
+          await tx.setting.update({ where: { key }, data: { value: { sig, at: new Date().toISOString() } } }).catch(() => {});
+        }
+      } else {
+        await tx.setting.create({ data: { key, value: { sig, at: new Date().toISOString(), by: identity.lockedBy } } }).catch(() => {});
+      }
+    } catch {}
     const existing = await tx.supplyOpeningRow.findUnique({
       where: { date_outletName_itemKey: { date, outletName: outlet, itemKey } },
     });

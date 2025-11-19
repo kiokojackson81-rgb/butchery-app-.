@@ -15,6 +15,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
   const [showAttach, setShowAttach] = useState(false);
   const [selectedOrphan, setSelectedOrphan] = useState<any>(null);
   const [outletInput, setOutletInput] = useState('');
+  const [shortcodeInput, setShortcodeInput] = useState('');
   const [paymentsState, setPaymentsState] = useState<Payment[]>(payments || []);
   const [orphansState, setOrphansState] = useState<Payment[]>(orphans || []);
   const [outletTotalsState, setOutletTotalsState] = useState<any>({ ...outletTotals });
@@ -139,7 +140,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
         if (isAdmin) headers['x-admin-auth'] = 'true';
       }
     } catch (e) {}
-    const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: selectedOrphan.id, outlet: outletInput }) });
+    const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: selectedOrphan.id, outlet: outletInput, shortcode: shortcodeInput }) });
     const j = await res.json();
   if (j.ok) {
       // optimistic update: remove orphan locally and add to payments + update totals
@@ -270,6 +271,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
           <div className="bg-white p-6 rounded shadow">
             <h3 className="font-bold">Attach orphan {selectedOrphan.id}</h3>
             <div className="mt-2"><label>Outlet code</label><input list="outlet-codes" className="border p-2 ml-2" value={outletInput} onChange={e=>setOutletInput(e.target.value)} placeholder="BRIGHT"/></div>
+            <div className="mt-2"><label className="mr-2">Shortcode (till)</label><input className="border p-2 ml-2" value={shortcodeInput} onChange={e=>setShortcodeInput(e.target.value)} placeholder="123456"/></div>
             <div className="mt-4 flex gap-2"><button className="btn" onClick={attachOrphan}>Attach</button><button className="btn" onClick={()=>setShowAttach(false)}>Cancel</button></div>
           </div>
         </div>
@@ -300,14 +302,16 @@ function useAdminHeaders() {
 function RowActions({ p, onUpdated, onMarkChanged }: { p: any; onUpdated: (np:any)=>void; onMarkChanged: ()=>void }) {
   const { showToast } = useToast();
   const [moveOutlet, setMoveOutlet] = useState<string>('');
+  const [moveShortcode, setMoveShortcode] = useState<string>('');
   const router = useRouter();
 
   useEffect(()=>{ setMoveOutlet(p?.outletCode || ''); }, [p?.outletCode]);
+  useEffect(()=>{ setMoveShortcode(p?.businessShortCode || p?.storeNumber || p?.headOfficeNumber || ''); }, [p?.businessShortCode, p?.storeNumber, p?.headOfficeNumber]);
 
   async function doMoveOutlet() {
     try {
       const headers = await useAdminHeaders();
-      const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: p.id, outlet: moveOutlet }) });
+      const res = await fetch('/api/admin/payments/attach', { method: 'POST', headers, body: JSON.stringify({ id: p.id, outlet: moveOutlet, shortcode: moveShortcode }) });
       const j = await res.json();
       if (j.ok) { onUpdated(j.data); onMarkChanged(); showToast({ type: 'success', message: 'Outlet moved' }); router.refresh(); }
       else showToast({ type: 'error', message: 'Move failed: ' + (j.error || 'unknown') });
@@ -327,6 +331,7 @@ function RowActions({ p, onUpdated, onMarkChanged }: { p: any; onUpdated: (np:an
   return (
     <div className="flex items-center gap-2">
       <input list="outlet-codes" className="border p-1 w-28" value={moveOutlet} onChange={e=>setMoveOutlet(e.target.value)} />
+      <input className="border p-1 w-24 ml-2" placeholder="shortcode" value={moveShortcode} onChange={e=>setMoveShortcode(e.target.value)} />
       <button className="text-blue-600 underline text-sm" onClick={doMoveOutlet}>Move</button>
       <span className="text-gray-400">|</span>
       <button className="text-sm px-2 py-1 border rounded" onClick={()=>assignPeriod('current')}>To Current</button>
