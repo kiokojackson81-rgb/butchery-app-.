@@ -4,6 +4,7 @@ export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export 
 export async function GET() {
 	try {
 		const env = (name: string) => (process.env[name] ? "set" : "missing");
+		const { hasPhoneNumberId, hasToken } = await import('@/lib/whatsapp/config');
 		const flags = {
 			WA_AI_ENABLED: String(process.env.WA_AI_ENABLED || "true").toLowerCase(),
 			WA_AUTOSEND_ENABLED: String(process.env.WA_AUTOSEND_ENABLED || "false").toLowerCase(),
@@ -11,8 +12,8 @@ export async function GET() {
 		};
 		const config = {
 			APP_ORIGIN: process.env.APP_ORIGIN || "",
-			WHATSAPP_PHONE_NUMBER_ID: env("WHATSAPP_PHONE_NUMBER_ID"),
-			WHATSAPP_TOKEN: env("WHATSAPP_TOKEN"),
+			WHATSAPP_PHONE_NUMBER_ID: hasPhoneNumberId() ? 'set' : 'missing',
+			WHATSAPP_TOKEN: hasToken() ? 'set' : 'missing',
 			WHATSAPP_VERIFY_TOKEN: env("WHATSAPP_VERIFY_TOKEN"),
 			WHATSAPP_APP_SECRET: env("WHATSAPP_APP_SECRET"),
 			OPENAI_API_KEY: env("OPENAI_API_KEY"),

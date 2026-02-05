@@ -3,18 +3,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { logMessage } from "@/lib/wa_log";
+import { GRAPH_BASE, getPhoneNumberId, getToken } from "@/lib/whatsapp/config";
 
 // Treat any non-production environment as dry-run by default to simplify local dev.
 // Still allow explicit WA_DRY_RUN=true in production-like envs for safety tests.
 const DRY = (process.env.WA_DRY_RUN === "true") || (process.env.NODE_ENV !== "production");
 
-const GRAPH_BASE = "https://graph.facebook.com/v20.0";
-
-function requiredEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name}`);
-  return v;
-}
+// Use centralized config getters to read WHATSAPP_* envs.
 
 function normalizeGraphPhone(to: string): string {
   // Graph API expects E.164 without leading '+'
@@ -93,8 +88,8 @@ export async function sendTemplate(opts: {
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
-  const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
-  const token = requiredEnv("WHATSAPP_TOKEN");
+  const phoneId = getPhoneNumberId();
+  const token = getToken();
   const lang = opts.langCode || "en";
   const to = toNorm;
 
@@ -173,8 +168,8 @@ async function _sendTextRaw(to: string, text: string, contextType?: string, inRe
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
-  const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
-  const token = requiredEnv("WHATSAPP_TOKEN");
+  const phoneId = getPhoneNumberId();
+  const token = getToken();
   const body = {
     messaging_product: "whatsapp",
     to: toNorm,
@@ -264,8 +259,8 @@ async function _sendInteractiveRaw(body: any, contextType?: string, inReplyTo?: 
     return { ok: true, waMessageId, response: { dryRun: true } } as const;
   }
 
-  const phoneId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");
-  const token = requiredEnv("WHATSAPP_TOKEN");
+  const phoneId = getPhoneNumberId();
+  const token = getToken();
   const normalized = { ...body, to: toNorm };
   const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`, {
     method: "POST",

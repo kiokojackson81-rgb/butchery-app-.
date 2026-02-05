@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { GRAPH_BASE, getWabaId, getToken } from '@/lib/whatsapp/config';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ function env(name: string) {
 }
 
 async function fetchAllTemplates(wabaId: string, token: string) {
-  const base = `https://graph.facebook.com/v20.0/${encodeURIComponent(wabaId)}/message_templates`;
+  const base = `${GRAPH_BASE}/${encodeURIComponent(wabaId)}/message_templates`;
   const params = new URLSearchParams({ fields: "name,status,language,category", limit: "200" });
   let url = `${base}?${params.toString()}`;
   const out: any[] = [];
@@ -32,11 +33,8 @@ async function fetchAllTemplates(wabaId: string, token: string) {
 
 export async function GET() {
   try {
-    const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.WHATSAPP_WABA_ID;
-    const token = process.env.WHATSAPP_TOKEN;
-    if (!wabaId || !token) {
-      return NextResponse.json({ ok: false, error: "Missing WHATSAPP_BUSINESS_ACCOUNT_ID/WHATSAPP_WABA_ID or WHATSAPP_TOKEN" }, { status: 200 });
-    }
+    const wabaId = getWabaId();
+    const token = getToken();
     const r = await fetchAllTemplates(wabaId, token);
     if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: 200 });
     const approved = r.data.filter((t: any) => String(t?.status).toUpperCase() === "APPROVED")

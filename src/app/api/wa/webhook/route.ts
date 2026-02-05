@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { getAppSecret, webhookPath } from '@/lib/whatsapp/config';
 import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
 import { logMessage } from "@/lib/wa_log";
@@ -64,9 +65,11 @@ function authOk(a: any): a is { ok: true; sess: any } {
 
 function verifySignature(body: string, sig: string | null) {
   try {
-    const appSecret = process.env.WHATSAPP_APP_SECRET!;
+    const appSecret = getAppSecret();
+    if (!appSecret) return true; // no app secret configured — skip verification
     const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(body).digest("hex");
-    return !!sig && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    if (!sig) return false;
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
   } catch {
     return false;
   }
@@ -81,11 +84,10 @@ export async function GET(req: Request) {
   const token = searchParams.get("hub.verify_token");
   const hubChallenge = searchParams.get("hub.challenge");
   const vt = process.env.WHATSAPP_VERIFY_TOKEN || "barakaops-verify";
-
   if (mode === "subscribe" && token === vt && hubChallenge) {
-    return new NextResponse(hubChallenge, { status: 200 });
+    return new Response(String(hubChallenge), { status: 200, headers: { 'Content-Type': 'text/plain' } });
   }
-  return NextResponse.json({ ok: false }, { status: 403 });
+  return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/plain' } });
 }
 
 // POST: receive events
@@ -276,15 +278,25 @@ export async function POST(req: Request) {
     });
   } catch {}
 
+  // Enforce signature verification for POSTs. If the signature doesn't match
+  // the expected HMAC, reject as unauthorized. Always respond 401 on failure
+  // to avoid processing forged events.
   if (!verifySignature(raw, sig)) {
-    if (!DRY) {
-      await logOutbound({ direction: "in", payload: { error: "bad signature" }, status: "ERROR" });
-      return NextResponse.json({ ok: true });
-    }
-    // In dry-run, continue without strict signature enforcement
+    try { await logOutbound({ direction: "in", payload: { error: "bad signature" }, status: "ERROR" }); } catch {}
+    return NextResponse.json({ ok: false, error: "bad signature" }, { status: 401 });
   }
 
   const body = JSON.parse(raw || "{}");
+
+  // Quick health check: if this webhook POST doesn't contain the expected
+  // WhatsApp structure, return HTTP 200 quickly (Meta expects 200 for pings
+  // and non-message callbacks). This keeps the endpoint resilient to
+  // non-WhatsApp probes while avoiding unnecessary processing.
+  const entries = Array.isArray(body.entry) ? body.entry : [];
+  const hasChanges = entries.some((e: any) => Array.isArray(e.changes) && e.changes.length > 0);
+  if (!hasChanges) {
+    return NextResponse.json({ ok: true });
+  }
 
   try {
     const entries = Array.isArray(body.entry) ? body.entry : [];

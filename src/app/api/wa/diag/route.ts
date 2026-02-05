@@ -171,8 +171,8 @@ export async function GET(req: Request) {
         limit,
         tables: Array.from(tableSet),
         waEnv: {
-          phoneId: Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID),
-          token: Boolean(process.env.WHATSAPP_TOKEN),
+          phoneId: (await import('@/lib/whatsapp/config')).hasPhoneNumberId(),
+          token: (await import('@/lib/whatsapp/config')).hasToken(),
         },
       },
       counts: {

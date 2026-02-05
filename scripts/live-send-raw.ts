@@ -4,8 +4,9 @@
 
 (async () => {
   const nodeFetch = (await import('node-fetch')).default;
-  const phoneId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '');
-  const token = String(process.env.WHATSAPP_TOKEN || '');
+  const { GRAPH_BASE, getPhoneNumberId, getToken } = await import('../src/lib/whatsapp/config');
+  const phoneId = String(getPhoneNumberId() || '');
+  const token = String(getToken() || '');
   const toArg = process.argv[2] || process.env.TO || '849934581535490';
   const templateArg = process.argv[3] || process.env.TEMPLATE || 'hello_world';
 
@@ -14,7 +15,7 @@
     process.exit(2);
   }
 
-  const url = `https://graph.facebook.com/v20.0/${encodeURIComponent(phoneId)}/messages`;
+  const url = `${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`;
   const body = {
     messaging_product: 'whatsapp',
     to: String(toArg).replace(/^\+/, ''),

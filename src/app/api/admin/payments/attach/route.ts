@@ -14,10 +14,22 @@ export async function POST(req: Request) {
     const { id, outlet, shortcode, storeNumber, headOfficeNumber } = body;
     if (!id || !outlet) return NextResponse.json({ ok: false, error: 'id and outlet required' }, { status: 400 });
     const data: any = { outletCode: outlet };
-    // Optional: update MPESA/till identifiers when provided
-    if (shortcode !== undefined && shortcode !== null) data.businessShortCode = String(shortcode);
-    if (storeNumber !== undefined && storeNumber !== null) data.storeNumber = String(storeNumber);
-    if (headOfficeNumber !== undefined && headOfficeNumber !== null) data.headOfficeNumber = String(headOfficeNumber);
+
+    // If any till identifier is provided, validate it exists in the Till table
+    const whereAny: any[] = [];
+    if (shortcode) whereAny.push({ tillNumber: String(shortcode) });
+    if (storeNumber) whereAny.push({ storeNumber: String(storeNumber) });
+    if (headOfficeNumber) whereAny.push({ headOfficeNumber: String(headOfficeNumber) });
+
+    if (whereAny.length > 0) {
+      const till = await (prisma as any).till.findFirst({ where: { OR: whereAny } });
+      if (!till) return NextResponse.json({ ok: false, error: 'till not found' }, { status: 400 });
+      // Use canonical values from the Till row to avoid typos
+      data.businessShortCode = till.tillNumber;
+      data.storeNumber = till.storeNumber;
+      data.headOfficeNumber = till.headOfficeNumber;
+    }
+
     const updated = await (prisma as any).payment.update({ where: { id }, data });
     return NextResponse.json({ ok: true, data: updated });
   } catch (e:any) {

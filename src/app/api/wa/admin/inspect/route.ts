@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     const { e164, noPlus } = normPhone(phone || null as any);
 
     // Quick env flags
+    const { hasPhoneNumberId, hasToken } = await import('@/lib/whatsapp/config');
     const env = {
       NODE_ENV: process.env.NODE_ENV || null,
       WA_DRY_RUN: String(process.env.WA_DRY_RUN || "").toLowerCase() === "true",
@@ -42,8 +43,8 @@ export async function GET(req: Request) {
       WA_TABS_ENABLED: String(process.env.WA_TABS_ENABLED || "").toLowerCase() === "true",
       WA_AI_ENABLED: String(process.env.WA_AI_ENABLED || "true").toLowerCase() === "true",
       OPENAI_KEY_PRESENT: !!process.env.OPENAI_API_KEY,
-      WHATSAPP_TOKEN_PRESENT: !!process.env.WHATSAPP_TOKEN,
-      WHATSAPP_PHONE_NUMBER_ID_PRESENT: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+      WHATSAPP_TOKEN_PRESENT: hasToken(),
+      WHATSAPP_PHONE_NUMBER_ID_PRESENT: hasPhoneNumberId(),
       WHATSAPP_WARMUP_TEMPLATE: process.env.WHATSAPP_WARMUP_TEMPLATE || null,
       WA_TEMPLATE_NAME: process.env.WA_TEMPLATE_NAME || null,
     };

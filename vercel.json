@@ -41,7 +41,6 @@
     }
   ],
   "routes": [
-    { "src": "/api/wa/webhook", "dest": "/api/whatsapp/webhook" },
-    { "src": "/api/whatsapp/webhook", "dest": "/api/whatsapp/webhook" }
+    { "src": "/api/wa/webhook", "dest": "/api/wa/webhook" }
   ]
 }

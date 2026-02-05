@@ -30,13 +30,14 @@ export async function GET(req: Request) {
   const WA_AUTOSEND_ENABLED = process.env.WA_AUTOSEND_ENABLED === "true";
   const NEXT_PUBLIC_WA_PUBLIC_E164 = process.env.NEXT_PUBLIC_WA_PUBLIC_E164 || null;
 
+  const { hasPhoneNumberId, hasToken, getAppSecret } = await import('@/lib/whatsapp/config');
   const envPresence = {
     openai: Boolean(process.env.OPENAI_API_KEY),
     whatsapp: {
-      phoneNumberId: Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID),
-      token: Boolean(process.env.WHATSAPP_TOKEN),
+      phoneNumberId: hasPhoneNumberId(),
+      token: hasToken(),
       verifyToken: Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
-      appSecret: Boolean(process.env.WHATSAPP_APP_SECRET),
+      appSecret: Boolean(getAppSecret()),
     },
   };
 

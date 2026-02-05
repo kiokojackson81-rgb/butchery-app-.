@@ -80,12 +80,11 @@ function toGraphFormat(e164Plus: string): string {
 type VerifyOutcome = "WA_USER" | "NOT_WA" | "VERIFY_ERROR" | "SKIPPED";
 
 async function verifyWithWhatsApp(graphNumber: string): Promise<VerifyOutcome> {
-  const token = process.env.WHATSAPP_TOKEN;
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!token || !phoneId) return "SKIPPED";
-
   try {
-    const res = await fetch(`https://graph.facebook.com/v20.0/${encodeURIComponent(phoneId)}/contacts`, {
+    const { getPhoneNumberId, getToken, GRAPH_BASE } = await import('../src/lib/whatsapp/config');
+    const token = getToken();
+    const phoneId = getPhoneNumberId();
+    const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/contacts`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -103,7 +102,7 @@ async function verifyWithWhatsApp(graphNumber: string): Promise<VerifyOutcome> {
     if (status === "invalid") return "NOT_WA";
     return "VERIFY_ERROR";
   } catch {
-    return "VERIFY_ERROR";
+    return "SKIPPED";
   }
 }
 
