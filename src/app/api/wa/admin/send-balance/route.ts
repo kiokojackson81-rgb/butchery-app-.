@@ -23,13 +23,21 @@ export async function GET(req: Request) {
     const total = Math.round(stats.tillSalesGross || 0);
     const count = Array.isArray((stats as any).payments) ? (stats as any).payments.length : (total ? 1 : 0);
 
-    const templateName = process.env.WA_TEMPLATE_NAME || 'till_balance_response';
-    const lang = url.searchParams.get('lang') || undefined;
+    const templateName = process.env.WA_TEMPLATE_NAME_BALANCE || process.env.WA_TEMPLATE_NAME || 'till_balance_response';
+
+    // Map incoming ?lang= to Meta template locale (Meta expects en_US for English templates)
+    const requestedLang = String(url.searchParams.get('lang') || 'en');
+    const langMap: Record<string, string> = {
+      en: 'en_US',
+      'en_US': 'en_US',
+    };
+    const languageCode = langMap[requestedLang] || 'en_US';
+
     const res = await sendWhatsAppTemplateMessage({
       to,
       templateName,
       bodyParams: [ outletLabel(outlet), date, String(total), String(count) ],
-      langCode: lang,
+      langCode: languageCode,
     });
 
     return NextResponse.json({ ok: true, result: res });
