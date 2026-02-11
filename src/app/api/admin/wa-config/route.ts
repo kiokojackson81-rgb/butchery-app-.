@@ -12,5 +12,5 @@ export async function GET() {
   const tplMid = process.env.WA_TEMPLATE_NAME_MIDNIGHT || null;
   const phoneLast4 = phoneId.slice(-4);
 
-  return NextResponse.json({ ok: true, phoneIdLast4, lang, templates: { balance: tplBalance, high_value: tplHigh, midnight: tplMid } });
+  return NextResponse.json({ ok: true, phoneLast4, lang, templates: { balance: tplBalance, high_value: tplHigh, midnight: tplMid } });
 }
