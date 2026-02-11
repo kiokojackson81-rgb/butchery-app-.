@@ -23,9 +23,10 @@ export async function GET(req: Request) {
     const total = Math.round(stats.tillSalesGross || 0);
     const count = Array.isArray((stats as any).payments) ? (stats as any).payments.length : (total ? 1 : 0);
 
+    const templateName = process.env.WA_TEMPLATE_NAME || 'till_balance_response';
     const res = await sendWhatsAppTemplateMessage({
       to,
-      templateName: 'till_balance_response',
+      templateName,
       bodyParams: [ outletLabel(outlet), date, String(total), String(count) ],
     });
 

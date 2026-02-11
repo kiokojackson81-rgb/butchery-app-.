@@ -16,13 +16,14 @@ export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams
   if (!token || !phoneNumberId) throw new Error('Missing WhatsApp env WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID');
 
   const toNorm = String(to || '').replace(/^\+/, '');
+  const langCode = process.env.WA_TEMPLATE_LANG || process.env.WHATSAPP_TEMPLATE_LANG || 'en';
   const body = {
     messaging_product: 'whatsapp',
     to: toNorm,
     type: 'template',
     template: {
       name: templateName,
-      language: { code: 'en_US' },
+      language: { code: String(langCode) },
       components: [
         { type: 'body', parameters: (bodyParams || []).map((v) => ({ type: 'text', text: String(v) })) },
       ],
