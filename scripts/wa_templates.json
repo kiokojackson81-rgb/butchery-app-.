@@ -1,0 +1,25 @@
+{
+  "templates": [
+    {
+      "name": "midnight_payment_summary",
+      "language": "en_US",
+      "category": "TRANSACTIONAL",
+      "body": "Midnight Payments Summary for {{1}} ({{2}}): {{3}} payments, Total KSh {{4}}. Top payers: {{5}}.",
+      "notes": "{{1}}=outlet or 'All outlets', {{2}}=date, {{3}}=count, {{4}}=total, {{5}}=short list"
+    },
+    {
+      "name": "high_value_payment_alert",
+      "language": "en_US",
+      "category": "TRANSACTIONAL",
+      "body": "High-value payment: Outlet {{1}} — KSh {{2}} by {{3}} at {{4}}. Till: {{5}}. Ref: {{6}}.",
+      "notes": "{{1}}=outlet, {{2}}=amount, {{3}}=payer, {{4}}=time, {{5}}=till, {{6}}=payment id"
+    },
+    {
+      "name": "till_balance_response",
+      "language": "en_US",
+      "category": "TRANSACTIONAL",
+      "body": "Current till total for {{1}} ({{2}}): KSh {{3}}. Payments: {{4}} transactions. For details reply 'details'.",
+      "notes": "{{1}}=outlet, {{2}}=date, {{3}}=total, {{4}}=count"
+    }
+  ]
+}

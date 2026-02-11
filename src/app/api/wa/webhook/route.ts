@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { getAppSecret, webhookPath } from '@/lib/whatsapp/config';
 import { prisma } from "@/lib/prisma";
 import { logOutbound, updateStatusByWamid } from "@/lib/wa";
+import { sendBalanceReply } from '@/lib/wa_notifications';
 import { logMessage } from "@/lib/wa_log";
 import { promptWebLogin } from "@/server/wa_gate";
 import { createLoginLink } from "@/server/wa_links";
@@ -1281,6 +1282,32 @@ export async function POST(req: Request) {
           // forward the text directly to the attendant flow before any GPT handling to preserve wizard progress.
           if (type === "text") {
             const text = (m.text?.body ?? "").trim();
+            const textLower = String(text || '').trim().toLowerCase();
+            // Quick on-demand balance handler: 'balance' or 'balance all' or 'balance <OUTLET>'
+            try {
+              if (textLower === 'balance' || textLower.startsWith('balance ')) {
+                let targetOutlet: string | undefined = undefined;
+                try { targetOutlet = (_sess as any)?.outlet || undefined; } catch {}
+                if (textLower !== 'balance' && textLower.startsWith('balance ')) {
+                  const parts = text.split(/\s+/);
+                  if (parts.length >= 2) targetOutlet = parts.slice(1).join(' ');
+                }
+                // Default to session outlet if available; else attempt phoneMapping recovery
+                if (!targetOutlet) {
+                  try {
+                    const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164 } }).catch(() => null);
+                    if (pm?.outlet) targetOutlet = pm.outlet;
+                  } catch {}
+                }
+                // If still missing, reply asking for clarity
+                if (!targetOutlet) {
+                  await sendTextSafe(toGraphPhone(phoneE164), 'Please specify which outlet (e.g., BALANCE BARAKA_A) or ensure your phone is registered.', 'AI_DISPATCH_TEXT');
+                } else {
+                  await sendBalanceReply({ to: toGraphPhone(phoneE164), outlet: targetOutlet, date: new Date().toISOString() });
+                }
+                continue;
+              }
+            } catch (e) { /* fall through to normal handling */ }
             try {
               // If we're in a numeric-entry context, dispatch to the attendant text handler first.
               const sessStateRaw = String((_sess as any)?.state || "");

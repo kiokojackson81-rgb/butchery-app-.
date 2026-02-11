@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendTextSafe } from "@/lib/wa";
+import sendWhatsAppTemplateMessage from '@/lib/whatsapp/sendTemplate';
+import { computeDayTotals } from '@/server/finance';
 
 type PaymentAlertOpts = {
   outletCode: string;
@@ -67,11 +69,47 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
     );
     if (!phones.length) return;
 
+    async function getNewBalanceSafe(outletName?: string | null) {
+      try {
+        const date = new Date().toISOString().slice(0,10);
+        const stats = await computeDayTotals({ date, outletName: outletName || '' });
+        return Math.round(stats.tillSalesGross || 0).toLocaleString('en-KE');
+      } catch { return '0'; }
+    }
+
     const amountFmt = Math.round(Number(opts.amount) || 0).toLocaleString("en-KE");
     const receiptText = opts.receipt ? ` Receipt ${opts.receipt}.` : "";
     const payerText = opts.payerMsisdn ? ` Payer ${maskMsisdn(opts.payerMsisdn)}.` : "";
-    const body = `Payment alert: KSh ${amountFmt} received on ${formatOutletLabel(outletName || opts.outletCode)}.${receiptText}${payerText} - BarakaOps`;
 
+    // If high-value, send template to supervisors/admins
+    if (Number(opts.amount) > 500) {
+      try {
+        const payerDisplay = String(opts.payerMsisdn ? normalizePhone(opts.payerMsisdn) || maskMsisdn(opts.payerMsisdn) : 'Customer');
+        const newBalance = await getNewBalanceSafe(outletName || opts.outletCode);
+        await Promise.all(
+          phones.map((phone) =>
+            sendWhatsAppTemplateMessage({
+              to: phone,
+              templateName: 'high_value_payment_alert',
+              bodyParams: [
+                outletName || opts.outletCode,
+                amountFmt,
+                payerDisplay,
+                new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }),
+                'TILL',
+                opts.receipt || '',
+                '' + newBalance,
+              ],
+            })
+          )
+        );
+        return;
+      } catch (e) {
+        // fall back to text
+      }
+    }
+
+    const body = `Payment alert: KSh ${amountFmt} received on ${formatOutletLabel(outletName || opts.outletCode)}.${receiptText}${payerText} - BarakaOps`;
     await Promise.all(phones.map((phone) => sendTextSafe(phone, body, "AI_DISPATCH_TEXT", { gpt_sent: true })));
   } catch {
     // best-effort; swallow

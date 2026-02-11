@@ -1,39 +1,37 @@
-// Centralized WhatsApp Cloud configuration
-export const graphVersion = process.env.GRAPH_VERSION || 'v21.0';
-export const GRAPH_BASE = `https://graph.facebook.com/${graphVersion}`;
+// Centralized WhatsApp Cloud configuration getters
+const graphVersion = process.env.GRAPH_VERSION || process.env.WHATSAPP_GRAPH_VERSION || 'v21.0';
+export const GRAPH_BASE = `${process.env.WHATSAPP_GRAPH_BASE || 'https://graph.facebook.com'}/${graphVersion}`;
 
 export function getPhoneNumberId(): string {
-  const v = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!v) throw new Error('Missing env WHATSAPP_PHONE_NUMBER_ID');
-  return v;
+  return String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID || '');
 }
 
 export function getWabaId(): string {
-  const v = process.env.WHATSAPP_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
-  if (!v) throw new Error('Missing env WHATSAPP_WABA_ID');
-  return v;
+  return String(process.env.WHATSAPP_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '');
 }
 
 export function getToken(): string {
-  const v = process.env.WHATSAPP_TOKEN;
-  if (!v) throw new Error('Missing env WHATSAPP_TOKEN');
-  return v;
+  return String(process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || '');
 }
 
-export function getAppSecret(): string | undefined {
-  return process.env.WHATSAPP_APP_SECRET;
+export function getAppSecret(): string | null {
+  return process.env.WHATSAPP_APP_SECRET || process.env.WHATSAPP_APPSECRET || null;
 }
 
 export const webhookPath = process.env.WHATSAPP_WEBHOOK_PATH || '/api/wa/webhook';
 
-export function hasPhoneNumberId(): boolean {
-  return Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID);
-}
+export function hasPhoneNumberId(): boolean { return !!getPhoneNumberId(); }
+export function hasWabaId(): boolean { return !!getWabaId(); }
+export function hasToken(): boolean { return !!getToken(); }
 
-export function hasWabaId(): boolean {
-  return Boolean(process.env.WHATSAPP_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID);
-}
-
-export function hasToken(): boolean {
-  return Boolean(process.env.WHATSAPP_TOKEN);
-}
+export default {
+  GRAPH_BASE,
+  getPhoneNumberId,
+  getToken,
+  getAppSecret,
+  webhookPath,
+  hasPhoneNumberId,
+  hasWabaId,
+  hasToken,
+  getWabaId,
+};
