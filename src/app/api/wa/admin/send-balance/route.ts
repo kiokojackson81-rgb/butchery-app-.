@@ -24,10 +24,12 @@ export async function GET(req: Request) {
     const count = Array.isArray((stats as any).payments) ? (stats as any).payments.length : (total ? 1 : 0);
 
     const templateName = process.env.WA_TEMPLATE_NAME || 'till_balance_response';
+    const lang = url.searchParams.get('lang') || undefined;
     const res = await sendWhatsAppTemplateMessage({
       to,
       templateName,
       bodyParams: [ outletLabel(outlet), date, String(total), String(count) ],
+      langCode: lang,
     });
 
     return NextResponse.json({ ok: true, result: res });

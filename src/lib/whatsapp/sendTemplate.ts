@@ -1,9 +1,10 @@
 import { GRAPH_BASE, getPhoneNumberId, getToken } from '@/lib/whatsapp/config';
 
-export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams }: {
+export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams, langCode }: {
   to: string;
   templateName: string;
   bodyParams: Array<string | number>;
+  langCode?: string | null;
 }) {
   const dry = String(process.env.WA_DRY_RUN || '').toLowerCase() === 'true' || (process.env.NODE_ENV || '').toLowerCase() !== 'production' && (process.env.WA_FORCE_LIVE !== 'true');
   if (dry) {
@@ -16,14 +17,14 @@ export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams
   if (!token || !phoneNumberId) throw new Error('Missing WhatsApp env WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID');
 
   const toNorm = String(to || '').replace(/^\+/, '');
-  const langCode = process.env.WA_TEMPLATE_LANG || process.env.WHATSAPP_TEMPLATE_LANG || 'en';
+  const resolvedLang = String(langCode || process.env.WA_TEMPLATE_LANG || process.env.WHATSAPP_TEMPLATE_LANG || 'en');
   const body = {
     messaging_product: 'whatsapp',
     to: toNorm,
     type: 'template',
     template: {
       name: templateName,
-      language: { code: String(langCode) },
+      language: { code: resolvedLang },
       components: [
         { type: 'body', parameters: (bodyParams || []).map((v) => ({ type: 'text', text: String(v) })) },
       ],
