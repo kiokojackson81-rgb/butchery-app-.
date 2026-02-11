@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const tmpl = (process.env.WA_TEMPLATE_NAME || "ops_role_notice").trim();
+    const tmpl = (process.env.WA_TEMPLATE_OPS_ROLE_NOTICE || "ops_role_notice").trim();
     const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
     if (!autosend) {
       return NextResponse.json({ ok: false, error: "autosend disabled" }, { status: 200 });

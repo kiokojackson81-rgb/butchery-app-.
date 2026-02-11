@@ -46,7 +46,9 @@ export async function GET(req: Request) {
       WHATSAPP_TOKEN_PRESENT: hasToken(),
       WHATSAPP_PHONE_NUMBER_ID_PRESENT: hasPhoneNumberId(),
       WHATSAPP_WARMUP_TEMPLATE: process.env.WHATSAPP_WARMUP_TEMPLATE || null,
-      WA_TEMPLATE_NAME: process.env.WA_TEMPLATE_NAME || null,
+      WA_TEMPLATE_NAME_BALANCE: process.env.WA_TEMPLATE_NAME_BALANCE || null,
+      WA_TEMPLATE_NAME_HIGH_VALUE: process.env.WA_TEMPLATE_NAME_HIGH_VALUE || null,
+      WA_TEMPLATE_NAME_MIDNIGHT: process.env.WA_TEMPLATE_NAME_MIDNIGHT || null,
     };
 
     // Recent logs
@@ -89,7 +91,7 @@ export async function POST(req: Request) {
     // 'gpt' kind no longer supported
 
     if (kind === 'template') {
-      const tmpl = String(body.template || process.env.WA_TEMPLATE_NAME || 'ops_role_notice');
+      const tmpl = String(body.template || process.env.WA_TEMPLATE_OPS_ROLE_NOTICE || 'ops_role_notice');
       try {
         const res = await sendTemplate({ to, template: tmpl, params: [String(body.p1 || 'BarakaOps needs your attention'), String(body.p2 || (process.env.APP_ORIGIN || 'https://barakafresh.com') + '/login')], contextType: 'TEMPLATE_REOPEN' });
         return NextResponse.json({ ok: true, result: res });

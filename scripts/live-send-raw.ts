@@ -16,11 +16,12 @@
   }
 
   const url = `${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`;
+  const langCode = process.env.WA_TEMPLATE_LANG || 'en';
   const body = {
     messaging_product: 'whatsapp',
     to: String(toArg).replace(/^\+/, ''),
     type: 'template',
-    template: { name: templateArg, language: { code: 'en_US' } }
+    template: { name: templateArg, language: { code: langCode } }
   };
 
   try {

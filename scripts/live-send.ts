@@ -9,7 +9,7 @@ async function main() {
   try {
     const wa = await import("../src/lib/wa");
     console.log(`Sending template=${template} to=${to}`);
-    const res = await wa.sendTemplate({ to, template, params: [], langCode: "en_US" });
+    const res = await wa.sendTemplate({ to, template, params: [], langCode: (process.env.WA_TEMPLATE_LANG || 'en') });
     console.log("Result:", JSON.stringify(res, null, 2));
     if ((res as any)?.ok) process.exit(0);
     else process.exit(2);

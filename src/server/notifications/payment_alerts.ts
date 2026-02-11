@@ -86,11 +86,12 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
       try {
         const payerDisplay = String(opts.payerMsisdn ? normalizePhone(opts.payerMsisdn) || maskMsisdn(opts.payerMsisdn) : 'Customer');
         const newBalance = await getNewBalanceSafe(outletName || opts.outletCode);
+        const tpl = process.env.WA_TEMPLATE_NAME_HIGH_VALUE || 'high_value_payment_alert';
         await Promise.all(
           phones.map((phone) =>
             sendWhatsAppTemplateMessage({
               to: phone,
-              templateName: 'high_value_payment_alert',
+              templateName: tpl,
               bodyParams: [
                 outletName || opts.outletCode,
                 amountFmt,

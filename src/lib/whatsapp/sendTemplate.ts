@@ -1,4 +1,4 @@
-import { GRAPH_BASE, getPhoneNumberId, getToken } from '@/lib/whatsapp/config';
+import { waSendTemplate } from './waSendTemplate';
 
 export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams, langCode }: {
   to: string;
@@ -12,36 +12,8 @@ export async function sendWhatsAppTemplateMessage({ to, templateName, bodyParams
     return { ok: true, dryRun: true } as const;
   }
 
-  const token = getToken();
-  const phoneNumberId = getPhoneNumberId();
-  if (!token || !phoneNumberId) throw new Error('Missing WhatsApp env WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID');
-
-  const toNorm = String(to || '').replace(/^\+/, '');
-  const resolvedLang = String(langCode || process.env.WA_TEMPLATE_LANG || process.env.WHATSAPP_TEMPLATE_LANG || 'en');
-  const body = {
-    messaging_product: 'whatsapp',
-    to: toNorm,
-    type: 'template',
-    template: {
-      name: templateName,
-      language: { code: resolvedLang },
-      components: [
-        { type: 'body', parameters: (bodyParams || []).map((v) => ({ type: 'text', text: String(v) })) },
-      ],
-    },
-  } as any;
-
-  const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneNumberId)}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error('[WA_TEMPLATE_FAIL]', res.status, json);
-    return { ok: false, status: res.status, data: json } as const;
-  }
-  return { ok: true, status: res.status, data: json } as const;
+  // Delegate to canonical sender (allows optional lang override)
+  return waSendTemplate({ to, templateName, bodyParams: (bodyParams || []).map(String), langOverride: langCode || null });
 }
 
 export default sendWhatsAppTemplateMessage;

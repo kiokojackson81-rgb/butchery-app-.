@@ -90,7 +90,8 @@ export async function sendTemplate(opts: {
 
   const phoneId = getPhoneNumberId();
   const token = getToken();
-  const lang = opts.langCode || "en";
+  let lang = process.env.WA_TEMPLATE_LANG || 'en';
+  if (String(lang).toLowerCase() === 'en_us' || String(lang).toLowerCase() === 'en-us') lang = 'en';
   const to = toNorm;
 
   const body: any = {

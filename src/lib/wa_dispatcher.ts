@@ -30,7 +30,7 @@ async function lastInboundAt(phoneE164: string): Promise<Date | null> {
 export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
   const to = toE164.startsWith("+") ? toE164 : "+" + toE164;
 
-  // If outside the 24h window: send ops_role_notice (or WA_TEMPLATE_NAME) to reopen
+  // If outside the 24h window: send ops_role_notice (or WA_TEMPLATE_OPS_ROLE_NOTICE) to reopen
   let stale = true;
   let reopenedSent = false;
   try {
@@ -48,7 +48,7 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
     const isLogin = ctx?.kind === "login_prompt";
     const template = isLogin
       ? (process.env.WA_TEMPLATE_LOGIN_NAME || "login_text_link_v1")
-      : (process.env.WA_TEMPLATE_NAME || "ops_role_notice");
+      : (process.env.WA_TEMPLATE_OPS_ROLE_NOTICE || "ops_role_notice");
     const params = isLogin
       ? [p2] // Template body should be: "You're not logged in. Open {{1}} to continue."
       : ["BarakaOps needs your attention", p2];
