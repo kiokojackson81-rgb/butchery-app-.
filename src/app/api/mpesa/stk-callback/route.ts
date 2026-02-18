@@ -90,9 +90,9 @@ export async function POST(req: Request) {
           }
         }
       } catch (e:any) { logger.error({ action: 'stkCallback:waSuccessNotify:error', error: String(e) }); }
-      // Notify supervisors/admins for large till payments (>= KSh 1,000)
+      // Notify supervisors/admins for high-value till payments (> KSh 500)
       try {
-        if (Number(update.amount || 0) >= 1000) {
+        if (Number(update.amount || 0) > 500) {
           await sendPaymentAlerts({
             outletCode: String(update.outletCode || ''),
             amount: Number(update.amount || 0),

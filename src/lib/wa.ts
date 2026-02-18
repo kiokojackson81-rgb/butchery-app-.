@@ -68,7 +68,7 @@ export async function sendTemplate(opts: {
 }) {
   // Feature-flag legacy senders: allow through only AI dispatcher and reopen templates
   const autosend = process.env.WA_AUTOSEND_ENABLED === "true";
-  const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN"];
+  const allowedContext = ["AI_DISPATCH_TEXT", "AI_DISPATCH_INTERACTIVE", "TEMPLATE_REOPEN", "TEMPLATE_OUTBOUND"];
   if (!autosend && opts.contextType && !allowedContext.includes(opts.contextType)) {
     const toNorm = normalizeGraphPhone(opts.to);
     const phoneE164 = toNorm ? `+${toNorm}` : String(opts.to || "");
@@ -90,7 +90,7 @@ export async function sendTemplate(opts: {
 
   const phoneId = getPhoneNumberId();
   const token = getToken();
-  let lang = process.env.WA_TEMPLATE_LANG || 'en';
+  let lang = (opts.langCode && String(opts.langCode).trim()) || process.env.WA_TEMPLATE_LANG || 'en';
   if (String(lang).toLowerCase() === 'en_us' || String(lang).toLowerCase() === 'en-us') lang = 'en';
   const to = toNorm;
 
@@ -105,9 +105,12 @@ export async function sendTemplate(opts: {
   };
 
   if (opts.params?.length) {
-    body.template.components = [
-      { type: "body", parameters: (opts.params || []).map((t) => ({ type: "text", text: String(t) })) },
-    ];
+    const filtered = (opts.params || []).map((t) => String(t ?? "")).filter((s) => s !== "");
+    if (filtered.length) {
+      body.template.components = [
+        { type: "body", parameters: filtered.map((t) => ({ type: "text", text: String(t) })) },
+      ];
+    }
   }
 
   const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`, {
