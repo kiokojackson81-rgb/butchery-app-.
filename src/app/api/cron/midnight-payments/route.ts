@@ -10,7 +10,8 @@ export const revalidate = 0;
 export async function GET(req: Request) {
   try {
     const date = new Date().toISOString().slice(0,10);
-    const adminPhones = (process.env.ADMIN_PHONES || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const adminPhonesRaw = (process.env.ADMIN_PHONES || process.env.ADMIN_PHONE || '');
+    const adminPhones = adminPhonesRaw.split(',').map(s=>s.trim()).filter(Boolean);
     const barakaASupervisor = process.env.SUPERVISOR_BARAKA_A || null;
     const kyaloPhone = process.env.KYALO_PHONE || null;
 
