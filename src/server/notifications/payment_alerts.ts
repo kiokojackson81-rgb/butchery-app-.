@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendTextSafe } from "@/lib/wa";
 import sendWhatsAppTemplateMessage from '@/lib/whatsapp/sendTemplate';
 import { computeDayTotals } from '@/server/finance';
+import { APP_TZ, todayLocalISO } from "@/server/trading_period";
 
 type PaymentAlertOpts = {
   outletCode: string;
@@ -70,7 +71,7 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
 
     async function getNewBalanceSafe(outletName?: string | null) {
       try {
-        const date = new Date().toISOString().slice(0,10);
+        const date = todayLocalISO();
         const stats = await computeDayTotals({ date, outletName: outletName || '' });
         return Math.round(stats.tillSalesGross || 0).toLocaleString('en-KE');
       } catch { return '0'; }
@@ -86,6 +87,7 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
         const payerDisplay = String(opts.payerMsisdn ? normalizePhone(opts.payerMsisdn) || maskMsisdn(opts.payerMsisdn) : 'Customer');
         const newBalance = await getNewBalanceSafe(outletName || opts.outletCode);
         const tpl = process.env.WA_TEMPLATE_NAME_HIGH_VALUE || 'high_value_payment_alert';
+        const timeLocal = new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TZ });
         await Promise.all(
           phones.map((phone) =>
             sendWhatsAppTemplateMessage({
@@ -95,7 +97,7 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
                 outletName || opts.outletCode,
                 amountFmt,
                 payerDisplay,
-                new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }),
+                timeLocal,
                 'TILL',
                 opts.receipt || '',
                 '' + newBalance,
