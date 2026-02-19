@@ -105,12 +105,15 @@ export async function sendTemplate(opts: {
   };
 
   if (opts.params?.length) {
-    const filtered = (opts.params || []).map((t) => String(t ?? "")).filter((s) => s !== "");
-    if (filtered.length) {
-      body.template.components = [
-        { type: "body", parameters: filtered.map((t) => ({ type: "text", text: String(t) })) },
-      ];
-    }
+    // IMPORTANT: preserve parameter count for templates.
+    // Filtering out empty strings can break templates that require a fixed number of body params.
+    const prepared = (opts.params || []).map((t) => {
+      const s = String(t ?? "");
+      return s.trim().length ? s : "-";
+    });
+    body.template.components = [
+      { type: "body", parameters: prepared.map((t) => ({ type: "text", text: String(t) })) },
+    ];
   }
 
   const res = await fetch(`${GRAPH_BASE}/${encodeURIComponent(phoneId)}/messages`, {
