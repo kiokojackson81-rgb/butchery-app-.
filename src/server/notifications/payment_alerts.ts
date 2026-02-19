@@ -42,16 +42,15 @@ export async function sendPaymentAlerts(opts: PaymentAlertOpts) {
     const phoneWhere: any[] = [
       { role: "admin", outlet: null },
       { role: "admin", outlet: "" },
+      // Global supervisors should receive the same alerts as global admins.
+      { role: "supervisor", outlet: null },
+      { role: "supervisor", outlet: "" },
     ];
     if (outletName) {
       phoneWhere.push(
         { role: "supervisor", outlet: { equals: outletName, mode: "insensitive" } },
         { role: "admin", outlet: { equals: outletName, mode: "insensitive" } }
       );
-    }
-    const needsSupervisorFallback = !outletName || outletName.toUpperCase() === "GENERAL" || opts.outletCode === "GENERAL";
-    if (needsSupervisorFallback) {
-      phoneWhere.push({ role: "supervisor", outlet: null }, { role: "supervisor", outlet: "" });
     }
 
     const rows = await (prisma as any).phoneMapping.findMany({
