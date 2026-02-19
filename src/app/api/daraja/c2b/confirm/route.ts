@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sendPaymentAlerts } from "@/server/notifications/payment_alerts";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -94,6 +95,22 @@ export async function POST(req: Request) {
               },
             });
             console.log("C2B updated existing payment by receipt", { receipt, short, amount });
+
+            // Avoid duplicate alerts for idempotent callbacks: only notify if the record was not already SUCCESS
+            // or the amount changed materially.
+            const shouldNotify =
+              String(existing.status || "").toUpperCase() !== "SUCCESS" ||
+              Math.round(Number(existing.amount || 0)) !== amount;
+            if (shouldNotify && amount > 500) {
+              try {
+                await sendPaymentAlerts({
+                  outletCode: String(outletCode || ""),
+                  amount,
+                  receipt,
+                  payerMsisdn: msisdn || existing.msisdn || null,
+                });
+              } catch {}
+            }
           } else {
             await (prisma as any).payment.create({
               data: {
@@ -112,6 +129,17 @@ export async function POST(req: Request) {
               },
             });
             console.log("C2B saved payment (new)", { short, amount, msisdn, receipt, outletCode });
+
+            if (amount > 500) {
+              try {
+                await sendPaymentAlerts({
+                  outletCode: String(outletCode || ""),
+                  amount,
+                  receipt,
+                  payerMsisdn: msisdn || null,
+                });
+              } catch {}
+            }
           }
         } else {
           await (prisma as any).payment.create({
@@ -130,6 +158,17 @@ export async function POST(req: Request) {
             },
           });
           console.log("C2B saved payment (no receipt)", { short, amount, msisdn, outletCode });
+
+          if (amount > 500) {
+            try {
+              await sendPaymentAlerts({
+                outletCode: String(outletCode || ""),
+                amount,
+                receipt: null,
+                payerMsisdn: msisdn || null,
+              });
+            } catch {}
+          }
         }
       } catch (e) {
         console.error("C2B saving payment failed:", String(e));
