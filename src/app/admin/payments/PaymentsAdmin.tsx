@@ -193,6 +193,7 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
           <option value="PENDING">PENDING</option>
           <option value="SUCCESS">SUCCESS</option>
           <option value="FAILED">FAILED</option>
+          <option value="REVERSED">REVERSED</option>
         </select>
 
         <button className="px-3 py-2 border rounded bg-black text-white" onClick={applyFilters}>Apply</button>

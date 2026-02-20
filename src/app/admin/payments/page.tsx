@@ -13,7 +13,7 @@ export const revalidate = 0;
 export default async function Page({ searchParams }: any) {
   try {
     const outlet = searchParams?.outlet;
-    const status = searchParams?.status;
+    const statusRaw = searchParams?.status;
     const period = searchParams?.period || 'today';
     const sortParam: string = searchParams?.sort || 'createdAt:desc';
 
@@ -46,17 +46,22 @@ export default async function Page({ searchParams }: any) {
     const sortField = allowedFields.has(sortFieldRaw) ? sortFieldRaw : 'createdAt';
     const sortDir = sortDirRaw === 'asc' ? 'asc' : 'desc';
 
-  const createdAtRange = buildRange(period);
+    const createdAtRange = buildRange(period);
 
     const where: any = {};
     if (outlet) where.outletCode = outlet;
-    // Normalize legacy status values (e.g. 'PAID') and validate against PaymentStatus enum
-    const legacyStatusMap: Record<string, string> = { PAID: 'SUCCESS' } as any;
-    const allowedPaymentStatuses = new Set(['PENDING', 'SUCCESS', 'FAILED', 'REVERSED']);
+    // Normalize and validate status against PaymentStatus enum.
+    // Note: we treat legacy 'PAID' as a SUCCESS-equivalent bucket.
+    const allowedPaymentStatuses = new Set(['PENDING', 'SUCCESS', 'PAID', 'FAILED', 'REVERSED']);
+    const status = String(Array.isArray(statusRaw) ? statusRaw[0] : statusRaw || '').trim().toUpperCase();
     if (status) {
-      const normalized = legacyStatusMap[status] || status;
-      if (allowedPaymentStatuses.has(normalized)) where.status = normalized;
-      else console.warn('[admin/payments] ignoring invalid status filter:', status);
+      if (!allowedPaymentStatuses.has(status)) {
+        console.warn('[admin/payments] ignoring invalid status filter:', statusRaw);
+      } else if (status === 'SUCCESS' || status === 'PAID') {
+        where.status = { in: ['SUCCESS', 'PAID'] };
+      } else {
+        where.status = status;
+      }
     }
     if (createdAtRange) where.createdAt = createdAtRange;
 
@@ -71,11 +76,10 @@ export default async function Page({ searchParams }: any) {
       ]);
     } catch (e: any) {
       const msg = String(e?.message || e);
-      if (msg.includes("Value 'PAID' not found in enum 'PaymentStatus'") || msg.includes("Value 'PAID' not found")) {
+      if (msg.includes("not found in enum 'PaymentStatus'") || msg.includes('not found in enum "PaymentStatus"')) {
         console.warn('[admin/payments] Prisma enum error detected; retrying without invalid status filter');
         const retryWhere = { ...where } as any;
-        if (retryWhere?.status === 'PAID') retryWhere.status = 'SUCCESS';
-        else delete retryWhere.status;
+        delete retryWhere.status;
         [payments, orphans] = await Promise.all([
           (prisma as any).payment.findMany({ where: retryWhere, orderBy: { [sortField]: sortDir }, take: 200 }),
           (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
@@ -101,7 +105,7 @@ export default async function Page({ searchParams }: any) {
       } catch {}
     }
     for (const o of outlets) {
-      const sumWhere: any = { outletCode: o, status: 'SUCCESS' };
+      const sumWhere: any = { outletCode: o, status: { in: ['SUCCESS', 'PAID'] } };
       // For 'today', align to current trading period start per outlet; otherwise fall back to calendar range
       if (period === 'today') {
         const fromTime = apStartMap.get(o);

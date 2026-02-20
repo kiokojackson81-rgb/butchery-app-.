@@ -160,6 +160,8 @@ enum OutletCode {
 enum PaymentStatus {
   PENDING
   SUCCESS
+  /// Legacy alias for SUCCESS (kept for backward compatibility with older rows)
+  PAID
   FAILED
   REVERSED
 }
