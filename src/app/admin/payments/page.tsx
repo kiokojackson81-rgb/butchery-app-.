@@ -120,7 +120,8 @@ export default async function Page({ searchParams }: any) {
       const sqlParts: string[] = [
         `SELECT COALESCE(SUM("amount"), 0)::int AS sum`,
         `FROM "Payment"`,
-        `WHERE "outletCode" = $1`,
+        // outletCode is a Postgres enum in some environments; compare as text to avoid enum/text operator errors.
+        `WHERE "outletCode"::text = $1`,
         `AND ("status"::text = 'PAID' OR "status"::text = 'SUCCESS')`,
       ];
       const params: any[] = [o];
