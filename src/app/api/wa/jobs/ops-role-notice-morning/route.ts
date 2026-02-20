@@ -9,8 +9,9 @@ export async function GET() {
     let count = 0;
     for (const row of list as any[]) {
       const phone = row.phoneE164 as string;
-      const params = ["Please confirm your role to continue.", (process.env.APP_ORIGIN || "https://barakafresh.com") + "/login?src=wa"];
-      try { await sendTemplate({ to: phone, template: "ops_role_notice", params, contextType: "TEMPLATE_REOPEN" }); count++; } catch {}
+      // The default `ops_role_notice` template is commonly configured with 0 params in Meta.
+      // If you want a parametric template, set `WA_TEMPLATE_OPS_ROLE_NOTICE` to a *_v1 variant.
+      try { await sendTemplate({ to: phone, template: "ops_role_notice", contextType: "TEMPLATE_REOPEN" }); count++; } catch {}
     }
     return NextResponse.json({ ok: true, count });
   } catch (e: any) {

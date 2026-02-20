@@ -49,9 +49,11 @@ export async function sendOpsMessage(toE164: string, ctx: OpsContext) {
     const template = isLogin
       ? (process.env.WA_TEMPLATE_LOGIN_NAME || "login_text_link_v1")
       : (process.env.WA_TEMPLATE_OPS_ROLE_NOTICE || "ops_role_notice");
+    // Some Meta templates (e.g. `ops_role_notice`) are configured with 0 parameters.
+    // Only pass params for templates that explicitly support them (we use *_v1 naming).
     const params = isLogin
       ? [p2] // Template body should be: "You're not logged in. Open {{1}} to continue."
-      : ["BarakaOps needs your attention", p2];
+      : (String(template).toLowerCase().includes("_v1") ? ["BarakaOps needs your attention", p2] : []);
 
     // Throttle: ReminderSend unique per day/phone/type (separate types per template)
     const today = new Date();
