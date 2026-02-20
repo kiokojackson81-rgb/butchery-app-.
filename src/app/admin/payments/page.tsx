@@ -60,11 +60,30 @@ export default async function Page({ searchParams }: any) {
     }
     if (createdAtRange) where.createdAt = createdAtRange;
 
-    // Primary queries
-    const [payments, orphans] = await Promise.all([
-      (prisma as any).payment.findMany({ where, orderBy: { [sortField]: sortDir }, take: 200 }),
-      (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
-    ]);
+    // Primary queries with defensive retry: if Prisma rejects invalid enum values (e.g. legacy 'PAID'),
+    // remap or remove the status filter and retry so the page doesn't crash in production.
+    let payments: any[] = [];
+    let orphans: any[] = [];
+    try {
+      [payments, orphans] = await Promise.all([
+        (prisma as any).payment.findMany({ where, orderBy: { [sortField]: sortDir }, take: 200 }),
+        (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
+      ]);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes("Value 'PAID' not found in enum 'PaymentStatus'") || msg.includes("Value 'PAID' not found")) {
+        console.warn('[admin/payments] Prisma enum error detected; retrying without invalid status filter');
+        const retryWhere = { ...where } as any;
+        if (retryWhere?.status === 'PAID') retryWhere.status = 'SUCCESS';
+        else delete retryWhere.status;
+        [payments, orphans] = await Promise.all([
+          (prisma as any).payment.findMany({ where: retryWhere, orderBy: { [sortField]: sortDir }, take: 200 }),
+          (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
+        ]);
+      } else {
+        throw e;
+      }
+    }
 
     // Totals and expectations
     const outlets = ['BRIGHT','BARAKA_A','BARAKA_B','BARAKA_C','GENERAL'];
