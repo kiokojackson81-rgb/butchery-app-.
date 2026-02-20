@@ -93,10 +93,15 @@ export async function POST(req: Request) {
     if (kind === 'template') {
       const tmpl = String(body.template || process.env.WA_TEMPLATE_OPS_ROLE_NOTICE || 'ops_role_notice');
       try {
+        const explicitParamsRaw = (body as any).params ?? (body as any).bodyParams ?? null;
+        const explicitParams = Array.isArray(explicitParamsRaw) ? explicitParamsRaw.map((x: any) => String(x ?? '')) : null;
+
         const wantsParams = String(tmpl).toLowerCase().includes('_v1');
-        const params = wantsParams
-          ? [String(body.p1 || 'BarakaOps needs your attention'), String(body.p2 || (process.env.APP_ORIGIN || 'https://barakafresh.com') + '/login')]
-          : [];
+        const params = explicitParams
+          ? explicitParams
+          : (wantsParams
+              ? [String(body.p1 || 'BarakaOps needs your attention'), String(body.p2 || (process.env.APP_ORIGIN || 'https://barakafresh.com') + '/login')]
+              : []);
         const res = await sendTemplate({ to, template: tmpl, params, contextType: 'TEMPLATE_REOPEN' });
         return NextResponse.json({ ok: true, result: res });
       } catch (e: any) { return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 }); }
