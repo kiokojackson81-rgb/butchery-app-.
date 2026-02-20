@@ -50,7 +50,14 @@ export default async function Page({ searchParams }: any) {
 
     const where: any = {};
     if (outlet) where.outletCode = outlet;
-    if (status) where.status = status;
+    // Normalize legacy status values (e.g. 'PAID') and validate against PaymentStatus enum
+    const legacyStatusMap: Record<string, string> = { PAID: 'SUCCESS' } as any;
+    const allowedPaymentStatuses = new Set(['PENDING', 'SUCCESS', 'FAILED', 'REVERSED']);
+    if (status) {
+      const normalized = legacyStatusMap[status] || status;
+      if (allowedPaymentStatuses.has(normalized)) where.status = normalized;
+      else console.warn('[admin/payments] ignoring invalid status filter:', status);
+    }
     if (createdAtRange) where.createdAt = createdAtRange;
 
     // Primary queries
