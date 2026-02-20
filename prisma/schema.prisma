@@ -186,6 +186,10 @@ enum OutletCode {
 }
 
 enum PaymentStatus {
+  /// Legacy: not yet settled / no confirmed receipt
+  UNPAID
+  /// Legacy: partial settlement recorded
+  PARTIAL
   PENDING
   SUCCESS
   /// Legacy alias for SUCCESS (kept for backward compatibility with older rows)

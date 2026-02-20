@@ -46,30 +46,30 @@ export async function POST(req: Request) {
     if (!payment) {
       // Create orphan on GENERAL
       const orphan = await (localPrisma as any).payment.create({ data: {
-        outletCode: 'GENERAL', amount: amount || 0, msisdn: phone || '', status: resultCode === 0 ? 'SUCCESS' : 'FAILED', merchantRequestId, checkoutRequestId, mpesaReceipt, rawPayload: payload
+        outletCode: 'GENERAL', amount: amount || 0, msisdn: phone || '', status: resultCode === 0 ? 'PAID' : 'UNPAID', merchantRequestId, checkoutRequestId, mpesaReceipt, rawPayload: payload
       }});
       logger.info({ action: 'stkCallback:orphanCreated', id: orphan.id, merchantRequestId, checkoutRequestId, amount });
       return ok({ created: 'orphan', id: orphan.id });
     }
 
     // Avoid duplicate processing: if already SUCCESS, return ok
-    if (payment.status === 'SUCCESS') return ok({ ok: true });
+    if (payment.status === 'PAID' || payment.status === 'SUCCESS') return ok({ ok: true });
 
-    const newStatus = resultCode === 0 ? 'SUCCESS' : 'FAILED';
+    const newStatus = resultCode === 0 ? 'PAID' : 'UNPAID';
     // Build update without relying on a non-existent 'note' field; use description for failure reason
     const updateData: any = {
       status: newStatus,
       mpesaReceipt: mpesaReceipt || payment.mpesaReceipt,
       rawPayload: payload,
     };
-    if (newStatus === 'FAILED' && resultDesc) {
+    if (newStatus === 'UNPAID' && resultDesc) {
       updateData.description = String(resultDesc).slice(0, 256);
     }
     const update = await (localPrisma as any).payment.update({ where: { id: payment.id }, data: updateData });
 
     logger.info({ action: 'stkCallback:updated', id: update.id, status: newStatus, merchantRequestId, checkoutRequestId });
 
-    if (newStatus === 'SUCCESS') {
+    if (newStatus === 'PAID') {
       // emit deposit_confirmed via real-time emitter (Pusher or notify fallback)
       try {
         const msisdnMasked = phone ? `***${String(phone).slice(-3)}` : '';
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
       } catch (e: any) {
         logger.error({ action: 'stkCallback:paymentAlert:error', error: String(e) });
       }
-    } else if (newStatus === 'FAILED') {
+    } else if (newStatus === 'UNPAID') {
       // Failure notification for general deposit attempts
       try {
         if (payment.accountReference && String(payment.accountReference).toUpperCase().startsWith('DEP_')) {

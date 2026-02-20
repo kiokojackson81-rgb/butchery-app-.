@@ -190,6 +190,9 @@ export default function PaymentsAdmin({ payments, orphans, outletTotals }: { pay
         </select>
         <select value={filterStatus} onChange={(e)=>onChangeStatus(e.target.value)} className="border p-2">
           <option value="">All statuses</option>
+          <option value="PAID">PAID</option>
+          <option value="UNPAID">UNPAID</option>
+          <option value="PARTIAL">PARTIAL</option>
           <option value="PENDING">PENDING</option>
           <option value="SUCCESS">SUCCESS</option>
           <option value="FAILED">FAILED</option>

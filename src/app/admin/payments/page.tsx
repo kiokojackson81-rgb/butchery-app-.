@@ -50,19 +50,9 @@ export default async function Page({ searchParams }: any) {
 
     const where: any = {};
     if (outlet) where.outletCode = outlet;
-    // Normalize and validate status against PaymentStatus enum.
-    // Note: we treat legacy 'PAID' as a SUCCESS-equivalent bucket.
-    const allowedPaymentStatuses = new Set(['PENDING', 'SUCCESS', 'PAID', 'FAILED', 'REVERSED']);
+    // Status filtering is applied in-memory after fetch to avoid production enum drift
+    // across environments (legacy DBs may not share the same PaymentStatus labels).
     const status = String(Array.isArray(statusRaw) ? statusRaw[0] : statusRaw || '').trim().toUpperCase();
-    if (status) {
-      if (!allowedPaymentStatuses.has(status)) {
-        console.warn('[admin/payments] ignoring invalid status filter:', statusRaw);
-      } else if (status === 'SUCCESS' || status === 'PAID') {
-        where.status = { in: ['SUCCESS', 'PAID'] };
-      } else {
-        where.status = status;
-      }
-    }
     if (createdAtRange) where.createdAt = createdAtRange;
 
     // Primary queries with defensive retry: if Prisma rejects invalid enum values (e.g. legacy 'PAID'),
@@ -79,7 +69,6 @@ export default async function Page({ searchParams }: any) {
       if (msg.includes("not found in enum 'PaymentStatus'") || msg.includes('not found in enum "PaymentStatus"')) {
         console.warn('[admin/payments] Prisma enum error detected; retrying without invalid status filter');
         const retryWhere = { ...where } as any;
-        delete retryWhere.status;
         [payments, orphans] = await Promise.all([
           (prisma as any).payment.findMany({ where: retryWhere, orderBy: { [sortField]: sortDir }, take: 200 }),
           (prisma as any).payment.findMany({ where: { outletCode: 'GENERAL', merchantRequestId: null }, orderBy: { createdAt: 'desc' }, take: 50 }),
@@ -87,6 +76,19 @@ export default async function Page({ searchParams }: any) {
       } else {
         throw e;
       }
+    }
+
+    // Apply status filter post-fetch (supports legacy labels)
+    const paidLike = new Set(['PAID', 'SUCCESS']);
+    const unpaidLike = new Set(['UNPAID', 'PENDING']);
+    if (status) {
+      payments = payments.filter((p: any) => {
+        const st = String(p?.status || '').toUpperCase();
+        if (!st) return false;
+        if (status === 'PAID' || status === 'SUCCESS') return paidLike.has(st);
+        if (status === 'UNPAID' || status === 'PENDING') return unpaidLike.has(st);
+        return st === status;
+      });
     }
 
     // Totals and expectations
@@ -105,17 +107,29 @@ export default async function Page({ searchParams }: any) {
       } catch {}
     }
     for (const o of outlets) {
-      const sumWhere: any = { outletCode: o, status: { in: ['SUCCESS', 'PAID'] } };
-      // For 'today', align to current trading period start per outlet; otherwise fall back to calendar range
-      if (period === 'today') {
-        const fromTime = apStartMap.get(o);
-        if (fromTime) sumWhere.createdAt = { gte: fromTime };
-        else if (createdAtRange) sumWhere.createdAt = createdAtRange; // safety fallback
-      } else if (createdAtRange) {
-        sumWhere.createdAt = createdAtRange;
-      }
-      const sumRow = await (prisma as any).payment.aggregate({ where: sumWhere, _sum: { amount: true } });
-      const sum = Number(sumRow?._sum?.amount || 0);
+      // Sum via raw SQL to tolerate enum label drift (compare on status::text)
+      const fromTime =
+        period === 'today'
+          ? (apStartMap.get(o) || (createdAtRange?.gte ? new Date(createdAtRange.gte) : null))
+          : (createdAtRange?.gte ? new Date(createdAtRange.gte) : null);
+      const toTime =
+        period === 'today'
+          ? null
+          : (createdAtRange?.lt ? new Date(createdAtRange.lt) : null);
+
+      const sqlParts: string[] = [
+        `SELECT COALESCE(SUM("amount"), 0)::int AS sum`,
+        `FROM "Payment"`,
+        `WHERE "outletCode" = $1`,
+        `AND ("status"::text = 'PAID' OR "status"::text = 'SUCCESS')`,
+      ];
+      const params: any[] = [o];
+      let idx = 2;
+      if (fromTime) { sqlParts.push(`AND "createdAt" >= $${idx++}`); params.push(fromTime); }
+      if (toTime) { sqlParts.push(`AND "createdAt" < $${idx++}`); params.push(toTime); }
+
+      const row = await (prisma as any).$queryRawUnsafe(sqlParts.join(' '), ...params);
+      const sum = Array.isArray(row) && row[0] ? Number((row[0] as any).sum || 0) : 0;
       // Expose as tillGross for clarity (payments to till within the selected period)
       outletTotals[o] = { tillGross: sum, expected: expectedMap[o] || 0 };
     }
