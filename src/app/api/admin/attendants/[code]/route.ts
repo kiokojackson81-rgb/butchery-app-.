@@ -26,9 +26,14 @@ async function removeCodeCascade(rawCode: string): Promise<boolean> {
   try { const res = await client.personCode.delete({ where: { code: canonical } }); return !!res; } catch { return false; }
 }
 
-export async function DELETE(req: Request, { params }: { params: { code?: string } }) {
+export async function DELETE(req: Request, context: { params: Promise<{ code?: string }> }) {
   try {
-    const raw = typeof params?.code === 'string' ? params.code : '';
+    const { code: codeParam } = await context.params;
+    const url = new URL(req.url);
+    const raw =
+      typeof codeParam === "string" && codeParam.trim()
+        ? codeParam
+        : url.searchParams.get("code") || url.searchParams.get("nxtPcode") || "";
     const code = normalizeCode(raw || '');
     if (!code) return NextResponse.json({ ok: false, error: 'Invalid code' }, { status: 400 });
 
