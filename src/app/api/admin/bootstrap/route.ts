@@ -7,6 +7,10 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
+    const settingsCodesPromise = (prisma as any).setting
+      .findUnique({ where: { key: "admin_codes" } })
+      .catch(() => null);
+
     // Outlets / assignments / codes can be loaded in parallel immediately
     const outletsPromise = (prisma as any).outlet.findMany({ orderBy: { code: "asc" } });
     const assignmentsPromise = (prisma as any).attendantAssignment.findMany({ orderBy: { code: "asc" } });
@@ -36,11 +40,12 @@ export async function GET() {
       }
     })();
 
-    const [outlets, attendants, assignments, personCodes] = await Promise.all([
+    const [outlets, attendants, assignments, personCodes, settingsCodesRow] = await Promise.all([
       outletsPromise,
       attendantsPromise,
       assignmentsPromise,
       codesPromise,
+      settingsCodesPromise,
     ]);
 
     // Compose a DB-first attendant scope map to hydrate Admin Assignments UI
@@ -79,7 +84,12 @@ export async function GET() {
       scope[code] = { outlet, productKeys: keys };
     }
 
-    return NextResponse.json({ ok: true, outlets, attendants, assignments, codes: personCodes, scope });
+    // Prefer the canonical People & Codes mirror from Settings (includes salary/outlet fields),
+    // fallback to PersonCode rows if Settings is missing or invalid.
+    const settingsCodesValue = (settingsCodesRow as any)?.value;
+    const codes = Array.isArray(settingsCodesValue) ? settingsCodesValue : personCodes;
+
+    return NextResponse.json({ ok: true, outlets, attendants, assignments, codes, scope });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "Failed" }, { status: 500 });
   }

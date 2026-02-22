@@ -14,7 +14,7 @@ export async function GET() {
       : [];
     return NextResponse.json(normalized);
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 200 });
+    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
   }
 }
 

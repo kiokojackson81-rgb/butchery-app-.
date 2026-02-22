@@ -40,9 +40,16 @@ export async function POST(req: Request) {
 
     // Update admin_codes mirror: rewrite to list of remaining people
     try {
-      const rows = await (prisma as any).personCode.findMany({ select: { code: true, name: true, role: true, active: true } });
-      const payload = (rows || []).map((r: any) => ({ code: r.code, name: r.name, role: r.role, active: r.active }));
-      await (prisma as any).setting.upsert({ where: { key: 'admin_codes' }, update: { value: payload }, create: { key: 'admin_codes', value: payload } });
+      const existing = await (prisma as any).setting.findUnique({ where: { key: "admin_codes" } }).catch(() => null);
+      const current = Array.isArray((existing as any)?.value) ? ((existing as any).value as any[]) : null;
+      if (current) {
+        const payload = current.filter((r: any) => normalizeCode(String(r?.code || "")) !== code);
+        await (prisma as any).setting.upsert({ where: { key: "admin_codes" }, update: { value: payload }, create: { key: "admin_codes", value: payload } });
+      } else {
+        const rows = await (prisma as any).personCode.findMany({ select: { code: true, name: true, role: true, active: true } });
+        const payload = (rows || []).map((r: any) => ({ code: r.code, name: r.name, role: r.role, active: r.active }));
+        await (prisma as any).setting.upsert({ where: { key: "admin_codes" }, update: { value: payload }, create: { key: "admin_codes", value: payload } });
+      }
     } catch {}
 
     return NextResponse.json({ ok: true });

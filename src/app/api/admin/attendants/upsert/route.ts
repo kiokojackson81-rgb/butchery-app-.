@@ -184,7 +184,7 @@ export async function POST(req: Request) {
         active: entry.active,
       };
       if (entry.outlet) base.outlet = entry.outlet;
-      if (entry.role === "attendant") {
+      if (entry.role === "attendant" || entry.role === "assistant") {
         if (typeof entry.salaryAmount === "number") base.salaryAmount = entry.salaryAmount;
         if (entry.salaryFrequency) base.salaryFrequency = entry.salaryFrequency;
       }
