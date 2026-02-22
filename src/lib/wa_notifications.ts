@@ -29,7 +29,7 @@ export async function sendBalanceReply({ to, outlet, date }: { to: string; outle
   try {
     const stats = await computeDayTotals({ date, outletName: outlet });
     const total = Math.round((stats.tillSalesGross || 0));
-    const count = (stats && (stats.tillSalesGross !== undefined)) ? (Array.isArray((stats as any).payments) ? (stats as any).payments.length : 0) : 0;
+    const count = Number((stats as any)?.paymentCount || 0);
     const tpl = templateNameOrDefault(process.env.WA_TEMPLATE_NAME_BALANCE, 'till_balance_response');
     return await sendWhatsAppTemplateMessage({ to, templateName: tpl, bodyParams: [ outlet, date, String(total), String(count) ] });
   } catch (e) { console.error('sendBalanceReply failed', e); return null; }

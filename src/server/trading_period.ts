@@ -36,6 +36,23 @@ export function todayLocalISO(d: Date = new Date()) {
   return dateISOInTZ(d, APP_TZ);
 }
 
+function tzOffsetFor(tz: string): string {
+  const t = String(tz || "").trim();
+  if (/^[+-]\d{2}:\d{2}$/.test(t)) return t;
+  if (t === "Africa/Nairobi") return "+03:00";
+  if (t === "Africa/Johannesburg") return "+02:00";
+  if (t === "UTC" || t === "Etc/UTC") return "+00:00";
+  return "+00:00";
+}
+
+/** Compute UTC Date bounds for a local (tz) calendar day given as YYYY-MM-DD. */
+export function dayBoundsUTC(dateStr: string, tz: string = APP_TZ): { start: Date; end: Date } {
+  const offset = tzOffsetFor(tz);
+  const start = new Date(`${dateStr}T00:00:00${offset}`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
 const lockKey = (date: string, outlet: string) => `lock:attendant:${date}:${outlet}`;
 const closeCountKey = (date: string, outlet: string) => `period:closecount:${date}:${outlet}`;
 

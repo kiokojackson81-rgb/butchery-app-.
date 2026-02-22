@@ -1,5 +1,6 @@
 // src/server/finance.ts
 import { prisma } from "@/lib/prisma";
+import { APP_TZ, dayBoundsUTC } from "@/server/trading_period";
 
 function prevDateISO(d: string) {
   const dt = new Date(d + "T00:00:00.000Z");
@@ -19,8 +20,7 @@ export async function computeDayTotals(args: { date: string; outletName: string 
     // Till payments gross (SUCCESS only) for expectedDeposit net calc
     (async () => {
       try {
-        const start = new Date(date + 'T00:00:00.000Z');
-        const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+        const { start, end } = dayBoundsUTC(date, APP_TZ);
         // Map outletName (human label) to Prisma enum OutletCode used by Payment
         const allowedCodes = ["BRIGHT", "BARAKA_A", "BARAKA_B", "BARAKA_C", "GENERAL"] as const;
         const toEnum = (s: string | null | undefined) => {
@@ -104,7 +104,7 @@ export async function computeDayTotals(args: { date: string; outletName: string 
   const netTill = tillSalesGross - verifiedDeposits;
   const expectedDeposit = todayTotalSales - netTill;
 
-  const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits };
+  const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits, paymentCount: (payments || []).length };
   if (process.env.SUPERVISOR_DIAG) {
     try {
       console.error('[computeDayTotals debug inputs]', {
@@ -193,7 +193,7 @@ export async function computeSnapshotTotals(args: {
   const netTill = tillSalesGross - verifiedDeposits;
   const expectedDeposit = todayTotalSales - netTill;
 
-    const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits };
+    const result = { expectedSales: weightSales, expenses: expensesSum, wasteValue: 0, expectedDeposit, potatoesExpectedDeposit, tillSalesGross, verifiedDeposits, paymentCount: 0 };
     if (process.env.SUPERVISOR_DIAG) {
       try {
         console.error('[computeSnapshotTotals debug inputs]', {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import sendWhatsAppTemplateMessage from '@/lib/whatsapp/sendTemplate';
 import { computeDayTotals } from '@/server/finance';
 import { outletLabel } from '@/lib/whatsapp/recipients';
+import { todayLocalISO } from '@/server/trading_period';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,10 +19,10 @@ export async function GET(req: Request) {
     const outlet = (url.searchParams.get('outlet') || 'BARAKA_A') as any;
     if (!to) return NextResponse.json({ ok: false, error: 'missing to' }, { status: 400 });
 
-    const date = new Date().toISOString().slice(0,10);
+    const date = todayLocalISO();
     const stats = await computeDayTotals({ date, outletName: outletLabel(outlet) as string });
     const total = Math.round(stats.tillSalesGross || 0);
-    const count = Array.isArray((stats as any).payments) ? (stats as any).payments.length : (total ? 1 : 0);
+    const count = Number((stats as any)?.paymentCount || 0);
 
     const templateName = process.env.WA_TEMPLATE_NAME_BALANCE || 'till_balance_response';
 

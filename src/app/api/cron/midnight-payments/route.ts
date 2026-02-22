@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeDayTotals } from '@/server/finance';
 import { sendMidnightSummary } from '@/lib/wa_notifications';
-import { APP_TZ, dateISOInTZ } from '@/server/trading_period';
+import { APP_TZ, addDaysISO, dateISOInTZ } from '@/server/trading_period';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,7 +34,8 @@ function timePartsInTZ(d: Date, tz: string) {
 export async function GET(req: Request) {
   try {
     const now = new Date();
-    const date = dateISOInTZ(now, APP_TZ);
+    // At local midnight we want the day that just ended (yesterday in local calendar).
+    const date = addDaysISO(dateISOInTZ(now, APP_TZ), -1, APP_TZ);
 
     // Only allow this endpoint to send messages around local midnight. This prevents
     // accidental/manual triggering during the day (which makes "midnight" alerts noisy).
@@ -91,7 +92,7 @@ export async function GET(req: Request) {
     let totalCount = 0; let totalAmt = 0; let topPayersArr: string[] = [];
     for (const o of outlets) {
       const stats = await computeDayTotals({ date, outletName: o.name });
-      const paymentsCount = stats ? (Array.isArray((stats as any).payments) ? (stats as any).payments.length : (stats.tillSalesGross ? 1 : 0)) : 0;
+      const paymentsCount = Number((stats as any)?.paymentCount || 0);
       totalCount += paymentsCount;
       totalAmt += Math.round(stats.tillSalesGross || 0);
       topPayersArr.push(`${o.name}:${Math.round(stats.tillSalesGross||0)}`);
