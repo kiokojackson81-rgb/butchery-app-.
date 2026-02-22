@@ -361,10 +361,14 @@ export default function AdminPage() {
       try {
         const r = await fetch("/api/admin/phones", { cache: "no-store" });
         if (r.ok) {
-          const list = (await r.json()) as Array<{ code: string; phoneE164: string }>;
-          const m: Record<string, string> = {};
-          list.forEach((row) => { if (row?.code) m[row.code] = row.phoneE164 || ""; });
-          setPhones(m);
+          const list = (await r.json()) as any;
+          if (Array.isArray(list)) {
+            const m: Record<string, string> = {};
+            list.forEach((row) => { if (row?.code) m[row.code] = row.phoneE164 || ""; });
+            setPhones(m);
+          } else if (list && typeof list === "object" && list.ok === false) {
+            notifyToast("Failed to load phone mappings");
+          }
         }
       } catch {}
     })();
@@ -376,9 +380,11 @@ export default function AdminPage() {
       try {
         const r = await fetch("/api/admin/phones", { cache: "no-store" });
         if (r.ok) {
-          const list = (await r.json()) as Array<{ code: string; phoneE164: string }>;
-          const row = list.find(x => x.code === "ADMIN");
-          if (row?.phoneE164) setAdminPhone(row.phoneE164);
+          const list = (await r.json()) as any;
+          if (Array.isArray(list)) {
+            const row = list.find((x) => canonFull(String(x?.code || "")) === "admin");
+            if (row?.phoneE164) setAdminPhone(row.phoneE164);
+          }
         }
       } catch {}
     })();
@@ -635,13 +641,57 @@ export default function AdminPage() {
   };
 
   /** Phones mapping upsert (server write-through) */
+  const normalizePhoneE164 = (input: string) => {
+    const trimmed = String(input || "").trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("+")) return trimmed;
+    const digits = trimmed.replace(/[^0-9]/g, "");
+    return digits ? `+${digits}` : "";
+  };
+
   const savePhoneFor = async (code: string, role: PersonCode["role"], outletName?: string) => {
     const norm = canonFull(code || "");
-    const phone = (phones[norm] || "").trim();
-  if (!code || !phone) { setToast("Missing code or phone"); return; }
-    const payload = { role, phoneE164: phone, outlet: outletName };
-    const r = await fetch(`/api/admin/phones/${encodeURIComponent(norm)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify(payload) });
+    const phoneRaw = (phones[norm] || "").trim();
+    const phoneE164 = normalizePhoneE164(phoneRaw);
+    if (!norm || !phoneE164) { setToast("Missing code or phone"); return; }
+
+    // Keep UI normalized after save
+    if (phoneE164 !== phoneRaw) {
+      setPhones((prev) => ({ ...prev, [norm]: phoneE164 }));
+    }
+
+    const payload = { code: norm, role, phoneE164, outlet: outletName };
+    let r = await fetch(`/api/admin/phones/${encodeURIComponent(norm)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+
+    // Back-compat fallback (in case the dynamic route is misconfigured in a deployment)
+    if (!r.ok) {
+      r = await fetch(`/api/admin/phones`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+    }
+
     if (!r.ok) throw new Error(await r.text());
+
+    // Refresh phones from server so reload matches DB state
+    try {
+      const rr = await fetch("/api/admin/phones", { cache: "no-store" });
+      if (rr.ok) {
+        const list = (await rr.json()) as any;
+        if (Array.isArray(list)) {
+          const m: Record<string, string> = {};
+          list.forEach((row) => { if (row?.code) m[row.code] = row.phoneE164 || ""; });
+          setPhones(m);
+        }
+      }
+    } catch {}
   };
   const saveAllPhones = async () => {
     try {
