@@ -280,7 +280,9 @@ model Attendant {
   id         String      @id @default(cuid())
   name       String
   salaryAmount    Float        @default(0)
-  salaryFrequency SalaryFrequency @default(daily)
+  // Use String instead of enum to avoid DB enum drift in production.
+  // Allowed values: "daily" | "weekly" | "monthly"
+  salaryFrequency String @default("daily")
   outletId   String?
   loginCode  String?     @unique
   createdAt  DateTime    @default(now())
@@ -420,12 +422,6 @@ enum DepositStatus {
   VALID
   PENDING
   INVALID
-}
-
-enum SalaryFrequency {
-  daily
-  weekly
-  monthly
 }
 
 /// =========================

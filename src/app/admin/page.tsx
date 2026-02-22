@@ -561,6 +561,44 @@ export default function AdminPage() {
       });
       saveLS(K_CODES, normalized);
       try { await refreshScopeFromServer(); } catch {}
+
+      // Also persist phone mappings if phones were filled in the table.
+      // This prevents the common case where admins click "Save Codes" but forget
+      // to click the per-row "Save" button for phones.
+      try {
+        const phonePayloads = normalized
+          .map((c) => {
+            const codeKey = normCode(c.code);
+            const phoneE164 = normalizePhoneE164(phones[codeKey] || "");
+            if (!codeKey || !phoneE164) return null;
+            return { code: codeKey, role: c.role, phoneE164, outlet: scope[codeKey]?.outlet };
+          })
+          .filter(Boolean) as Array<{ code: string; role: string; phoneE164: string; outlet?: string }>;
+
+        if (phonePayloads.length) {
+          await Promise.allSettled(
+            phonePayloads.map((p) =>
+              fetch("/api/admin/phones", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                cache: "no-store",
+                body: JSON.stringify(p),
+              })
+            )
+          );
+          // Refresh phones so reload matches DB state
+          const rr = await fetch("/api/admin/phones", { cache: "no-store" });
+          if (rr.ok) {
+            const list = (await rr.json()) as any;
+            if (Array.isArray(list)) {
+              const m: Record<string, string> = {};
+              list.forEach((row) => { if (row?.code) m[row.code] = row.phoneE164 || ""; });
+              setPhones(m);
+            }
+          }
+        }
+      } catch {}
+
       // Sync assistants allowlist from codes labeled as 'assistant'
       try {
         const assistantCodes = normalized.filter(c => c.role === 'assistant').map(c => canonFull(c.code));
