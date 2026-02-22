@@ -282,9 +282,19 @@ export async function POST(req: Request) {
   // Enforce signature verification for POSTs. If the signature doesn't match
   // the expected HMAC, reject as unauthorized. Always respond 401 on failure
   // to avoid processing forged events.
+  const acceptUnsigned = String(process.env.WA_ACCEPT_UNSIGNED_WEBHOOKS || "false").toLowerCase() === "true";
   if (!verifySignature(raw, sig)) {
-    try { await logOutbound({ direction: "in", payload: { error: "bad signature" }, status: "ERROR" }); } catch {}
-    return NextResponse.json({ ok: false, error: "bad signature" }, { status: 401 });
+    try {
+      console.warn("[WA] bad signature", {
+        sigPresent: !!sig,
+        acceptUnsigned,
+        hasAppSecret: !!process.env.WHATSAPP_APP_SECRET || !!process.env.WHATSAPP_APPSECRET,
+      });
+    } catch {}
+    try { await logOutbound({ direction: "in", payload: { error: "bad signature", acceptUnsigned }, status: "ERROR" }); } catch {}
+    if (!acceptUnsigned) {
+      return NextResponse.json({ ok: false, error: "bad signature" }, { status: 401 });
+    }
   }
 
   const body = JSON.parse(raw || "{}");
