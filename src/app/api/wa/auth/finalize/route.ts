@@ -8,6 +8,7 @@ import { markLastMsg, touchWaSession } from "@/lib/waSession";
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 import { setDrySession, updateDrySession } from "@/lib/dev_dry";
 import { createSession, serializeSessionCookie } from "@/lib/session";
+import { todayLocalISO } from "@/server/trading_period";
 
 function msSince(iso?: string) {
   if (!iso) return Infinity;
@@ -26,11 +27,7 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
       const phoneDB0 = toE164DB(phoneE164);
       const role0 = 'attendant';
       const outlet0 = 'TestOutlet';
-      const today = new Date();
-      const y = today.getFullYear();
-      const m = String(today.getMonth() + 1).padStart(2, "0");
-      const d = String(today.getDate()).padStart(2, "0");
-      const tradingPeriodId0 = `${y}-${m}-${d}@${outlet0}`;
+      const tradingPeriodId0 = `${todayLocalISO()}@${outlet0}`;
       try { setDrySession({ phoneE164: phoneDB0, role: role0, outlet: outlet0, code: rawCode, state: "MENU", cursor: { lastActiveAt: new Date().toISOString(), tradingPeriodId: tradingPeriodId0, status: "ACTIVE" } }); } catch {}
       try { await safeSendGreetingOrMenu({ phone: phoneDB0, role: role0, outlet: outlet0, force: true, source: "auth_finalize_dry" }); } catch {}
       try { await logOutbound({ direction: "out", templateName: null, payload: { phone: phoneDB0, meta: { phoneE164: phoneDB0, outlet: outlet0, role: role0, tradingPeriodId: tradingPeriodId0 }, event: "login_welcome_sent" }, status: "SENT", type: "login_welcome_sent" }); } catch {}
@@ -56,11 +53,8 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
 
   const role = String(pc.role || "attendant");
   let outletFinal: string | null = null;
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, "0");
-  const d = String(today.getDate()).padStart(2, "0");
-  const tradingPeriodId = outletFinal ? `${y}-${m}-${d}@${outletFinal}` : null;
+  const tradingDateISO = todayLocalISO();
+  let tradingPeriodId: string | null = null;
   if (role === "attendant") {
     // Align outlet resolution with login-link API for parity
     // 1) Primary: AttendantScope
@@ -131,6 +125,8 @@ export async function finalizeLoginDirect(phoneE164: string, rawCode: string) {
       if (!outletFinal) return { ok: false, error: "CODE_NOT_ASSIGNED" } as const;
     }
   }
+
+  tradingPeriodId = outletFinal ? `${tradingDateISO}@${outletFinal}` : null;
 
   // Bind mapping by unique code and update phone
   try {

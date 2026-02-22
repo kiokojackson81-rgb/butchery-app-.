@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { getDrySession as getDrySess, setDrySession as setDrySess } from "@/lib/dev_dry";
 import { handleInboundText as libHandleInboundText, handleInteractiveReply as libHandleInteractiveReply } from "@/lib/wa_attendant_flow";
+import { todayLocalISO } from "@/server/trading_period";
 
 const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 10);
 
@@ -30,27 +31,44 @@ export async function ensureAuthenticated(phoneE164: string): Promise<
 
   let sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
 
-  // Auto-recover: if session missing or lacks credentials, try binding from phoneMapping
-  // Strict mode: disable auto-recover to force explicit login
-  const STRICT = String(process.env.WA_STRICT_AUTH || "true").toLowerCase() === "true";
+  // Auto-recover from PhoneMapping: if the phone number is already registered in the system,
+  // bind to the mapped active code without requiring a web login.
+  // (This is still safe: only phones explicitly saved in PhoneMapping can auto-bind.)
   const needsRecover = !sess || !sess.code || sess.state === "LOGIN" || sess.state === "SPLASH";
-  if (needsRecover && !STRICT) {
+  if (needsRecover) {
     try {
       // phoneE164 is not unique in PhoneMapping; use findFirst
-      const pm = await (prisma as any).phoneMapping.findFirst({ where: { phoneE164 } }).catch(() => null);
+      const pm = await (prisma as any).phoneMapping
+        .findFirst({ where: { phoneE164: { equals: phoneE164, mode: "insensitive" } } })
+        .catch(() => null);
       if (pm?.code) {
-        const pc = await (prisma as any).personCode.findFirst({ where: { code: pm.code, active: true } }).catch(() => null);
+        const pc = await (prisma as any).personCode
+          .findFirst({ where: { code: { equals: pm.code, mode: "insensitive" }, active: true } })
+          .catch(() => null);
         if (pc) {
           let outlet: string | null = pm.outlet || null;
           if (!outlet && String(pc.role || "attendant").toLowerCase() === "attendant") {
-            const sc = await (prisma as any).attendantScope.findFirst({ where: { codeNorm: pc.code } }).catch(() => null);
+            const sc = await (prisma as any).attendantScope
+              .findFirst({ where: { codeNorm: pc.code } })
+              .catch(() => null);
             outlet = sc?.outletName || null;
           }
-          const cursor = (sess?.cursor as any) || { date: new Date().toISOString().slice(0, 10), rows: [] };
+
+          const nowIso = new Date().toISOString();
+          const date = todayLocalISO();
+          const prevCursor = (sess?.cursor as any) || {};
+          const cursor = {
+            ...prevCursor,
+            date: prevCursor?.date || date,
+            rows: Array.isArray(prevCursor?.rows) ? prevCursor.rows : [],
+            status: "ACTIVE",
+            lastActiveAt: nowIso,
+          };
+
           await (prisma as any).waSession.upsert({
             where: { phoneE164 },
-            update: { role: pc.role, code: pc.code, outlet, state: "MENU", cursor },
-            create: { phoneE164, role: pc.role, code: pc.code, outlet, state: "MENU", cursor },
+            update: { role: pc.role, code: pc.code, outlet, state: "MENU", cursor, lastFinalizeAt: new Date() },
+            create: { phoneE164, role: pc.role, code: pc.code, outlet, state: "MENU", cursor, lastFinalizeAt: new Date(), sessionVersion: 1 },
           });
           sess = await (prisma as any).waSession.findUnique({ where: { phoneE164 } });
         }

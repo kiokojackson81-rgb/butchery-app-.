@@ -25,7 +25,7 @@ import { getTodaySupplySummary } from "@/server/supply";
 import { handleSupplyDispute } from "@/server/supply_notify";
 import { createReviewItem } from "@/server/review";
 import { getWaState, updateWaState, WaState } from "@/lib/wa/state";
-import { getCloseCount, incrementCloseCount, getPeriodState } from "@/server/trading_period";
+import { addDaysISO, getCloseCount, getPeriodState, incrementCloseCount, todayLocalISO } from "@/server/trading_period";
 import {
   buildButtonPayload,
   buildListPayload,
@@ -52,8 +52,7 @@ type Cursor = {
 async function computeOpeningEffective(outletName: string, dateISO: string, itemKey: string): Promise<number> {
   try {
     const keyLc = String(itemKey || '').toLowerCase();
-    const dt = new Date(dateISO + "T00:00:00.000Z"); dt.setUTCDate(dt.getUTCDate() - 1);
-    const y = dt.toISOString().slice(0, 10);
+    const y = prevDateISO(dateISO);
     const [prevRows, supplyRows] = await Promise.all([
       (prisma as any).attendantClosing.findMany({ where: { date: y, outletName } }).catch(() => []),
       (prisma as any).supplyOpeningRow.findMany({ where: { date: dateISO, outletName } }).catch(() => []),
@@ -128,13 +127,11 @@ async function saveSession(phone: string, patch: SessionPatch) {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocalISO();
 }
 
 function prevDateISO(d: string) {
-  const dt = new Date((d || today()) + "T00:00:00.000Z");
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  return dt.toISOString().slice(0, 10);
+  return addDaysISO(d || today(), -1);
 }
 
 function inactiveExpired(updatedAt: Date) {
@@ -1546,7 +1543,8 @@ export async function handleInboundText(phone: string, text: string) {
   const menuRequested = /^MENU$/i.test(t);
   if (menuRequested || s.state === "MENU") {
     if (!s.code || !s.outlet) {
-      await sendText(phone, "You're not logged in. Send your login code (e.g., BR1234).", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      await sendText(phone, "You're not logged in. Use the login link to continue.", "AI_DISPATCH_TEXT", { gpt_sent: true });
+      try { await promptLogin(phone); } catch {}
       return;
     }
     await safeSendGreetingOrMenu({

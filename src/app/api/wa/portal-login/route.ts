@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { warmUpSession } from "@/lib/wa";
 import { safeSendGreetingOrMenu } from "@/lib/wa_attendant_flow";
 import { normCode, toGraphPhone, toDbPhone } from "@/server/util/normalize";
+import { todayLocalISO } from "@/server/trading_period";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,8 +65,8 @@ export async function POST(req: Request) {
 
       await (prisma as any).waSession.upsert({
         where: { phoneE164: phonePlus },
-        update: { role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
-        create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: new Date().toISOString().slice(0, 10), rows: [] } },
+        update: { role, code: pc.code, outlet, state: "MENU", cursor: { date: todayLocalISO(), rows: [] } },
+        create: { phoneE164: phonePlus, role, code: pc.code, outlet, state: "MENU", cursor: { date: todayLocalISO(), rows: [] } },
       });
 
       // If a recent finalize ran, skip to avoid double-send. Also avoid force

@@ -13,7 +13,7 @@ import {
   buildBackCancel,
   buildAfterSaveButtons,
 } from "@/server/wa/wa_messages";
-import { lockPeriod } from "@/server/trading_period";
+import { lockPeriod, todayLocalISO } from "@/server/trading_period";
 import { notifyTransferCreated } from "@/server/supplier/supplier.notifications";
 import { getTodaySupplySummary } from "@/server/supply";
 import { listProductsForOutlet } from "@/server/supplier/supplier.service";
@@ -55,14 +55,6 @@ export type SupplierCursor = {
 };
 
 const TTL_MIN = Number(process.env.WA_SESSION_TTL_MIN || 120);
-
-function todayLocalISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 function isSessionValid(sess: any) {
   if (!sess?.code || sess.role !== "supplier") return false;
